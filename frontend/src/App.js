@@ -7,6 +7,7 @@ import { AppProvider } from "@/context/AppContext";
 import AppShell from "@/components/layout/AppShell";
 import { Loader2 } from "lucide-react";
 
+import { Capacitor } from "@capacitor/core";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Fleet from "@/pages/Fleet";
@@ -44,6 +45,10 @@ function ReportsRouter() { return <Reports />; }
 
 function Shell() {
   const { user, loading } = useAuth();
+  if (Capacitor.isNativePlatform() && !window.location.pathname.startsWith('/driver')) {
+    window.location.replace('/driver');
+    return null;
+  }
   if (loading)
     return <div className="min-h-screen flex items-center justify-center bg-mv-bg"><Loader2 className="w-6 h-6 animate-spin text-mv-primary" /></div>;
   if (user && user.role === "platform_admin") return <PlatformApp />;
