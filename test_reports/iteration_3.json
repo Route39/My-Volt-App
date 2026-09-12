@@ -1,0 +1,31 @@
+{
+  "summary": "Focused frontend-only re-test (iteration_3) of the two iteration_2 fixes plus a light Nayara/Route39 regression. RESULT: both fixes VERIFIED. (1) Kanban drag-and-drop now works end-to-end: locator.drag_to() from RECEIVED -> PROCESSING on order-card-6a8da775a4f36c4d67993713 (ORD-1024) fired PUT /api/orders/6a8da775a4f36c4d67993713, showed toast '✓ Order moved to processing', the card rendered in the Processing column (received col count for that card = 0), and the order detail Activity Timeline contains a 'Moved to' entry. Note on the diagnostic probe: document.body.contains(draggedNode) sampled 60ms after dragstart is now false, but that is the expected post-drop re-render (the card legitimately moved columns) — the drop event fired and the PUT completed, so the module-scope <OrderCard> fix is effective. (2) Route guards work: Nayara admin hitting /fleet, /rentals, /drivers, /service-requests all redirect to /dashboard rendering the Nayara dashboard (no 'Route39 EV fleet' copy, no fleet shell); Route39 admin hitting /orders and /customers redirects to /dashboard with no Nayara order-board copy. Regression: Orders board renders 4 columns / 24 cards; New Order dialog created 'QA_UI Retest Fabric' (toast 'Order created ✓') and it appeared on the board; order-detail status select -> 'Moved to' timeline entry; Complete button -> toast 'Order completed ✓'; Route39 fleet dashboard loads fully (284 Total Fleet, donut, rental snapshot, 4 city cards, Needs Attention, Recent Operations). Backend suite intentionally not re-run per request.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Any authenticated page load (both orgs)", "issue": "STILL PRESENT (from iteration_2, LOW): 2 x console 401 resource errors on page load (auth probe before token attach). Cosmetic/noisy only.", "affected_selectors": []}
+    ],
+    "design_issues": [
+      {"screen": "Nayara (carried over, not re-tested this round)", "issues": ["New Order dialog still uses native <input type=date> and most fields still lack data-testid", "Order detail status/payment selects still show raw lowercase values ('received', 'processing')", "Settings > Roles & Permissions still shows fleet-specific role copy for Nayara", "'Due Soon' dashboard panel still empty while orders are overdue"]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_2.json", "/app/backend/tests/test_nayara.py"],
+  "action_items": [
+    "No blocking issues. Optional cleanups remain from iteration_2: add data-testids + shadcn date picker in New Order dialog, title-case status/payment select labels, industry-aware Settings roles copy, silence the 401 auth-probe console errors, seed a few near-future due dates for 'Due Soon'.",
+    "Still open from iteration_1 (Route39 backend): rentals pending_payment KPI/filter mismatch and /api/vehicles pagination (284 vs 120 fetched)."
+  ],
+  "critical_code_review_comments": [
+    "Orders.jsx: OrderCard is now module-scope and receives dragId/onDragStart/onOpen as props — root cause fixed. dragId is still useState, which re-renders the whole board on dragstart; a useRef (or CSS class on the node) would avoid 24 re-renders per drag, but it is no longer a correctness problem.",
+    "Orders.jsx move(): still does an optimistic setItems + a full load() re-fetch after the PUT (2 renders + extra GET per move).",
+    "App.js Protected(): path guard uses startsWith on FLEET_PATHS/FABRIC_PATHS, so /fleet-anything would also be caught; acceptable today but prefer exact route-level guards or an industry-aware route table."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested this iteration (per request)", "frontend": "100% of the re-tested scope (drag-and-drop fix, route guards both directions, Nayara orders regression, Route39 dashboard regression)"},
+  "seed_data_creation": "Created one order 'QA_UI Retest Fabric' via the UI, completed it, then deleted it directly in Mongo (no DELETE API). Nayara data restored to baseline: 24 orders. The order dragged during the test (ORD-1024 / 6a8da775a4f36c4d67993713) was reset to 'received' and verified as 'received' in the order detail select.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Nayara admin admin@nayara.studio / Nayara@2026; Route39 admin support@route39.in / Route39@2026 (both valid, no 429 encountered)",
+  "context_for_next_testing_agent": "Both iteration_2 fixes are verified working. Drag-and-drop can be tested simply with locator.drag_to(card, targetColumn) — do NOT rely on 'document.body.contains(node)' after dragstart as a failure signal any more, since the node is legitimately re-parented after a successful drop; assert on the PUT /api/orders/{id} request + toast + column membership instead. Column locator: div.mv-card.bg-mv-surface2\\/60 (4 columns, order received/processing/on_hold/completed). Remaining open items are the LOW/MEDIUM polish items listed above plus the two pre-existing Route39 backend defects from iteration_1.",
+  "rca_of_the_issue": "Iteration_2 RCA confirmed and resolved: hoisting OrderCard to module scope keeps the component type stable across the setDragId re-render, so React reconciles instead of unmounting/remounting the dragged node and Chromium no longer cancels the drag; drop -> move() -> PUT /api/orders/{id} now completes."
+}

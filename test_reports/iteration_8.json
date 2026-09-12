@@ -1,0 +1,63 @@
+{
+  "summary": "Verified permanent deletion of Nayara org + Fabric industry with no regressions to Route39 fleet, MyEVRental driver app, Rental Drivers admin, or Platform Admin. Backend pytest: 16/16 passed. Frontend Playwright: all critical flows pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_results": {
+    "backend_pytest": {
+      "file": "/app/backend/tests/test_nayara_deletion.py",
+      "results": "16 passed",
+      "cases": [
+        "TestNayaraDeleted.test_nayara_login_401_user_gone[admin@nayara.studio] PASS (401 'Invalid email or password', NOT 'no longer active')",
+        "TestNayaraDeleted.test_nayara_login_401_user_gone[nandhini@nayara.studio] PASS",
+        "TestNayaraDeleted.test_nayara_login_401_user_gone[priya@nayara.studio] PASS",
+        "TestRoute39Intact.test_login_ok PASS",
+        "TestRoute39Intact.test_vehicles_count_284 PASS (total==284 via ?page_size=1000)",
+        "TestRoute39Intact.test_dashboard_summary PASS (fleet.total==284)",
+        "TestRoute39Intact.test_orders_empty_for_route39 PASS (empty list)",
+        "TestRoute39Intact.test_customers_empty_for_route39 PASS (empty list)",
+        "TestRoute39Intact.test_rental_admin_summary PASS (total=4, active=2, overdue=1, blocked=1)",
+        "TestPlatformAdmin.test_companies_only_route39 PASS (only route39 org in list; Nayara absent)",
+        "TestPlatformAdmin.test_add_fabric_rejected PASS (POST /api/platform/companies industry=fabric_order_management -> 400)",
+        "TestDriverRegression.test_driver_login_ok[+919000000001..4] PASS (all 4 drivers)",
+        "TestDriverRegression.test_driver_status_shapes PASS (/driver/me returns 200 for all 4 personas)"
+      ]
+    },
+    "frontend_playwright": {
+      "nayara_login_ui": "PASS - admin@nayara.studio stays on /login with error 'Invalid email or password' (NOT 'no longer active'/'archived' — confirms user record deleted, not merely blocked)",
+      "route39_login_dashboard": "PASS - support@route39.in lands on /dashboard, header 'Route39 · COMMAND CENTER', TOTAL FLEET tile shows 284",
+      "route39_sidebar": "PASS - shows Dashboard, Fleet, Drivers, Rentals, Rental Drivers, Service Requests, Vehicle Service, Locations, Documents, Incidents, Vehicle Health, Reports, Settings. No 'Orders' or 'Customers' entries. No Nayara/Fabric references.",
+      "orders_redirect": "PASS - /orders -> /dashboard",
+      "customers_redirect": "PASS - /customers -> /dashboard",
+      "rental_drivers_page": "PASS - /rental-drivers shows 2 ACTIVE / 1 OVERDUE / 1 BLOCKED, driver list has Vikram/Arjun/Suresh/Raj with correct package+state (Silver active, Gold overdue, Platinum blocked, Vikram active w/ ₹0 outstanding). Deposits collected ₹15,000.",
+      "platform_admin_login": "PASS - platform@myvolt.app -> /platform/dashboard",
+      "platform_companies_list": "PASS - only 'Route39' row visible (Fleet & Rental / Professional / 9 users / Active). No Nayara row.",
+      "add_company_industry_dropdown": "PASS - opening Add Company -> Industry select shows exactly ['Fleet & Rental']. Fabric Order Management not selectable."
+    }
+  },
+  "notes": [
+    "MyEVRental payment integration NOT re-mutated to avoid resetting demo state — main agent already curl-verified sandbox verify + rental-admin sync end-to-end.",
+    "Existing /app/backend/tests/test_nayara.py and /app/backend/tests/test_fabric_removal.py are now STALE — they expect Nayara to be present (test_nayara.py) or archived-403 (test_fabric_removal.py). Post-deletion the correct expectation is 401 user-not-found. New authoritative suite is /app/backend/tests/test_nayara_deletion.py.",
+    "Two harmless 401 console entries from shared /auth/me on unauth pages are pre-known and NOT bugs."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/test_nayara_deletion.py",
+    "/app/test_reports/pytest/nayara_deletion.xml"
+  ],
+  "action_items": [
+    "Delete or archive the now-stale /app/backend/tests/test_nayara.py (expects Nayara org + 25 orders + 6 customers to exist — will always fail post-deletion).",
+    "Delete or update /app/backend/tests/test_fabric_removal.py — its TestArchivedNayaraBlocked class asserts 403 'no longer active' but backend now returns 401 (correct new behaviour); test_nayara_deletion.py already covers this correctly."
+  ],
+  "critical_code_review_comments": [
+    "server.py still contains order/customer endpoints (/api/orders, /api/customers, /api/order-dashboard, /api/order-search, /api/order-reports) plus the fabric-specific attachment endpoints. They now return empty lists for any org (no data, no industry uses them). Recommend removing or gating behind an industry check to shrink attack surface and stop 200-with-empty-array responses from masquerading as valid endpoints.",
+    "seed.py: verified Nayara is not seeded, but consider adding a comment/assert to prevent regressions.",
+    "INDUSTRY_LABEL fabric_order_management entry in platform/PlatformApp.jsx (retained per previous iteration for archived Nayara row) is now truly dead code since no Nayara row can ever render — safe to remove."
+  ],
+  "updated_files": ["/app/backend/tests/test_nayara_deletion.py"],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% on all in-scope flows"},
+  "test_credentials": "Platform: platform@myvolt.app / Platform@2026; Route39: support@route39.in / Route39@2026; Deleted Nayara (must 401): admin@nayara.studio / Nayara@2026; Drivers: +919000000001..4 / Driver@2026",
+  "seed_data_creation": "None. Did not mutate driver rental/payment data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Nayara org + all 3 users + 25 orders + 6 customers PERMANENTLY DELETED. Login for any Nayara user returns 401 'Invalid email or password' (not 403). Only orgs remaining: 'platform' and 'route39-org'. Fabric industry removed from Add Company. Route39 (284 vehicles) and MyEVRental (4 drivers: 2 active, 1 overdue, 1 blocked) intact. Authoritative test suite: /app/backend/tests/test_nayara_deletion.py. Old test_nayara.py + old TestArchivedNayaraBlocked (403 expectation) in test_fabric_removal.py are now stale and should be removed.",
+  "rca of the issue": "Not applicable — feature deletion review, all acceptance criteria satisfied."
+}

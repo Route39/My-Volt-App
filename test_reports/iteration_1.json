@@ -1,0 +1,69 @@
+{
+  "summary": "First full test pass of MYVOLT (Route39 fleet/rental ops). Backend: 42 pytest cases across auth, dashboard, reports, search, fleet CRUD+transfer, drivers+assignment, rental full lifecycle (create->payments->activate->renew->suspend->close with ledger math), rental plans, service requests workflow (new->assigned->inspection->repair->ready + closure via service record), vehicle services, documents/incidents/locations/handovers/returns, permissions (staff 403, service_manager scoping) and Chennai city-manager scoping — 39 passed / 3 failed. Frontend: UI login (admin/ops/city_manager/staff), dashboard KPIs (280/214/35/17/14), donut, 4 city cards, needs-attention, recent ops, all 12 nav routes render with zero console/page errors, vehicle profile with 7 tabs, 7-step Create Rental wizard completed end-to-end (rental RNT-1216 created, payment recorded, activated, ledger correct), SR kanban (21 cards across 6 stages), reports charts, locations, incidents, global search, fleet/rental filter chips, Add Vehicle modal (ops) saving successfully, staff correctly does not see Add Vehicle. No trip/passenger/fare features present (as required).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "No brute-force protection/lockout: 7 consecutive wrong-password attempts all return 401 with no 423/429 throttle or attempt counter (playbook requires lockout after 5 fails)."},
+      {"endpoint": "GET /api/dashboard/summary vs GET /api/rentals?status=pending_payment", "issue": "Inconsistent semantics: dashboard rentals.payment_pending = 77 (counts payment_status pending/partial) but the Needs-Attention deep link /rentals?status=pending_payment returns 0 items (list filter matches rental.status=='pending_payment' only). Users clicking '77 pending rental payment(s)' land on an empty list. Also 77 vs 80 rentals actually unpaid because suspended rentals are `continue`d before the payment check."},
+      {"endpoint": "POST /api/rentals/{rid}/suspend, /close", "issue": "No 404 guard: rental doc is fetched then used unconditionally (r['driver_id']); a bogus/other-org id raises TypeError -> 500 instead of 404. Same pattern: suspend/close skip the `if not r` check that activate/renew have."},
+      {"endpoint": "PUT /api/vehicles/{vid}, PUT /api/drivers/{did}, PUT /api/service-requests/{sid}, POST /api/documents, POST /api/incidents, POST /api/handovers", "issue": "Accept raw `dict` bodies with no Pydantic validation (arbitrary fields can be written into Mongo docs); also PUT endpoints return 200 even when the id matches no document (silent no-op update)."},
+      {"endpoint": "backend/.env CORS_ORIGINS", "issue": "CORS_ORIGINS='*' combined with allow_credentials=True. It works today only because frontend and API share one origin; with a separate origin browsers reject credentialed responses that carry ACAO '*'. Playbook expects explicit origins."},
+      {"endpoint": "POST /api/rentals (code generation)", "issue": "_next_rental_code / SR / INC codes are derived from count_documents, so concurrent creates or deletions can produce duplicate codes (no unique index on rental_code/code)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Fleet.jsx", "issue": "Fleet list requests page_size=120 with no pagination / load-more / infinite scroll while the org has 281 vehicles — 160+ vehicles are unreachable by browsing (only via search or status filter). Backend already returns total/page.", "selector": "[data-testid^=\"vehicle-card-\"]", "priority": "HIGH"},
+      {"component": "AppShell nav / role gating", "issue": "Staff sees all 12 nav items (Reports, Settings, Documents, Vehicle Service, Service Requests) although auth.ROLE_ACCESS limits staff to fleet/drivers/rentals/dashboard; pages load fully with no gating message. Nav should be filtered by role (write actions are correctly hidden/403).", "selector": "[data-testid^=\"nav-\"]", "priority": "MEDIUM"},
+      {"component": "Dashboard needs-attention link", "issue": "'77 pending rental payment(s)' navigates to /rentals?status=pending_payment which renders an empty list (see backend inconsistency).", "selector": "[data-testid^=\"attention-\"]", "priority": "MEDIUM"},
+      {"component": "AppShell CitySelector (city_manager)", "issue": "City manager (chennai@route39.in) still sees all 4 cities in the city selector and header reads 'All Cities' although data is hard-scoped to Chennai; selecting another city yields empty views.", "selector": "[data-testid=\"city-selector\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Dashboard recent operations for city_manager", "issue": "Chennai city manager sees audit entries such as 'Vehicle moved to Bangalore' (audit rows keep city=to_city/from_city), leaking other-city activity into a city-scoped view.", "affected_selectors": ["[data-testid^=\"attention-\"]", "Recent Operations list"]}
+    ],
+    "design_issues": [
+      {"screen": "Vehicle profile hero", "issues": ["Seeded vehicle image (seed.py VEHICLE_IMG pexels 32910572) is an unrelated stock photo of a barbershop storefront ('VICX CUTS AND SHAVES') used as the hero banner for every EV — replace with an EV/fleet image."]},
+      {"screen": "Create Rental wizard step 4 (Dates)", "issues": ["Uses two native <input type=\"date\"> browser pickers instead of the shadcn calendar/date-picker used elsewhere in the design system."]},
+      {"screen": "Reports", "issues": ["'Fleet' section card holds a single KPI (Total Fleet) leaving ~80% empty width; bar chart x-axis labels truncated to 'Tir/Coi/Che/Ban'."]},
+      {"screen": "Service Requests kanban", "issues": ["Most SR cards show '—' for driver name (seed does not populate driver_name), making cards look broken."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_seed_hash.py",
+    "/app/backend/tests/test_consistency.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add pagination (or load-more/infinite scroll) to Fleet page — currently only 120 of 281 vehicles are browsable.",
+    "Align 'payment pending' semantics: either make /api/rentals?status=pending_payment match payment_status pending/partial, or change the dashboard KPI + deep link (e.g. status=payment_pending) so the Needs-Attention link is not empty.",
+    "Add `if not r: raise HTTPException(404)` to /api/rentals/{rid}/suspend and /close (currently 500 on bad id).",
+    "Add brute-force lockout/throttling on POST /api/auth/login (5 failed attempts -> 423/429) per auth playbook.",
+    "Filter sidebar nav by auth.ROLE_ACCESS so staff/service_manager do not see modules they are not meant to use.",
+    "Replace seed VEHICLE_IMG with a relevant EV/fleet image; populate driver_name on seeded service requests.",
+    "Set explicit CORS_ORIGINS instead of '*' since allow_credentials=True.",
+    "Replace native date inputs in the rental wizard with the shadcn date picker; scope city selector to the city_manager's city."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1115 lines with all routers in one file — split into routers/ modules (auth, fleet, drivers, rentals, service, misc) per the <700 line guideline.",
+    "suspend_rental/close_rental dereference `r` without a None check — guaranteed 500 for invalid/cross-city ids.",
+    "Many mutating endpoints take untyped `dict` bodies (vehicles PUT, drivers PUT, SR PUT, documents/incidents/handovers/returns POST) — add Pydantic models; today any arbitrary key is persisted, and PUTs cannot report 404.",
+    "Sequential-code generation via count_documents (RNT-/SR-/INC-) is race-prone; use a counters collection with findAndModify plus a unique index.",
+    "Dashboard rental aggregation loads all rentals into Python (find(base).to_list(5000)) — use aggregation pipelines before the dataset grows.",
+    "org_filter enforces city for city_manager on collections that have a `city` field, but audit_logs/notifications rely on the stored city value, which for transfers is the destination city — city-scoped users can see other cities' activity text."
+  ],
+  "updated_files": [
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_seed_hash.py",
+    "/app/backend/tests/test_consistency.py"
+  ],
+  "success_rate": {"backend": "93% (39/42 pytest cases; the 3 failures are the brute-force lockout gap and 2 data-consistency assertions)", "frontend": "95% (all 12 routes + wizard + CRUD flows work; issues are pagination, role-based nav gating and cosmetic)"},
+  "seed_data_creation": "Test artifacts left in DB (prefixed TEST_/TEST-/UI-TEST): vehicles TEST-V1, TEST-V2, UI-TEST-1; drivers 'TEST_Driver A', 'TEST_Rental Driver'; plan 'TEST_Plan Weekly'; location 'TEST_Hub X'; document 'TEST_Insurance'; incident INC-3010 'TEST_Minor scratch'; service request SR-2021 'TEST_Brake noise'; rentals RNT-121x created via API/UI wizard. Main agent may purge docs matching /^TEST[_-]|^UI-TEST/.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "/app/memory/test_credentials.md present and all 5 accounts (admin/ops/city_manager/service_manager/staff, password Route39@2026) log in successfully; bcrypt hashes verified to start with $2b$; httpOnly access_token cookie set on login.",
+  "context_for_next_testing_agent": "Pytest suite lives in /app/backend/tests (conftest.py provides admin/ops/city_mgr/svc_mgr/staff fixtures using Bearer tokens; run `cd /app/backend && python -m pytest tests/ -v`). backend_test.py covers all modules and passes fully. test_consistency.py intentionally fails on the payment_pending KPI mismatch and Fleet pagination gap — re-run after fixes. test_seed_hash.py hits Mongo directly for bcrypt/org checks. Frontend flows already verified: login, all 12 nav routes, vehicle profile tabs, 7-step rental wizard end-to-end, Add Vehicle modal, fleet/rental filter chips, city-manager Chennai scoping, staff role hiding write buttons. Not yet tested: Handover/Return/Transfer modals from the vehicle profile, Documents upload (base64) UI, Incidents create modal, VehicleService create modal, Settings user creation, mobile viewport (390x844) layout.",
+  "rca_of_the_issue": "payment_pending mismatch: dashboard_summary counts rentals whose payment_status is pending/partial, while list_rentals' status filter compares against rental.status/display_status where 'pending_payment' only exists before activation — so the deep link returns nothing. Fleet gap: Fleet.jsx line 30 hardcodes {page_size: 120} and never reads the `total`/`page` fields returned by /api/vehicles, so vehicles beyond the first 120 are unreachable. suspend/close 500 risk: those handlers omit the `if not r` guard present in activate/renew."
+}

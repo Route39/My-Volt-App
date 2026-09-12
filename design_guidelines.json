@@ -1,0 +1,125 @@
+{
+  "project_name": "MYVOLT - Fleet & Rental Operations Platform",
+  "app_type": "SaaS Dashboard / Command Center",
+  "theme": {
+    "mode": "dark",
+    "rationale": "A sleek, deep obsidian dark mode is chosen for the Command Center to reduce glare for fleet operators monitoring screens all day, echoing modern EV tech interfaces like Tesla.",
+    "colors": {
+      "background": "#09090b",
+      "surface": "#18181b",
+      "surface_elevated": "#27272a",
+      "primary": "#3b82f6",
+      "primary_hover": "#2563eb",
+      "text_main": "#f4f4f5",
+      "text_muted": "#a1a1aa",
+      "border": "#27272a",
+      "status": {
+        "green": "#22c55e",
+        "green_bg": "rgba(34, 197, 94, 0.15)",
+        "amber": "#f59e0b",
+        "amber_bg": "rgba(245, 158, 11, 0.15)",
+        "red": "#ef4444",
+        "red_bg": "rgba(239, 68, 68, 0.15)",
+        "neutral": "#71717a",
+        "neutral_bg": "rgba(113, 113, 122, 0.15)"
+      }
+    }
+  },
+  "typography": {
+    "headings": "Outfit",
+    "body": "IBM Plex Sans",
+    "banned_fonts": ["Inter", "Roboto", "Open Sans", "Lato", "Space Grotesk"],
+    "rules": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-bold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed text-zinc-300",
+      "labels": "text-xs tracking-[0.2em] uppercase font-semibold text-zinc-400"
+    }
+  },
+  "visual_enhancers": {
+    "surface_strategy": "Grid Borders (Technical Look) mixed with Glassmorphism for overlays. Flat dark surfaces with crisp 1px borders to organize dense information.",
+    "shadows": "Minimal ambient shadows on base cards; deeper drop-shadows (shadow-xl) for active modals or dragged kanban items.",
+    "radii": "rounded-xl for main cards, rounded-full for status chips and avatars, rounded-2xl for modals.",
+    "textures": "Subtle noise on the main dashboard background to prevent digital flatness.",
+    "animations": "Subtle and fast (150-300ms). Use ease-out for entrances. Strict compliance with prefers-reduced-motion."
+  },
+  "layouts": {
+    "desktop": "Left-aligned sidebar navigation (w-64) with a top header for global search and notifications. Main content area uses a high-density 12-column grid layout with gap-4 or gap-6.",
+    "mobile": "Bottom navigation bar (Dashboard | Fleet | Rentals | More) with a floating Quick Action button (FAB) in the bottom-right corner.",
+    "dashboard_grid": "Bento-style grid for KPI cards (col-span-1 to col-span-3), large Map/Fleet Donut (col-span-full md:col-span-8), Recent Operations Timeline (col-span-4)."
+  },
+  "components": {
+    "kpi_cards": "Flat background, 1px border-zinc-800. Include animated counter numbers and a small graphical sparkline or trending arrow.",
+    "status_chips": "Pill-shaped (rounded-full) with contextual status colors (bg + text color).",
+    "kanban_board": "Horizontal scrolling columns (gap-4) for Service Requests. Draggable cards with avatar, vehicle ID, and status badge.",
+    "forms_wizards": "Multi-step flows for Rentals. Use horizontal progress bars, clear segmented controls, and Shadcn inputs.",
+    "vehicle_cards": "Display image or icon, Name, ID, battery progress bar (gradient fill based on %), and status chip.",
+    "tables": "Modern, border-collapse tables with sticky headers. Use avatar + name lockups for drivers."
+  },
+  "libraries": {
+    "icons": "lucide-react (Standard) or @phosphor-icons/react (for duotone premium look)",
+    "charts": "recharts (for Donut charts, Bar charts, KPI sparklines)",
+    "maps": "react-map-gl (Mapbox wrapper for dark-mode 3D city maps)",
+    "animations": "framer-motion (for page transitions, drawer slides, drag/drop kanban)",
+    "notifications": "sonner",
+    "routing": "react-router-dom"
+  },
+  "image_urls": {
+    "vehicles": [
+      {
+        "url": "https://images.pexels.com/photos/38869184/pexels-photo-38869184.jpeg",
+        "description": "Amazon Prime delivery vans lined up (Use for fleet overview/hero)",
+        "category": "hero"
+      },
+      {
+        "url": "https://images.pexels.com/photos/32910572/pexels-photo-32910572.jpeg",
+        "description": "Courier organizing packages in electric van",
+        "category": "vehicle_profile"
+      }
+    ],
+    "drivers": [
+      {
+        "url": "https://images.unsplash.com/photo-1551825687-f9de1603ed8b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwzfHxkZWxpdmVyeSUyMGRyaXZlciUyMHBvcnRyYWl0fGVufDB8fHx8MTc4NzY2MTc0M3ww&ixlib=rb-4.1.0&q=85",
+        "description": "Smiling man behind delivery truck (Use for Driver Profile Avatar)",
+        "category": "avatar"
+      },
+      {
+        "url": "https://images.pexels.com/photos/6868173/pexels-photo-6868173.jpeg",
+        "description": "Smiling delivery driver wearing a red uniform",
+        "category": "avatar"
+      }
+    ],
+    "maps": [
+      {
+        "url": "https://images.pexels.com/photos/9966011/pexels-photo-9966011.jpeg",
+        "description": "Car GPS navigation system illuminated at night",
+        "category": "dashboard_map"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Ensure the UI feels like a premium SaaS product, not an old ERP. Use generous padding (p-4 to p-6 inside cards).",
+    "Use Phosphor icons or Lucide icons for all navigation and action items.",
+    "Implement a dark theme using Tailwind's zinc color palette (bg-zinc-950, surface bg-zinc-900).",
+    "Include a `data-testid` attribute on all interactive elements (e.g., data-testid='create-rental-btn').",
+    "Use Recharts for the Fleet status Donut chart and Location capacity bars.",
+    "For the Kanban board, build a responsive grid. The user requested drag/drop, use framer-motion or a simple drag-and-drop HTML5 implementation if a heavy library isn't available.",
+    "Do not use generic centered layouts. Align content to the left to maintain readability in dense data screens.",
+    "Never use purely transparent backgrounds on overlays or sticky headers; use backdrop-blur with a semi-transparent color (e.g., bg-zinc-900/80).",
+    "Do not use HTML-based components for advanced user interactions. Use Shadcn components for Select, Dialog, Dropdowns, DatePicker, etc.",
+    "Map out the correct routing for the Sidebar navigation: Dashboard, Fleet, Drivers, Rentals, Service Requests, Vehicle Service, Locations, Documents, Incidents, Vehicle Health, Reports, Settings.",
+    "For the mobile bottom nav, ensure it is fixed to the bottom (fixed bottom-0 w-full) with the FAB floating just above it."
+  ],
+  "universal_guidelines_for_main_agent": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition. Eg: transition: all. This results in breaking transforms. Always add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "Every interaction needs micro-animations - hover states, transitions, and entrance animations.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Use sonner for toast notifications."
+  ]
+}

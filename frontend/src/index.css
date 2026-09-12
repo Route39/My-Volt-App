@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* MyVolt light theme */
+  --mv-bg: #f5f6f8;
+  --mv-surface: #ffffff;
+  --mv-surface-2: #f7f8fa;
+  --mv-elevated: #eef1f5;
+  --mv-border: #e6e8ee;
+  --mv-border-soft: #eef1f5;
+  --mv-primary: #2563eb;
+  --mv-primary-hover: #1d4ed8;
+  --mv-text: #0f172a;
+  --mv-muted: #4b5563;
+  --mv-dim: #94a3b8;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --neutral: #94a3b8;
+
+  /* shadcn tokens (light) */
+  --background: 220 20% 97%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 221 83% 53%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 14% 96%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 96%;
+  --muted-foreground: 215 16% 42%;
+  --accent: 220 16% 94%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 16% 91%;
+  --input: 220 16% 91%;
+  --ring: 221 83% 53%;
+  --radius: 0.75rem;
+}
+
+* { border-color: var(--mv-border); }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--mv-bg);
+  color: var(--mv-text);
+  font-family: 'Manrope', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, .font-display { font-family: 'Outfit', sans-serif; }
+
+.App { min-height: 100%; }
+
+/* Subtle ambient background wash on light theme */
+.mv-noise::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 500px at 100% -5%, rgba(37,99,235,.06), transparent 60%),
+    radial-gradient(700px 500px at -10% 110%, rgba(37,99,235,.05), transparent 55%);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; background-clip: padding-box; }
+
+/* Status utility chips (light) */
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1; }
+.chip-green { background: rgba(34,197,94,.12); color: #15803d; }
+.chip-amber { background: rgba(245,158,11,.15); color: #b45309; }
+.chip-red { background: rgba(239,68,68,.12); color: #b91c1c; }
+.chip-blue { background: rgba(37,99,235,.11); color: #1d4ed8; }
+.chip-neutral { background: rgba(100,116,139,.12); color: #475569; }
+
+.mv-card {
+  background: var(--mv-surface);
+  border: 1px solid var(--mv-border);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+}
+.mv-card-hover { transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease, background-color .2s ease; }
+.mv-card-hover:hover { border-color: #d3d9e3; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(16,24,40,.09), 0 2px 6px rgba(16,24,40,.06); }
+
+.mv-label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; color: var(--mv-dim); }
+
+.glass { background: rgba(255,255,255,.82); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); }
+
+/* Entrance animation */
+@keyframes mv-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.mv-rise { animation: mv-rise .35s ease-out both; }
+
+@keyframes mv-fade { from { opacity: 0; } to { opacity: 1; } }
+.mv-fade { animation: mv-fade .3s ease-out both; }
+
+/* Skeleton shimmer (light) */
+@keyframes mv-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.mv-skel {
+  background: linear-gradient(90deg, #eceff3 25%, #f5f7fa 50%, #eceff3 75%);
+  background-size: 800px 100%;
+  animation: mv-shimmer 1.4s infinite linear;
+  border-radius: 8px;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}

@@ -1,0 +1,64 @@
+{
+  "summary": "Iteration 2 focused on the new Nayara Studio (fabric_order_management) order-management config + multi-tenant isolation + Route39 fleet regression. Backend: added /app/backend/tests/test_nayara.py (24 pytest cases: Nayara login/industry flag + httpOnly cookie, seeded 24 orders / 6 customers, order-dashboard KPI math, order-reports, order-search, status/priority filters, full order lifecycle create->status->notes->payment->attachment upload/delete->complete with timeline + customer counts, 404/401 negatives, and 9 cross-tenant isolation cases). Full suite run: 63 passed / 3 failed (all 3 are pre-existing Route39 issues reported in iteration_1 and still unfixed: rentals ?status=pending_payment semantics, dashboard payment_pending 77 vs 80, fleet 284 vehicles vs 120 fetched without pagination). Frontend (Playwright, 1920x1080): Nayara login lands on 'Nayara Studio' dashboard with 6 okpi-* cards (28/5/8/12/3/7 pre-cleanup), Order Pipeline, Today's/Due Soon/Recently Completed/Needs Attention all populated from real data; sidebar shows exactly Dashboard/Orders/Customers/Reports/Settings and the city selector is hidden; Orders board renders 4 columns with 28 cards, search + priority filter + list-view toggle work; New Order dialog created an order that appeared in RECEIVED; Order detail verified end-to-end (status select -> 'Moved to Processing' timeline, notes save -> 'Notes updated', payment update total 2000/paid 500 -> balance Rs.1,500, PNG attachment upload -> thumbnail + 'Attachment uploaded' timeline, Complete button -> 'Order completed'); Customers list/create/profile (Silk Route Retail: 6 total / 3 completed / 2 processing / 1 on hold + its 6 orders); Nayara Reports renders 4 charts (Status/Assigned/Customer/Month) with no errors; Cmd+K global search returns ORDERS + CUSTOMERS and no Vehicles section; Nayara staff (nandhini) login works identically. Route39 regression OK: 284 Total Fleet, donut, 4 city cards, 12 fleet nav items, city selector, 60 vehicle cards, 216 rental rows, 23 SR kanban cards; Route39 /orders and /customers return 0 records (isolation holds from the UI too). ONE HIGH bug found: Kanban drag-and-drop does not work for a real user.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/rentals?status=pending_payment vs /api/dashboard/summary", "issue": "PRE-EXISTING (iteration_1, still unfixed): KPI payment_pending=77 but filter returns 80 rentals with display_status active/expiring_soon; deep-link semantics still mismatched (tests/test_consistency.py + backend_test.py::TestRentals::test_rental_status_filters fail)."},
+      {"endpoint": "GET /api/vehicles", "issue": "PRE-EXISTING: 284 vehicles but UI only fetches page_size=120 with no pagination (test_consistency fails)."},
+      {"endpoint": "DELETE /api/orders/{id}, DELETE /api/customers/{id}", "issue": "No delete endpoints exist, so QA/test data cannot be cleaned up through the API (had to delete TEST_ docs directly in Mongo). Consider adding admin-only delete or archive."},
+      {"endpoint": "PUT /api/orders/{id}, PUT /api/customers/{id}", "issue": "Untyped `dict` body: any arbitrary key is persisted into the order/customer doc (no Pydantic model). Only a fixed blacklist of keys is stripped."},
+      {"endpoint": "POST /api/orders", "issue": "order_number generated from count_documents (ORD-1000+count+1) — deleting an order makes the next create reuse an existing number; race-prone under concurrency, no unique index."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "pages/nayara/Orders.jsx (Kanban)", "issue": "HIGH: Drag-and-drop status change is broken for real users. onDragStart calls setDragId(), which re-renders Orders; because `Card` is declared *inside* the Orders component body its component type is recreated every render, so React unmounts/remounts every card and the dragged DOM node is detached mid-drag -> Chromium aborts the drag, no drop event fires, no PUT /api/orders/{id}, no toast, no status change. Verified 3 ways: Playwright mouse drag, locator.drag_to(), and synthetic HTML5 DragEvents all failed (`document.body.contains(srcNode)` === false right after dragstart). A 2-phase synthetic drop against a *re-queried* column node DOES work (PUT 200 + toast '✓ Order moved to on hold'), which proves the handlers are correct and only the remount breaks it. Fix: hoist `Card` to module scope (or useMemo/useCallback outside render) and store the dragged id in a ref instead of state (or set opacity via dataTransfer/class without re-render).", "selector": "[data-testid^=\"order-card-\"]", "priority": "HIGH"},
+      {"component": "App routing / AppShell", "issue": "Routes are not guarded by industry: Nayara admin can open /fleet, /rentals, /service-requests and sees the full Route39 fleet UI shell (page title 'Fleet', copy 'Vehicle control system for the Route39 EV fleet', 'Add Vehicle' button, city selector) with empty data; conversely Route39 admin can open /orders and /customers and sees the Nayara order board with 'No orders yet. Your studio is ready for its next order.'. No data leaks (backend isolation holds) but cross-industry pages/copy should 404/redirect to the org dashboard.", "selector": "n/a (direct URL navigation)", "priority": "MEDIUM"},
+      {"component": "Settings > Roles & Permissions (Nayara)", "issue": "Fleet-specific role descriptions are shown to the fabric org: 'Operations Manager — Fleet, Drivers, Rentals, Service, Locations', 'Service Manager — Service Requests, Vehicle Service, health', 'City Manager — Assigned city only'. Should be industry-aware or hidden for fabric_order_management.", "selector": "[data-testid=\"nav-settings\"]", "priority": "LOW"},
+      {"component": "OrderDetail status/payment selects", "issue": "Select values render raw snake/lowercase values ('completed', 'pending', 'on_hold') instead of title-cased labels used elsewhere ('Completed', 'On Hold').", "selector": "[data-testid=\"order-status-select\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Kanban drag -> PUT /api/orders/{id}", "issue": "Never fires on a real drag (see UI bug above); the only way to change status in the UI today is the order-detail status dropdown / Complete button.", "affected_selectors": ["[data-testid^=\"order-card-\"]"]},
+      {"flow": "Any page load (Nayara + Route39)", "issue": "2 x console '401' resource errors on every page load (unauthenticated /api/auth/me or refresh attempt before the token is attached). Harmless today but noisy and would mask real auth failures.", "affected_selectors": []}
+    ],
+    "design_issues": [
+      {"screen": "New Order dialog", "issues": ["Order Date and Due Date use native <input type=\"date\"> browser pickers instead of the shadcn date picker used elsewhere in the design system.", "Dialog inputs (product, quantity, unit, assigned person, amounts, due date) have no data-testid — only order-customer and save-order-btn do; tests must fall back to placeholder/type selectors."]},
+      {"screen": "Nayara Reports", "issues": ["'Orders by Customer' y-axis labels wrap onto two lines and get clipped for longer names (e.g. 'Silk Route Retail')."]},
+      {"screen": "Nayara Dashboard / Due Soon", "issues": ["'Due Soon' panel is empty ('Nothing due soon.') while 7 orders are overdue — seeded due dates cluster in the past, so this panel looks broken on a fresh demo; consider seeding a few orders due in the next 3 days."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_nayara.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "FIX (HIGH): Kanban drag-and-drop in pages/nayara/Orders.jsx — move the `Card` component out of the Orders function body and keep the dragged id in a useRef (not useState) so the dragged node is not remounted; re-verify a real drag fires PUT /api/orders/{id} + toast + timeline entry.",
+    "Guard routes by user.industry: fabric users hitting /fleet,/rentals,/drivers,/service-requests (and fleet users hitting /orders,/customers) should redirect to their own dashboard instead of rendering the other industry's page and copy.",
+    "Make Settings 'Roles & Permissions' copy industry-aware for Nayara (currently lists Fleet/Rentals/Service modules).",
+    "Add data-testids to New Order dialog fields and replace native date inputs with the shadcn date picker.",
+    "Title-case status/payment values in the order detail selects.",
+    "Still open from iteration_1 (Route39): rentals pending_payment KPI/filter mismatch, fleet pagination (284 vehicles vs 120 fetched)."
+  ],
+  "critical_code_review_comments": [
+    "pages/nayara/Orders.jsx: defining `Card` inside the component remounts every card on each render — this is the root cause of the broken drag-and-drop and also costs a full re-render of 28 nodes on every keystroke in the search box.",
+    "Orders.jsx move(): optimistically mutates state then calls load() again — two renders + an extra GET per move; also no rollback message detail on failure (generic 'Failed to move').",
+    "server.py is now ~1465 lines with fleet + order-management routers in one module; split into routers/ (auth, fleet, rentals, service, orders, customers) per the <700-line guideline.",
+    "update_order/update_customer accept raw dict bodies — add OrderUpdate/CustomerUpdate Pydantic models so unknown fields are rejected rather than persisted.",
+    "order_dashboard/order_reports load all org orders into Python (to_list(5000)) and compute KPIs in a loop — move to aggregation pipelines before order volume grows.",
+    "Order attachments are stored as base64 inside the order document (10 MB cap); documents will bloat past Mongo's 16 MB limit with a few uploads — move to object storage or GridFS."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_nayara.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "95% (63/66 pytest; 24/24 Nayara + isolation cases pass; 3 failures are pre-existing Route39 issues from iteration_1)", "frontend": "90% (all Nayara pages/flows pass except Kanban drag-and-drop; Route39 regression passes)"},
+  "seed_data_creation": "Created and then removed TEST_QA Customer / QA_UI Boutique customers and TEST_/QA_UI orders (no DELETE API exists, so cleanup was done directly in Mongo). Nayara data restored to the seeded baseline: 24 orders, 6 customers; the order moved during the drag test was reset to 'received'. Also cleared db.login_attempts (brute-force test had locked staff@route39.in for 15 min) and changed backend_test.py's brute-force test to use a throwaway email so it no longer locks a real account.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Nayara admin admin@nayara.studio / Nayara@2026, staff nandhini@nayara.studio / Nayara@2026, Route39 admin support@route39.in / Route39@2026 (all from /app/memory/test_credentials.md, all valid)",
+  "context_for_next_testing_agent": "Run `pytest /app/backend/tests/ -q` (pytest.ini uses xdist). test_nayara.py covers Nayara orders/customers/dashboard/reports/search/isolation and is the regression suite for this feature. Known-still-failing: backend_test.py::TestRentals::test_rental_status_filters and both test_consistency.py cases (pre-existing Route39 defects). If login returns 429, clear db.login_attempts. Nayara baseline data = 24 orders / 6 customers; delete any TEST_/QA_ docs you create directly in Mongo (no DELETE endpoints). The only unverified-as-working Nayara flow is Kanban drag-and-drop — after the fix, verify with locator.drag_to() AND check that document.body still contains the dragged node right after dragstart.",
+  "rca_of_the_issue": "Kanban DnD: `Card` is declared inside the `Orders` component, so every render produces a new component type; onDragStart -> setDragId(state) triggers that render, React unmounts/remounts all cards, and the element the browser is dragging is detached from the DOM. Chromium cancels a drag whose source node is removed, so dragover/drop never reach the column handler -> no PUT /api/orders/{id}, no toast, no timeline entry. Proof: right after dispatching dragstart, document.body.contains(sourceNode) === false; issuing dragover+drop on a freshly re-queried column element (2-phase) succeeds with PUT 200 and toast '✓ Order moved to on hold'. Fix = hoist Card to module scope + track dragged id in a ref."
+}
