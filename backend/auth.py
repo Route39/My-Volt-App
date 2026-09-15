@@ -60,12 +60,11 @@ def decode_token(token: str) -> dict:
 
 
 def _extract_token(request: Request):
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
-    return token
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    
+    return request.cookies.get("access_token")
 
 
 async def current_user_from_request(request: Request, db) -> dict:
