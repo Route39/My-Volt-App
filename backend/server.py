@@ -2100,7 +2100,7 @@ async def startup():
         await db.rental_accounts.create_index([("organization_id", 1), ("driver_id", 1)])
     except Exception as e:
         logger.warning(f"Failed to create indexes: {e}")
-    await seedlib.seed(db, authlib)
+    # await seedlib.seed(db, authlib)  # disabled - do not reseed
 
 
 @app.on_event("shutdown")
