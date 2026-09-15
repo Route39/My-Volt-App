@@ -37,6 +37,7 @@
     "ajv": "^8.20.0",
     "ajv-keywords": "^5.1.0",
     "axios": "1.18.0",
+    "capacitor-razorpay": "^1.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",

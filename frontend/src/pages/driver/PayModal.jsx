@@ -3,6 +3,8 @@ import { X, Loader2, CheckCircle2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import dapi from "../../lib/driverApi";
 import { inr, fmtDate } from "../../lib/format";
+import { Capacitor } from "@capacitor/core";
+import { Checkout } from "capacitor-razorpay";
 
 function loadRazorpay() {
   return new Promise((resolve) => {
@@ -30,29 +32,51 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
       const { data: order } = await dapi.post("/driver/payments/create-order", { kind });
       let verifyRes;
       if (order.gateway === "razorpay") {
-        const ok = await loadRazorpay();
-        if (!ok) throw new Error("Could not load payment gateway");
-        verifyRes = await new Promise((resolve, reject) => {
-          const rz = new window.Razorpay({
-            key: order.key_id, amount: order.amount_paise, currency: "INR",
-            name: "MyEVRental", description: title, order_id: order.order_id,
-            prefill: { name: driverName, contact: driverPhone },
-            theme: { color: "#10b981" },
-            handler: async (res) => {
-              try {
-                const { data } = await dapi.post("/driver/payments/verify", {
-                  payment_id: order.payment_id,
-                  razorpay_order_id: res.razorpay_order_id,
-                  razorpay_payment_id: res.razorpay_payment_id,
-                  razorpay_signature: res.razorpay_signature,
-                });
-                resolve(data);
-              } catch (e) { reject(e); }
-            },
-            modal: { ondismiss: () => reject(new Error("cancelled")) },
+        if (Capacitor.isNativePlatform()) {
+          verifyRes = await new Promise(async (resolve, reject) => {
+            try {
+              const data = await Checkout.open({
+                key: order.key_id, amount: order.amount_paise, currency: "INR",
+                name: "MyEVRental", description: title, order_id: order.order_id,
+                prefill: { name: driverName, contact: driverPhone },
+                theme: { color: "#10b981" }
+              });
+              const verifyData = await dapi.post("/driver/payments/verify", {
+                payment_id: order.payment_id,
+                razorpay_order_id: data.response.razorpay_order_id,
+                razorpay_payment_id: data.response.razorpay_payment_id,
+                razorpay_signature: data.response.razorpay_signature,
+              });
+              resolve(verifyData.data);
+            } catch (err) {
+              reject(new Error(err.message || "cancelled"));
+            }
           });
-          rz.open();
-        });
+        } else {
+          const ok = await loadRazorpay();
+          if (!ok) throw new Error("Could not load payment gateway");
+          verifyRes = await new Promise((resolve, reject) => {
+            const rz = new window.Razorpay({
+              key: order.key_id, amount: order.amount_paise, currency: "INR",
+              name: "MyEVRental", description: title, order_id: order.order_id,
+              prefill: { name: driverName, contact: driverPhone },
+              theme: { color: "#10b981" },
+              handler: async (res) => {
+                try {
+                  const { data } = await dapi.post("/driver/payments/verify", {
+                    payment_id: order.payment_id,
+                    razorpay_order_id: res.razorpay_order_id,
+                    razorpay_payment_id: res.razorpay_payment_id,
+                    razorpay_signature: res.razorpay_signature,
+                  });
+                  resolve(data);
+                } catch (e) { reject(e); }
+              },
+              modal: { ondismiss: () => reject(new Error("cancelled")) },
+            });
+            rz.open();
+          });
+        }
       } else {
         // Sandbox: gateway not yet configured. Confirmation is still server-verified via a
         // server-issued token (never a frontend success flag). Plug in Razorpay keys to go live.
