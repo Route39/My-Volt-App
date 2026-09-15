@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">MyVoltApp</string>
-    <string name="title_activity_main">MyVoltApp</string>
+    <string name="app_name">MyEVRental</string>
+    <string name="title_activity_main">MyEVRental</string>
     <string name="package_name">com.route39.myvolt</string>
     <string name="custom_url_scheme">com.route39.myvolt</string>
 </resources>
