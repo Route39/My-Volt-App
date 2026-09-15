@@ -1673,7 +1673,7 @@ async def driver_request_otp(body: DriverOTPRequest):
             "sender": os.environ.get("BULKSMSPLANS_SENDER_ID", "ROUTEX"),
             "number": phone[-10:] if len(phone) >= 10 else phone,
             "message": f"Your Route39 app verification OTP is {otp}. Keep it confidential for your security.",
-            "template_id": ""
+            "template_id": os.environ.get("BULKSMSPLANS_TEMPLATE_ID", "")
         }
         try:
             res = requests.post(url, params=params, timeout=5)
