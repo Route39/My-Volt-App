@@ -41,11 +41,17 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
                 prefill: { name: driverName, contact: driverPhone },
                 theme: { color: "#10b981" }
               });
+              
+              let resObj = data.response;
+              if (typeof resObj === "string") {
+                try { resObj = JSON.parse(resObj); } catch(e) {}
+              }
+              
               const verifyData = await dapi.post("/driver/payments/verify", {
                 payment_id: order.payment_id,
-                razorpay_order_id: data.response.razorpay_order_id,
-                razorpay_payment_id: data.response.razorpay_payment_id,
-                razorpay_signature: data.response.razorpay_signature,
+                razorpay_order_id: resObj.razorpay_order_id,
+                razorpay_payment_id: resObj.razorpay_payment_id,
+                razorpay_signature: resObj.razorpay_signature,
               });
               resolve(verifyData.data);
             } catch (err) {
