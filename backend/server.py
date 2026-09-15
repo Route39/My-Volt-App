@@ -153,9 +153,11 @@ async def login(body: LoginBody, response: Response):
             upsert=True)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await db.login_attempts.delete_one({"identifier": email})
-    org = await db.organizations.find_one({"org_id": user["organization_id"]})
-    if org and org.get("archived"):
-        raise HTTPException(status_code=403, detail="This workspace is no longer active. Please contact your administrator.")
+    org_id = user.get("organization_id")
+    if org_id:
+        org = await db.organizations.find_one({"org_id": org_id})
+        if org and org.get("archived"):
+            raise HTTPException(status_code=403, detail="This workspace is no longer active. Please contact your administrator.")
     token = set_auth_cookies(response, str(user["_id"]), email)
     out = ser(user)
     out = await attach_org(out)
