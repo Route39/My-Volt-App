@@ -5,16 +5,15 @@ const Ctx = createContext(null);
 
 export function DriverAuthProvider({ children }) {
   const [data, setData] = useState(null);      // full /driver/me payload
-  const [authed, setAuthed] = useState(!!localStorage.getItem("ev_token"));
-  const [loading, setLoading] = useState(!!localStorage.getItem("ev_token"));
+  const [authed, setAuthed] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!localStorage.getItem("ev_token")) { setLoading(false); setAuthed(false); return; }
     try {
       const { data } = await dapi.get("/driver/me");
       setData(data); setAuthed(true);
     } catch {
-      localStorage.removeItem("ev_token"); setAuthed(false); setData(null);
+      setAuthed(false); setData(null);
     } finally { setLoading(false); }
   }, []);
 
@@ -27,14 +26,13 @@ export function DriverAuthProvider({ children }) {
 
   const login = async (phone, otp) => {
     const { data } = await dapi.post("/driver/auth/login", { phone, otp });
-    localStorage.setItem("ev_token", data.token);
     setAuthed(true);
     await refresh();
     return data;
   };
 
-  const logout = () => {
-    localStorage.removeItem("ev_token");
+  const logout = async () => {
+    try { await dapi.post("/driver/auth/logout"); } catch {}
     setAuthed(false); setData(null);
   };
 

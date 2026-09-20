@@ -1,10 +1,24 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
+import api from "../lib/api";
+import { useAuth } from "./AuthContext";
 
 const AppCtx = createContext(null);
 
 export function AppProvider({ children }) {
-  const [city, setCity] = useState(localStorage.getItem("mv_city") || "all");
-  const setCityPersist = (c) => { setCity(c); localStorage.setItem("mv_city", c); };
+  const { user } = useAuth();
+  const [city, setCity] = useState("all");
+
+  useEffect(() => {
+    if (user?.city) setCity(user.city);
+  }, [user]);
+
+  const setCityPersist = async (c) => {
+    setCity(c);
+    if (user) {
+      try { await api.post("/admin/preferences/city", { city: c }); } catch (e) {}
+    }
+  };
+
   return (
     <AppCtx.Provider value={{ city, setCity: setCityPersist }}>{children}</AppCtx.Provider>
   );

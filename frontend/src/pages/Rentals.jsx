@@ -9,8 +9,7 @@ import { PageHeader, FilterChip, PrimaryBtn } from "../components/common/Page";
 import { fmtDate, inr, relativeEnd } from "../lib/format";
 
 const TABS = [
-  ["active", "Active"], ["expiring", "Expiring"], ["pending_payment", "Pending Payment"],
-  ["suspended", "Suspended"], ["closed", "Completed"], ["all", "All Rentals"],
+  ["active", "Active"], ["suspended", "Suspended"], ["closed", "Completed"], ["all", "All Rentals"],
 ];
 
 export default function Rentals() {
@@ -68,11 +67,7 @@ export default function Rentals() {
               </div>
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-mv-border">
                 <div><div className="mv-label">Plan</div><div className="text-sm font-medium">{r.plan_name}</div></div>
-                <div className="text-right"><div className="mv-label">Ends</div><div className="text-sm font-medium text-amber-400">{relativeEnd(r.end)}</div></div>
-              </div>
-              <div className="flex items-center justify-between mt-3">
-                <StatusChip status={r.payment_status === "paid" ? "paid" : r.payment_status === "partial" ? "partial" : "pending"} label={r.payment_status === "paid" ? "Paid" : r.payment_status === "partial" ? "Partial" : "Due"} />
-                {r.outstanding > 0 && <span className="text-xs text-red-400">Outstanding {inr(r.outstanding)}</span>}
+                <div className="text-right"><div className="mv-label">Ends</div><div className="text-sm font-medium text-amber-400">{(r.end && r.end !== 'Ongoing') ? relativeEnd(r.end) : 'Ongoing'}</div></div>
               </div>
             </button>
           ))}

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Car, MapPin, User, Battery, Wrench, FileText, AlertTriangle, History,
-  LogIn, LogOut, ArrowRightLeft, Zap,
+  LogIn, LogOut, ArrowRightLeft, Zap, Edit2, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
@@ -23,6 +23,8 @@ export default function VehicleProfile() {
   const { user } = useAuth();
   const [v, setV] = useState(null);
   const [dialog, setDialog] = useState(null); // handover | return | transfer
+  const [edit, setEdit] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     const { data } = await api.get(`/vehicles/${id}`);
@@ -34,9 +36,8 @@ export default function VehicleProfile() {
 
   const canEdit = ["admin", "city_manager"].includes(user?.role);
   const info = [
-    ["Model", v.model], ["Mfg Year", v.manufacturing_year], ["Chassis", v.chassis_number],
-    ["Battery", v.battery_capacity], ["Charger", v.charger], ["Odometer", `${(v.odometer || 0).toLocaleString()} km`],
-    ["City", v.city], ["Parking", v.parking], ["Next Service", fmtDate(v.next_service_date)],
+    ["Model", v.model], ["Chassis", v.chassis_number], ["Odometer", `${(v.odometer || 0).toLocaleString()} km`],
+    ["City", v.city], ["Parking", v.parking],
   ];
 
   return (
@@ -66,10 +67,8 @@ export default function VehicleProfile() {
           </div>
           {canEdit && (
             <div className="flex items-center gap-2 flex-wrap">
-              <GhostBtn onClick={() => setDialog("handover")} data-testid="handover-btn"><LogIn className="w-4 h-4" /> Handover</GhostBtn>
-              <GhostBtn onClick={() => setDialog("return")} data-testid="return-btn"><LogOut className="w-4 h-4" /> Return</GhostBtn>
-              <GhostBtn onClick={() => setDialog("transfer")} data-testid="transfer-btn"><ArrowRightLeft className="w-4 h-4" /> Transfer</GhostBtn>
-              <StatusSelect v={v} onDone={load} />
+              <GhostBtn onClick={() => setEdit(true)} data-testid="edit-btn"><Edit2 className="w-4 h-4" /> Edit</GhostBtn>
+              <GhostBtn onClick={() => setDeleting(true)} data-testid="delete-btn" className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn>
             </div>
           )}
         </div>
@@ -77,7 +76,7 @@ export default function VehicleProfile() {
 
       <Tabs defaultValue="overview" className="mt-6">
         <TabsList className="bg-mv-surface border border-mv-border flex-wrap h-auto">
-          {["overview", "rental", "driver", "service", "documents", "incidents", "history"].map((t) => (
+          {["overview", "rental", "driver"].map((t) => (
             <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize" data-testid={`vtab-${t}`}>{t}</TabsTrigger>
           ))}
         </TabsList>
@@ -87,11 +86,6 @@ export default function VehicleProfile() {
             {info.map(([k, val]) => (
               <div key={k} className="mv-card p-4"><div className="mv-label">{k}</div><div className="text-sm font-medium mt-1 break-words">{val || "—"}</div></div>
             ))}
-          </div>
-          <div className="mv-card p-5 mt-3">
-            <div className="flex items-center justify-between mb-2"><span className="mv-label">Battery</span><span className="font-display text-xl font-bold">{v.battery_percent}%</span></div>
-            <BatteryBar percent={v.battery_percent} />
-            <div className="mt-2 text-xs text-mv-muted">Health: <StatusChip status={v.battery_health} className="ml-1" /></div>
           </div>
         </TabsContent>
 
@@ -118,162 +112,68 @@ export default function VehicleProfile() {
             </button>
           ) : <div className="mv-card p-10 text-center text-mv-muted text-sm">No driver assigned.</div>}
         </TabsContent>
-
-        <TabsContent value="service" className="mt-4">
-          <ServiceTimeline services={v.services} requests={v.service_requests} />
-        </TabsContent>
-
-        <TabsContent value="documents" className="mt-4">
-          <DocsList docs={v.documents} />
-        </TabsContent>
-
-        <TabsContent value="incidents" className="mt-4">
-          {(v.incidents || []).length === 0 ? <div className="mv-card p-10 text-center text-mv-muted text-sm">No incidents recorded ✓</div> : (
-            <div className="space-y-2">{v.incidents.map((i) => (
-              <div key={i.id} className="mv-card p-4 flex items-center justify-between"><div><div className="font-medium">{i.code} · {i.incident_type}</div><div className="text-xs text-mv-dim">{fmtDate(i.created_at)} · {i.location}</div></div><StatusChip status={i.status} /></div>
-            ))}</div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="history" className="mt-4">
-          <AssignmentHistory assignments={v.assignments} />
-        </TabsContent>
       </Tabs>
 
-      <HandoverDialog kind={dialog === "return" ? "return" : "handover"} open={dialog === "handover" || dialog === "return"} setOpen={() => setDialog(null)} vehicle={v} onDone={() => { setDialog(null); load(); }} />
-      <TransferDialog open={dialog === "transfer"} setOpen={() => setDialog(null)} vehicle={v} onDone={() => { setDialog(null); load(); }} />
+      <EditVehicleDialog open={edit} setOpen={setEdit} vehicle={v} onDone={() => { setEdit(false); load(); }} />
+      <Dialog open={deleting} onOpenChange={setDeleting}>
+        <DialogContent className="bg-mv-surface max-w-sm">
+          <DialogHeader><DialogTitle>Delete Vehicle?</DialogTitle></DialogHeader>
+          <p className="text-sm text-mv-muted">Are you sure you want to permanently delete vehicle <strong>{v?.vehicle_number}</strong>? This action cannot be undone and will unassign any active driver.</p>
+          <div className="flex justify-end gap-3 mt-4">
+            <GhostBtn onClick={() => setDeleting(false)}>Cancel</GhostBtn>
+            <PrimaryBtn className="bg-red-600 hover:bg-red-700 text-white" onClick={async () => {
+              try { await api.delete(`/vehicles/${v.id || v._id}`); toast.success("Vehicle deleted"); nav("/fleet"); }
+              catch { toast.error("Failed to delete"); } finally { setDeleting(false); }
+            }}>Delete</PrimaryBtn>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function StatusSelect({ v, onDone }) {
-  const change = async (status) => {
-    try { await api.put(`/vehicles/${v.id}`, { status }); toast.success(`Status → ${status}`); onDone(); } catch { toast.error("Failed"); }
-  };
-  return (
-    <Select value={v.status} onValueChange={change}>
-      <SelectTrigger className="w-32 h-9 bg-mv-surface border-mv-border" data-testid="veh-status-select"><SelectValue /></SelectTrigger>
-      <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-        {["available", "rented", "idle", "service", "accident", "inactive"].map((s) => <SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function ServiceTimeline({ services, requests }) {
-  const total = (services || []).reduce((s, x) => s + Number(x.cost || 0), 0);
-  return (
-    <div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <div className="mv-card p-4"><div className="mv-label">Service Count</div><div className="font-display text-2xl font-bold">{(services || []).length}</div></div>
-        <div className="mv-card p-4"><div className="mv-label">Total Cost</div><div className="font-display text-2xl font-bold">{inr(total)}</div></div>
-        <div className="mv-card p-4"><div className="mv-label">Open Requests</div><div className="font-display text-2xl font-bold">{(requests || []).filter((r) => r.status !== "closed").length}</div></div>
-        <div className="mv-card p-4"><div className="mv-label">Last Service</div><div className="text-sm font-medium mt-1">{services?.[0] ? fmtDate(services[0].start_date) : "—"}</div></div>
-      </div>
-      {(services || []).length === 0 ? <div className="mv-card p-10 text-center text-mv-muted text-sm">No service history yet ✓</div> : (
-        <div className="relative pl-6 space-y-4">
-          <div className="absolute left-[9px] top-1 bottom-1 w-px bg-mv-border" />
-          {services.map((s) => (
-            <div key={s.id} className="relative flex gap-3">
-              <div className="absolute -left-6 w-4 h-4 rounded-full bg-mv-surface border-2 border-amber-500" />
-              <div className="mv-card p-4 flex-1 flex items-center justify-between">
-                <div><div className="font-medium flex items-center gap-2"><Wrench className="w-4 h-4 text-amber-400" /> {s.issue}</div><div className="text-xs text-mv-dim mt-0.5">{fmtDate(s.start_date)} · {s.service_centre}</div></div>
-                <div className="font-display font-bold">{inr(s.cost)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DocsList({ docs }) {
-  if (!docs || docs.length === 0) return <div className="mv-card p-10 text-center text-mv-muted text-sm">No documents uploaded.</div>;
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {docs.map((d) => (
-        <div key={d.id} className="mv-card p-4 flex items-center justify-between">
-          <div><div className="font-medium flex items-center gap-2"><FileText className="w-4 h-4 text-mv-dim" /> {d.doc_type}</div><div className="text-xs text-mv-dim mt-1">Expires {fmtDate(d.expiry_date)}</div></div>
-          <StatusChip status={d.doc_status || "valid"} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function AssignmentHistory({ assignments }) {
-  if (!assignments || assignments.length === 0) return <div className="mv-card p-10 text-center text-mv-muted text-sm">No assignment history.</div>;
-  return (
-    <div className="mv-card divide-y divide-mv-border">
-      {assignments.map((a) => (
-        <div key={a.id} className="p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3"><History className="w-4 h-4 text-mv-dim" /><div><div className="font-medium">{a.driver_name}</div><div className="text-xs text-mv-dim">{fmtDate(a.start, true)} → {a.end ? fmtDate(a.end, true) : "Present"}</div></div></div>
-          {!a.end && <StatusChip status="active" label="Current" />}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function HandoverDialog({ kind, open, setOpen, vehicle, onDone }) {
-  const [form, setForm] = useState({ odometer: vehicle.odometer, battery_percent: vehicle.battery_percent, condition: "Good", charger: true, stepney: true, jack: true, tool_kit: true, notes: "" });
+function EditVehicleDialog({ open, setOpen, vehicle, onDone }) {
+  const [form, setForm] = useState(vehicle);
   const [saving, setSaving] = useState(false);
-  const set = (k, val) => setForm((f) => ({ ...f, [k]: val }));
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => { if (open) setForm(vehicle); }, [open, vehicle]);
+
   const save = async () => {
     setSaving(true);
-    const body = { ...form, vehicle_id: vehicle.id, vehicle_number: vehicle.vehicle_number, driver_id: vehicle.current_driver_id, driver_name: vehicle.current_driver_name, city: vehicle.city, rental_id: vehicle.current_rental_id };
-    try { await api.post(kind === "return" ? "/returns" : "/handovers", body); toast.success(kind === "return" ? "Vehicle return recorded ✓" : "Vehicle handover recorded ✓"); onDone(); }
-    catch { toast.error("Failed"); } finally { setSaving(false); }
+    try { await api.put(`/vehicles/${vehicle.id || vehicle._id}`, form); toast.success("Vehicle updated ✓"); onDone(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Failed to update"); } finally { setSaving(false); }
   };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg">
-        <DialogHeader><DialogTitle className="font-display capitalize">Vehicle {kind}</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-2 gap-4 pt-2">
-          <Field label="Odometer (km)"><TextInput type="number" value={form.odometer} onChange={(e) => set("odometer", e.target.value)} /></Field>
-          <Field label="Battery %"><TextInput type="number" value={form.battery_percent} onChange={(e) => set("battery_percent", e.target.value)} /></Field>
-          <Field label="Condition">
-            <Select value={form.condition} onValueChange={(v) => set("condition", v)}>
-              <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-mv-surface border-mv-border text-mv-text">{["Excellent", "Good", "Fair", "Damaged"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-            </Select>
+      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="font-display">Edit Vehicle</DialogTitle></DialogHeader>
+        <div className="space-y-4 pt-2">
+          <Field label="Registration Number">
+            <TextInput value={form.registration_number || ""} onChange={(e) => set("registration_number", e.target.value)} />
+          </Field>
+          <Field label="Model">
+            <TextInput value={form.model || ""} onChange={(e) => set("model", e.target.value)} />
+          </Field>
+          <Field label="Odometer (km)">
+            <TextInput type="number" value={form.odometer || ""} onChange={(e) => set("odometer", parseInt(e.target.value))} />
+          </Field>
+          <Field label="Chassis Number">
+            <TextInput value={form.chassis_number || ""} onChange={(e) => set("chassis_number", e.target.value)} />
+          </Field>
+          <Field label="Parking Location">
+            <TextInput value={form.parking || ""} onChange={(e) => set("parking", e.target.value)} />
           </Field>
         </div>
-        <div className="flex flex-wrap gap-2 pt-1">
-          {ACCESSORY_KEYS.map((a) => (
-            <button key={a} onClick={() => set(a, !form[a])} className={`h-8 px-3 rounded-full text-xs capitalize transition-colors ${form[a] ? "bg-green-500/15 text-green-400" : "border border-mv-border text-mv-dim"}`}>
-              {a.replace("_", " ")} {form[a] ? "✓" : "✗"}
-            </button>
-          ))}
+        <div className="flex justify-end gap-2 pt-4">
+          <PrimaryBtn onClick={save} disabled={saving} className="w-full">
+            {saving ? "Saving..." : "Save Changes"}
+          </PrimaryBtn>
         </div>
-        <Field label="Notes / Existing damage"><TextArea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} /></Field>
-        <div className="flex justify-end pt-1"><PrimaryBtn onClick={save} disabled={saving} data-testid="save-handover-btn">Record {kind}</PrimaryBtn></div>
       </DialogContent>
     </Dialog>
   );
 }
 
-function TransferDialog({ open, setOpen, vehicle, onDone }) {
-  const [toCity, setToCity] = useState(CITIES.find((c) => c !== vehicle.city));
-  const [reason, setReason] = useState("");
-  const save = async () => {
-    try { await api.post(`/vehicles/${vehicle.id}/transfer`, { to_city: toCity, reason }); toast.success("Vehicle transferred ✓"); onDone(); } catch { toast.error("Failed"); }
-  };
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
-        <DialogHeader><DialogTitle className="font-display">Transfer Vehicle</DialogTitle></DialogHeader>
-        <div className="text-sm text-mv-muted">From <span className="text-mv-text font-medium">{vehicle.city}</span></div>
-        <Field label="To City">
-          <Select value={toCity} onValueChange={setToCity}>
-            <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
-            <SelectContent className="bg-mv-surface border-mv-border text-mv-text">{CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-          </Select>
-        </Field>
-        <Field label="Reason"><TextInput value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Demand balancing" /></Field>
-        <div className="flex justify-end pt-1"><PrimaryBtn onClick={save} data-testid="save-transfer-btn">Transfer</PrimaryBtn></div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+

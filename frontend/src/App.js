@@ -23,14 +23,16 @@ import Locations from "@/pages/Locations";
 import Documents from "@/pages/Documents";
 import Incidents from "@/pages/Incidents";
 import VehicleHealth from "@/pages/VehicleHealth";
+import Packages from "@/pages/Packages";
 import Reports from "@/pages/Reports";
 import Settings from "@/pages/Settings";
+import KycApprovals from "@/pages/KycApprovals";
+import OdometerApprovals from "@/pages/OdometerApprovals";
 import PlatformApp from "@/pages/platform/PlatformApp";
 import DriverApp from "@/pages/driver/DriverApp";
-import RentalDrivers from "@/pages/RentalDrivers";
-import RentalDriverDetail from "@/pages/RentalDriverDetail";
+import DailyCollection from "@/pages/DailyCollection";
 
-const FLEET_PATHS = ["/fleet", "/drivers", "/rentals", "/rental-drivers", "/service-requests", "/vehicle-service", "/locations", "/documents", "/incidents", "/vehicle-health"];
+const FLEET_PATHS = ["/fleet", "/drivers", "/rentals", "/service-requests", "/vehicle-service", "/locations", "/documents", "/incidents", "/vehicle-health"];
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -59,6 +61,8 @@ function Shell() {
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
+      <Route path="/kyc" element={<Protected><KycApprovals /></Protected>} />
+      <Route path="/odometer" element={<Protected><OdometerApprovals /></Protected>} />
 
       {/* Fleet (Route39) */}
       <Route path="/fleet" element={<Protected><Fleet /></Protected>} />
@@ -68,14 +72,13 @@ function Shell() {
       <Route path="/rentals" element={<Protected><Rentals /></Protected>} />
       <Route path="/rentals/new" element={<Protected><RentalCreate /></Protected>} />
       <Route path="/rentals/:id" element={<Protected><RentalProfile /></Protected>} />
-      <Route path="/rental-drivers" element={<Protected><RentalDrivers /></Protected>} />
-      <Route path="/rental-drivers/:id" element={<Protected><RentalDriverDetail /></Protected>} />
+      <Route path="/daily-collection" element={<Protected><DailyCollection /></Protected>} />
       <Route path="/service-requests" element={<Protected><ServiceRequests /></Protected>} />
       <Route path="/vehicle-service" element={<Protected><VehicleService /></Protected>} />
-      <Route path="/locations" element={<Protected><Locations /></Protected>} />
       <Route path="/documents" element={<Protected><Documents /></Protected>} />
       <Route path="/incidents" element={<Protected><Incidents /></Protected>} />
       <Route path="/vehicle-health" element={<Protected><VehicleHealth /></Protected>} />
+      <Route path="/packages" element={<Protected><Packages /></Protected>} />
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>

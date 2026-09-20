@@ -5,12 +5,7 @@ export const API = `${BACKEND_URL}/api`;
 
 const api = axios.create({ baseURL: API, withCredentials: true });
 
-// Attach bearer token fallback (cookies are primary)
-api.interceptors.request.use((config) => {
-  const t = localStorage.getItem("mv_token");
-  if (t) config.headers.Authorization = `Bearer ${t}`;
-  return config;
-});
+// Removed localStorage token logic; relying completely on HttpOnly cookies
 
 export function formatApiErrorDetail(detail) {
   if (detail == null) return "Something went wrong. Please try again.";
