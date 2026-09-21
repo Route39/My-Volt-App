@@ -26,6 +26,9 @@ export function DriverAuthProvider({ children }) {
 
   const login = async (phone, otp) => {
     const { data } = await dapi.post("/driver/auth/login", { phone, otp });
+    if (data.token) {
+      localStorage.setItem("driver_token", data.token);
+    }
     setAuthed(true);
     await refresh();
     return data;
@@ -33,6 +36,7 @@ export function DriverAuthProvider({ children }) {
 
   const logout = async () => {
     try { await dapi.post("/driver/auth/logout"); } catch {}
+    localStorage.removeItem("driver_token");
     setAuthed(false); setData(null);
   };
 

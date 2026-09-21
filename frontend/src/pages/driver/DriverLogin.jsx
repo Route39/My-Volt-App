@@ -42,7 +42,7 @@ export default function DriverLogin() {
             <Zap className="w-8 h-8 text-white" fill="white" />
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 mt-4">MyEVRental</h1>
-          <p className="text-slate-500 text-sm mt-1">Your daily EV rental, made simple.</p>
+          <p className="text-slate-500 text-sm mt-1">Your daily EV rental, made simple..</p>
         </div>
 
         <form onSubmit={step === 1 ? handleRequestOtp : handleLogin} className="space-y-4">

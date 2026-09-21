@@ -151,8 +151,8 @@ function UserDialog({ open, setOpen, editUser, onDone }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   
   const save = async () => {
-    if (!form.name || !form.phone || !form.email) { 
-      toast.error("Name, phone, and username are required"); 
+    if (!form.name || !form.phone) { 
+      toast.error("Name and Phone Number are required"); 
       return; 
     }
     if (!editUser && !form.password) {
@@ -162,7 +162,7 @@ function UserDialog({ open, setOpen, editUser, onDone }) {
     
     setSaving(true);
     try { 
-      const payload = { ...form, city: form.role === "city_manager" ? form.city : null };
+      const payload = { ...form, email: form.phone, city: form.role === "city_manager" ? form.city : null };
       if (editUser && !form.password) delete payload.password;
 
       if (editUser) {
@@ -186,9 +186,8 @@ function UserDialog({ open, setOpen, editUser, onDone }) {
         <DialogHeader><DialogTitle className="font-display font-extrabold text-xl">{editUser ? "Edit" : "Add"} Team Member</DialogTitle></DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
           <Field label="Name"><TextInput value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Full Name" /></Field>
-          <Field label="Phone Number"><TextInput type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="10-digit number" /></Field>
-          <Field label="Username"><TextInput type="text" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="Choose a username" /></Field>
-          <Field label="Password"><TextInput type="password" value={form.password} onChange={(e) => set("password", e.target.value)} placeholder={editUser ? "Leave blank to keep" : "Set password"} /></Field>
+          <Field label="Phone Number (Username)"><TextInput type="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="10-digit number" /></Field>
+          <Field label="Password"><TextInput type="password" value={form.password} onChange={(e) => set("password", e.target.value)} placeholder={editUser ? "Leave blank to keep" : "Set password (e.g. number)"} /></Field>
           <Field label="Role">
             <Select value={form.role} onValueChange={(v) => set("role", v)}>
               <SelectTrigger className="h-11 rounded-xl bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>

@@ -447,15 +447,15 @@ export default function DriverHome() {
       {(!depositPaid && deposit?.amount > 0) && (
         <button onClick={() => setPay("deposit")} data-testid="home-pay-deposit-btn"
           className="w-full h-12 rounded-2xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors mt-5">
-          Pay Security Deposit {inr(deposit.amount)}
+          Pay Security Deposit. {inr(deposit.amount)}
         </button>
       )}
 
       {/* Spacer to prevent content from hiding behind sticky bar */}
       <div className="h-24"></div>
 
-      {/* Sticky Bottom Payment Bar - only shown when there's an outstanding balance */}
-      {isFullyAssigned && (account?.outstanding_amount || 0) > 0 && (
+      {/* Sticky Bottom Payment Bar - shown when there's outstanding or rent isn't paid today */}
+      {isFullyAssigned && ((account?.outstanding_amount || 0) > 0 || !account?.today_paid) && (
         <div className="fixed bottom-16 left-1/2 -translate-x-1/2 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] p-4 flex items-center justify-between z-40 max-w-md w-full">
           <div>
             {(account?.outstanding_amount || 0) > 0 ? (

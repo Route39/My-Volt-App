@@ -4,9 +4,16 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
 // Dedicated instance for the MyEVRental driver app.
-// withCredentials:false so the MyVolt admin cookie is never sent — driver auth is bearer-only (ev_token).
+// withCredentials:true is kept for web fallback, but we primarily use Bearer tokens
+// from localStorage to ensure persistence on Capacitor mobile app restarts.
 const dapi = axios.create({ baseURL: API, withCredentials: true });
 
-// Removed localStorage token logic; relying completely on HttpOnly cookies
+dapi.interceptors.request.use((config) => {
+  const token = localStorage.getItem("driver_token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 export default dapi;

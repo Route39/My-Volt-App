@@ -39,6 +39,8 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+if not os.path.exists("uploads"):
+    os.makedirs("uploads")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 api = APIRouter(prefix="/api")
 
@@ -250,9 +252,12 @@ async def list_users(request: Request):
 async def create_user(body: RegisterBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin"])
-    email = body.email.lower()
+    
+    raw_email = body.email.strip()
+    email = f"{raw_email}@myvolt.local" if raw_email.isdigit() else raw_email.lower()
+    
     if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email already exists")
+        raise HTTPException(status_code=400, detail="Username/Email already exists")
     doc = {
         "email": email,
         "phone": body.phone,
@@ -277,7 +282,8 @@ async def update_user(uid: str, body: UpdateUserBody, request: Request):
     if body.name is not None: update_data["name"] = body.name
     if body.phone is not None: update_data["phone"] = body.phone
     if body.email is not None: 
-        email = body.email.lower()
+        raw_email = body.email.strip()
+        email = f"{raw_email}@myvolt.local" if raw_email.isdigit() else raw_email.lower()
         existing = await db.users.find_one({"email": email, "_id": {"$ne": oid(uid)}})
         if existing: raise HTTPException(status_code=400, detail="Email already exists")
         update_data["email"] = email
