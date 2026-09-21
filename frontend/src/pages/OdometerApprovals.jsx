@@ -3,8 +3,11 @@ import api from "../lib/api";
 import { Image as ImageIcon, Search } from "lucide-react";
 import { inr } from "../lib/format";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { useApp, CITIES } from "../context/AppContext";
 
 export default function OdometerApprovals() {
+  const { city: gCity } = useApp();
+  const [city, setCity] = useState(gCity === "all" ? "all" : gCity);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [imgModal, setImgModal] = useState(null);
@@ -17,7 +20,7 @@ export default function OdometerApprovals() {
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const p = {};
+      const p = city !== "all" ? { city } : {};
       if (search) p.driver_name = search;
       
       if (dateFilter === "today") {
@@ -48,7 +51,7 @@ export default function OdometerApprovals() {
     } finally {
       setLoading(false);
     }
-  }, [dateFilter, fromDate, toDate, search]);
+  }, [city, dateFilter, fromDate, toDate, search]);
 
   useEffect(() => {
     fetchLogs();
@@ -62,6 +65,18 @@ export default function OdometerApprovals() {
           <p className="text-slate-500">Monitor daily vehicle usage and limits</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          <Select value={city} onValueChange={setCity}>
+            <SelectTrigger className="w-40 h-10 rounded-xl bg-white border-slate-200">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-white rounded-xl border-slate-200 text-slate-900">
+              <SelectItem value="all">All Cities</SelectItem>
+              {CITIES.map((c) => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <Select value={dateFilter} onValueChange={setDateFilter}>
             <SelectTrigger className="w-40 h-10 rounded-xl bg-white border-slate-200">
               <SelectValue />
@@ -109,18 +124,18 @@ export default function OdometerApprovals() {
         <table className="w-full text-left text-sm min-w-[1100px]">
           <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
             <tr>
-              <th className="px-5 py-4">Driver</th>
-              <th className="px-5 py-4">Date</th>
-              <th className="px-5 py-4">Package</th>
-              <th className="px-5 py-4 text-amber-600">Daily Rent</th>
-              <th className="px-5 py-4">Start KM</th>
-              <th className="px-5 py-4">End KM</th>
-              <th className="px-5 py-4 text-indigo-600">Today Driven</th>
-              <th className="px-5 py-4">Daily Limit</th>
-              <th className="px-5 py-4 text-red-500">Extra KM</th>
-              <th className="px-5 py-4 text-center">Monthly KM</th>
-              <th className="px-5 py-4 text-center">Status</th>
-              <th className="px-5 py-4 text-center">Photos</th>
+              <th className="px-3 py-4 whitespace-nowrap">Driver</th>
+              <th className="px-3 py-4 whitespace-nowrap">Date</th>
+              <th className="px-3 py-4 whitespace-nowrap">Package</th>
+              <th className="px-3 py-4 whitespace-nowrap text-amber-600">Daily Rent</th>
+              <th className="px-3 py-4 whitespace-nowrap">Start KM</th>
+              <th className="px-3 py-4 whitespace-nowrap">End KM</th>
+              <th className="px-3 py-4 whitespace-nowrap text-indigo-600">Today Driven</th>
+              <th className="px-3 py-4 whitespace-nowrap">Daily Limit</th>
+              <th className="px-3 py-4 whitespace-nowrap text-red-500">Extra KM</th>
+              <th className="px-3 py-4 whitespace-nowrap text-center">Monthly KM</th>
+              <th className="px-3 py-4 whitespace-nowrap text-center">Status</th>
+              <th className="px-3 py-4 whitespace-nowrap text-center">Photos</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -143,31 +158,31 @@ export default function OdometerApprovals() {
                 return (
                   <tr key={log._id} className="hover:bg-slate-50 transition-colors">
                     {/* Driver */}
-                    <td className="px-5 py-4 font-bold text-slate-900">{log.driver_name}</td>
+                    <td className="px-3 py-4 font-bold text-slate-900 whitespace-nowrap">{log.driver_name}</td>
                     
                     {/* Date */}
-                    <td className="px-5 py-4 text-slate-500">{log.date}</td>
+                    <td className="px-3 py-4 text-slate-500 whitespace-nowrap">{log.date}</td>
                     
                     {/* Package */}
-                    <td className="px-5 py-4">
-                      <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full">
+                    <td className="px-3 py-4 whitespace-nowrap">
+                      <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full whitespace-nowrap">
                         {log.package_name || "—"}
                       </span>
                     </td>
                     
                     {/* Daily Rent */}
-                    <td className="px-5 py-4 font-bold text-amber-600">
+                    <td className="px-3 py-4 font-bold text-amber-600 whitespace-nowrap">
                       {log.daily_rent ? inr(log.daily_rent) : "—"}
                     </td>
                     
                     {/* Start KM */}
-                    <td className="px-5 py-4 font-mono text-slate-700">{log.start_reading ? `${log.start_reading} km` : "—"}</td>
+                    <td className="px-3 py-4 font-mono text-slate-700 whitespace-nowrap">{log.start_reading ? `${log.start_reading} km` : "—"}</td>
                     
                     {/* End KM */}
-                    <td className="px-5 py-4 font-mono text-slate-700">{log.end_reading ? `${log.end_reading} km` : "—"}</td>
+                    <td className="px-3 py-4 font-mono text-slate-700 whitespace-nowrap">{log.end_reading ? `${log.end_reading} km` : "—"}</td>
                     
                     {/* Today Driven */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 py-4 whitespace-nowrap">
                       {driven > 0 ? (
                         <div>
                           <span className={`font-bold text-base ${overDaily ? "text-red-600" : "text-indigo-600"}`}>
@@ -178,12 +193,12 @@ export default function OdometerApprovals() {
                     </td>
                     
                     {/* Daily Limit */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 py-4 whitespace-nowrap">
                       <span className="text-slate-600 font-medium">{dailyLimit > 0 ? `${dailyLimit} km` : "—"}</span>
                     </td>
                     
                     {/* Extra KM */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 py-4 whitespace-nowrap">
                       {driven > 0 ? (
                         extraKm > 0 ? (
                           <div>
@@ -201,7 +216,7 @@ export default function OdometerApprovals() {
                     </td>
                     
                     {/* Monthly KM */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 py-4 whitespace-nowrap">
                       <div className="flex flex-col items-center">
                         <span className={`font-bold ${overLimit ? "text-red-600" : "text-slate-900"}`}>
                           {log.monthly_kms} / {limit} km
@@ -217,14 +232,14 @@ export default function OdometerApprovals() {
                     </td>
                     
                     {/* Status */}
-                    <td className="px-5 py-4 text-center">
+                    <td className="px-3 py-4 text-center whitespace-nowrap">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ${log.status === "active" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
                         {log.status === "active" ? "In Progress" : "Completed"}
                       </span>
                     </td>
                     
                     {/* Photos */}
-                    <td className="px-5 py-4 text-center">
+                    <td className="px-3 py-4 text-center whitespace-nowrap">
                       <div className="flex gap-2 justify-center">
                         <button
                           onClick={() => setImgModal(log.start_image_url || log.image_url)}

@@ -29,6 +29,16 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 
 app = FastAPI(title="MyVolt API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://0.0.0.0:3000", "https://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 api = APIRouter(prefix="/api")
 
@@ -111,23 +121,41 @@ async def add_notification(org_id, level, title, message, link=None, city=None):
 
 # ---------- auth models ----------
 class LoginBody(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
 class RegisterBody(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     name: str
+    phone: str
     role: str = "staff"
     city: Optional[str] = None
 
+class UpdateUserBody(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    role: Optional[str] = None
+    city: Optional[str] = None
+    password: Optional[str] = None
+
+
+IS_PROD = os.getenv("ENV", "development") == "production"
 
 def set_auth_cookies(response: Response, uid, email):
     at = authlib.create_access_token(uid, email)
     rt = authlib.create_refresh_token(uid)
-    response.set_cookie("access_token", at, httponly=True, secure=True, samesite="none", max_age=43200, path="/")
-    response.set_cookie("refresh_token", rt, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    response.set_cookie("access_token", at, httponly=True, secure=IS_PROD, samesite="lax" if not IS_PROD else "none", max_age=315360000, path="/")
+    response.set_cookie("refresh_token", rt, httponly=True, secure=IS_PROD, samesite="lax" if not IS_PROD else "none", max_age=315360000, path="/")
+    return at
+
+def set_driver_auth_cookies(response: Response, uid, phone):
+    at = authlib.create_access_token(uid, phone)
+    rt = authlib.create_refresh_token(uid)
+    response.set_cookie("driver_access_token", at, httponly=True, secure=IS_PROD, samesite="lax" if not IS_PROD else "none", max_age=315360000, path="/")
+    response.set_cookie("driver_refresh_token", rt, httponly=True, secure=IS_PROD, samesite="lax" if not IS_PROD else "none", max_age=315360000, path="/")
     return at
 
 
@@ -145,22 +173,22 @@ async def _check_lockout(identifier):
 
 @api.post("/auth/login")
 async def login(body: LoginBody, response: Response):
-    email = body.email.lower()
-    await _check_lockout(email)
-    user = await db.users.find_one({"email": email})
+    identifier = body.email.lower()
+    await _check_lockout(identifier)
+    user = await db.users.find_one({"$or": [{"email": identifier}, {"phone": body.email}]})
     if not user or not authlib.verify_password(body.password, user["password_hash"]):
         await db.login_attempts.update_one(
-            {"identifier": email},
+            {"identifier": identifier},
             {"$inc": {"count": 1}, "$set": {"locked_until": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}},
             upsert=True)
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    await db.login_attempts.delete_one({"identifier": email})
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    await db.login_attempts.delete_one({"identifier": identifier})
     org_id = user.get("organization_id")
     if org_id:
         org = await db.organizations.find_one({"org_id": org_id})
         if org and org.get("archived"):
             raise HTTPException(status_code=403, detail="This workspace is no longer active. Please contact your administrator.")
-    token = set_auth_cookies(response, str(user["_id"]), email)
+    token = set_auth_cookies(response, str(user["_id"]), identifier)
     out = ser(user)
     out = await attach_org(out)
     out["token"] = token
@@ -225,6 +253,7 @@ async def create_user(body: RegisterBody, request: Request):
         raise HTTPException(status_code=400, detail="Email already exists")
     doc = {
         "email": email,
+        "phone": body.phone,
         "password_hash": authlib.hash_password(body.password),
         "name": body.name,
         "role": body.role if body.role in authlib.ROLES else "staff",
@@ -235,6 +264,83 @@ async def create_user(body: RegisterBody, request: Request):
     res = await db.users.insert_one(doc)
     await log_audit(user, "user_created", "user", str(res.inserted_id), f"User {body.name} created")
     return ser(await db.users.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/users/{uid}")
+async def update_user(uid: str, body: UpdateUserBody, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin"])
+    
+    update_data = {}
+    if body.name is not None: update_data["name"] = body.name
+    if body.phone is not None: update_data["phone"] = body.phone
+    if body.email is not None: 
+        email = body.email.lower()
+        existing = await db.users.find_one({"email": email, "_id": {"$ne": oid(uid)}})
+        if existing: raise HTTPException(status_code=400, detail="Email already exists")
+        update_data["email"] = email
+    if body.role is not None: update_data["role"] = body.role if body.role in authlib.ROLES else "staff"
+    
+    if body.city is not None:
+        update_data["city"] = body.city
+
+    if body.password:
+        update_data["password_hash"] = authlib.hash_password(body.password)
+        
+    if update_data:
+        res = await db.users.update_one(org_filter(user, {"_id": oid(uid)}), {"$set": update_data})
+        if res.matched_count == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        await log_audit(user, "user_updated", "user", uid, f"User {uid} updated")
+    return {"ok": True}
+
+
+@api.delete("/users/{uid}")
+async def delete_user(uid: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin"])
+    if str(user["id"]) == uid:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    res = await db.users.delete_one(org_filter(user, {"_id": oid(uid)}))
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    await log_audit(user, "user_deleted", "user", uid, f"User {uid} deleted")
+    return {"ok": True}
+
+
+# ---------- package password ----------
+class PackagePasswordBody(BaseModel):
+    password: str
+
+@api.get("/settings/package-password")
+async def get_package_password_status(request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin"])
+    org = await db.organizations.find_one({"org_id": user["organization_id"]})
+    return {"has_password": bool(org and org.get("package_password"))}
+
+@api.post("/settings/package-password")
+async def set_package_password(body: PackagePasswordBody, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin"])
+    await db.organizations.update_one(
+        {"org_id": user["organization_id"]},
+        {"$set": {"package_password": body.password}},
+        upsert=True
+    )
+    return {"ok": True}
+
+@api.post("/settings/package-password/verify")
+async def verify_package_password(body: PackagePasswordBody, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "city_manager"])
+    org = await db.organizations.find_one({"org_id": user["organization_id"]})
+    stored = org.get("package_password") if org else None
+    if not stored:
+        return {"ok": True}  # No password set, allow access
+    if stored != body.password:
+        raise HTTPException(status_code=401, detail="Wrong password")
+    return {"ok": True}
 
 
 # ---------- cities ----------
@@ -417,10 +523,17 @@ class DriverBody(BaseModel):
 
 
 @api.get("/admin/kyc/pending")
-async def pending_kyc(request: Request):
+async def pending_kyc(request: Request, city: Optional[str] = None, driver_name: Optional[str] = None):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    return await _find("drivers", user, extra={"kyc_status": "submitted"})
+    
+    drv_filter = {"kyc_status": "submitted"}
+    if city and city != "all":
+        drv_filter["city"] = city
+    if driver_name:
+        drv_filter["name"] = {"$regex": driver_name, "$options": "i"}
+        
+    return await _find("drivers", user, extra=drv_filter)
 
 
 @api.get("/admin/odometer")
@@ -513,9 +626,13 @@ async def review_kyc(driver_id: str, action: str, request: Request):
     if action not in ["approve", "reject"]:
         raise HTTPException(status_code=400, detail="Invalid action")
         
+    update_doc = {"$set": {"kyc_status": "approved" if action == "approve" else "rejected", "kyc_reviewed_at": now_iso()}}
+    if action == "reject":
+        update_doc["$unset"] = {"kyc_documents": "", "location": ""}
+
     res = await db.drivers.update_one(
         org_filter(user, {"_id": oid(driver_id)}),
-        {"$set": {"kyc_status": "approved" if action == "approve" else "rejected", "kyc_reviewed_at": now_iso()}}
+        update_doc
     )
     if res.modified_count == 0:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -566,15 +683,25 @@ async def get_driver(did: str, request: Request):
 
 
 @api.delete("/drivers/{did}")
-async def delete_driver(did: str, request: Request):
+async def delete_driver(did: str, request: Request, force: bool = False):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
+    require_role(user, ["admin", "city_manager"])
     
-    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    # Find driver by org only (not city-restricted) so any city manager in the org can delete
+    drv = await db.drivers.find_one({"_id": oid(did), "organization_id": user["organization_id"]})
     if not drv:
         raise HTTPException(status_code=404, detail="Driver not found")
-        
+    
     org = user["organization_id"]
+    
+    # Check for unpaid balance unless force delete
+    if not force:
+        account = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+        if account and account.get("balance", 0) > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Driver has unpaid balance of ₹{account.get('balance', 0)}. Use force delete to proceed."
+            )
     
     # 1. Delete driver document
     await db.drivers.delete_one({"_id": oid(did)})
@@ -620,10 +747,12 @@ async def create_driver(body: DriverBody, request: Request):
 @api.put("/drivers/{did}")
 async def update_driver(did: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "city_manager"])
     for k in ("id", "_id", "assignments", "rentals", "incidents", "documents"):
         body.pop(k, None)
-    await db.drivers.update_one(org_filter(user, {"_id": oid(did)}), {"$set": body})
+    res = await db.drivers.update_one({"_id": oid(did), "organization_id": user["organization_id"]}, {"$set": body})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Driver not found")
     return ser(await db.drivers.find_one({"_id": oid(did)}))
 
 
@@ -811,11 +940,24 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             d_start = datetime.combine(d, time.min).replace(tzinfo=timezone.utc)
             d_end = datetime.combine(d, time.max).replace(tzinfo=timezone.utc)
             
-            # Payments for THIS specific date
+            # Payments that specifically cover this date (due date), or fallback to exact timestamp matching if no covers_dates exists.
             day_payments = await db.rental_payments.find({
                 "rental_id": rid,
-                "created_at": {"$gte": d_start.isoformat(), "$lte": d_end.isoformat()}
+                "$or": [
+                    {"covers_dates": d_str},
+                    {"covers_dates": {"$exists": False}, "created_at": {"$gte": d_start.isoformat(), "$lte": d_end.isoformat()}},
+                    {"covers_dates": {"$size": 0}, "created_at": {"$gte": d_start.isoformat(), "$lte": d_end.isoformat()}}
+                ]
             }).to_list(100)
+            
+            # Find the actual date this payment was physically processed (useful for late retroactive payments)
+            paid_on_date = None
+            for p in day_payments:
+                if p.get("payment_status") == "paid" and p.get("type") != "refund":
+                    created = p.get("created_at")
+                    if created:
+                        paid_on_date = created.split("T")[0]
+                        break
             
             today_paid = sum(p.get("amount", 0) for p in day_payments if p.get("type") != "refund")
             
@@ -846,8 +988,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             end_meter = odo_log.get("end_reading", 0) if odo_log else 0
             total_km = odo_log.get("driven_today", 0) if odo_log else 0
             
-            # Only append if they actually drove or paid that day, OR if it's today.
-            if d == datetime.now(timezone.utc).date() or odo_log or today_paid > 0:
+            # Only append if they actually drove or paid that day, or if it's today, OR if they owe rent for this day!
+            if d == datetime.now(timezone.utc).date() or odo_log or today_paid > 0 or d_str in acct.get("unpaid_dates", []):
                 out.append({
                     "id": f"{rid}_{d_str}",
                     "driver_name": r.get("driver_name", "Unknown"),
@@ -860,6 +1002,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     "today_paid": today_paid,
                     "outstanding_amount": outstanding_amount if d == datetime.now(timezone.utc).date() else max(0, daily_rate - today_paid),
                     "daily_status": daily_status,
+                    "paid_on": paid_on_date,
                     "deposit": deposit,
                     "deposit_paid": deposit_paid,
                     "deposit_status": deposit_status,
@@ -2087,7 +2230,7 @@ async def driver_request_otp(body: DriverOTPRequest):
     if not u:
         raise HTTPException(status_code=400, detail="Driver not found with this mobile number")
     
-    otp = str(random.randint(100000, 999999))
+    otp = str(secrets.randbelow(900000) + 100000)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
     print(f"\n--- DEBUG OTP for {phone} ---: {otp}\n")
     await db.otp_codes.update_one(
@@ -2149,13 +2292,13 @@ async def driver_login(body: DriverLogin, response: Response):
         
     await db.otp_codes.delete_one({"phone": phone})
     await db.login_attempts.delete_one({"identifier": "driver:" + phone})
-    token = set_auth_cookies(response, str(u["_id"]), u.get("phone", ""))
+    token = set_driver_auth_cookies(response, str(u["_id"]), u.get("phone", ""))
     return {"token": token, "driver": ser(u)}
 
 @api.post("/driver/auth/logout")
 async def driver_logout(response: Response):
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie("driver_access_token", path="/")
+    response.delete_cookie("driver_refresh_token", path="/")
     return {"ok": True}
 
 
@@ -2860,15 +3003,6 @@ async def delete_document(did: str, request: Request):
 
 
 app.include_router(api)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origin_regex=".*",
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 @app.on_event("startup")
 async def startup():

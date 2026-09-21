@@ -212,20 +212,78 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
 
 function DeleteDriverDialog({ open, setOpen, driver, onDone }) {
   const [deleting, setDeleting] = useState(false);
-  const del = async () => {
+  const [unpaidError, setUnpaidError] = useState(null);
+
+  const doDelete = async (force = false) => {
     setDeleting(true);
-    try { await api.delete(`/drivers/${driver.id}`); toast.success("Driver deleted"); onDone(); } catch { toast.error("Failed to delete"); } finally { setDeleting(false); }
+    setUnpaidError(null);
+    try {
+      await api.delete(`/drivers/${driver.id}?force=${force}`);
+      toast.success("Driver deleted successfully");
+      onDone();
+    } catch (e) {
+      const status = e.response?.status;
+      const detail = e.response?.data?.detail || "Failed to delete";
+      if (status === 409) {
+        // Unpaid balance warning — show force delete option
+        setUnpaidError(detail);
+      } else {
+        toast.error(detail);
+        setOpen(false);
+      }
+    } finally {
+      setDeleting(false);
+    }
   };
+
+  const handleClose = () => { setUnpaidError(null); setOpen(false); };
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
-        <DialogHeader><DialogTitle className="font-display flex items-center gap-2 text-red-500"><AlertTriangle className="w-5 h-5" /> Delete Driver</DialogTitle></DialogHeader>
-        <p className="text-sm text-mv-muted">Are you sure you want to permanently delete driver <strong>{driver?.name}</strong>? This action cannot be undone.</p>
-        <div className="flex justify-end gap-2 pt-2"><GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn><PrimaryBtn onClick={del} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">Delete</PrimaryBtn></div>
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2 text-red-500">
+            <AlertTriangle className="w-5 h-5" /> Delete Driver
+          </DialogTitle>
+        </DialogHeader>
+
+        {!unpaidError ? (
+          <>
+            <p className="text-sm text-mv-muted">
+              Are you sure you want to permanently delete driver <strong>{driver?.name}</strong>? 
+              All their rentals, payments and records will be deleted. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <GhostBtn onClick={handleClose}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={() => doDelete(false)} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">
+                {deleting ? "Deleting..." : "Delete"}
+              </PrimaryBtn>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" /> Unpaid Balance Found
+              </p>
+              <p className="text-sm text-amber-700 mt-1">{unpaidError}</p>
+            </div>
+            <p className="text-sm text-mv-muted mt-1">
+              You can still force delete this driver. All their data including unpaid dues will be permanently removed.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <GhostBtn onClick={handleClose}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={() => doDelete(true)} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">
+                {deleting ? "Deleting..." : "Force Delete Anyway"}
+              </PrimaryBtn>
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
 }
+
 
 function KycDocCard({ title, url }) {
   if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;

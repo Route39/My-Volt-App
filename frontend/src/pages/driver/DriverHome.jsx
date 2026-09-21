@@ -293,7 +293,7 @@ export default function DriverHome() {
       </div>
 
       {!isApprovedHidden && kycStatus === "approved" && (
-        <div className="mx-5 mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-3xl flex items-start gap-3 mv-rise">
+        <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-3xl flex items-start gap-3 mv-rise">
           <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center shrink-0">
             <ShieldCheck className="w-5 h-5 text-white" />
           </div>

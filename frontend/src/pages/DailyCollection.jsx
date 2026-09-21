@@ -203,16 +203,21 @@ export default function DailyCollection() {
                     <td className="px-5 py-4 font-medium">{it.total_km || "—"} km</td>
                     <td className="px-5 py-4 font-display font-bold text-amber-500/90">{inr(it.daily_rate)}</td>
                     <td className="px-5 py-4">
-                      {it.outstanding_amount === 0 ? (
-                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold tracking-wide">
-                          <Check className="w-3.5 h-3.5" /> PAID
+                      {it.daily_status === "paid" ? (
+                        <div className="inline-flex flex-col gap-0.5">
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold tracking-wide">
+                            <Check className="w-3.5 h-3.5" /> PAID
+                          </div>
+                          {it.paid_on && it.paid_on !== it.date && (
+                            <span className="text-[10px] font-bold text-emerald-600/80 ml-1">(Paid on {it.paid_on})</span>
+                          )}
                         </div>
                       ) : (
                         <div className="inline-flex flex-col gap-0.5">
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
                             NOT PAID
                           </div>
-                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr(it.outstanding_amount)}</span>
+                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr(it.daily_rate - it.today_paid)}</span>
                         </div>
                       )}
                     </td>

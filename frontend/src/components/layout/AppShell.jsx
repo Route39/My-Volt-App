@@ -19,23 +19,20 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, mod: "dashboard" },
   { to: "/drivers", label: "Drivers", icon: Users, mod: "drivers" },
   { to: "/fleet", label: "Vehicles", icon: Car, mod: "fleet" },
-  { to: "/packages", label: "Rental Packages", icon: Package, mod: "settings" },
+  { to: "/packages", label: "Rental Packages", icon: Package, mod: "packages" },
   { to: "/rentals", label: "Rentals", icon: KeyRound, mod: "rentals" },
   { to: "/daily-collection", label: "Daily Collection", icon: Banknote, mod: "rentals" },
   { to: "/odometer", label: "Odometer Logs", icon: Car, mod: "drivers" },
   { to: "/kyc", label: "KYC Approvals", icon: FileBadge, mod: "drivers" },
   { to: "/service-requests", label: "Service Requests", icon: Wrench, mod: "service" },
   { to: "/vehicle-service", label: "Vehicle Service", icon: ClipboardList, mod: "service" },
-  { to: "/documents", label: "Documents", icon: FileText, mod: "documents" },
   { to: "/incidents", label: "Incidents", icon: AlertTriangle, mod: "incidents" },
-  { to: "/vehicle-health", label: "Vehicle Health", icon: HeartPulse, mod: "health" },
-  { to: "/reports", label: "Reports", icon: BarChart3, mod: "reports" },
   { to: "/settings", label: "Settings", icon: Settings, mod: "settings" },
 ];
 
 const ROLE_MODULES = {
   admin: null,
-  city_manager: ["dashboard", "fleet", "drivers", "rentals", "service", "locations", "documents", "incidents", "health", "reports"],
+  city_manager: ["dashboard", "fleet", "drivers", "rentals", "service", "locations", "incidents", "packages"],
 };
 const navForRole = (role) => { const a = ROLE_MODULES[role]; return a ? NAV.filter((n) => a.includes(n.mod)) : NAV; };
 

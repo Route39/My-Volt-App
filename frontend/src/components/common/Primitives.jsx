@@ -60,10 +60,10 @@ const STATUS_MAP = {
 
 export function KycStatusChip({ status, className = "" }) {
   const map = {
-    "pending": ["chip-red", "Missing (Driver)"],
-    "submitted": ["chip-amber", "Pending Review (Admin)"],
-    "approved": ["chip-green", "Approved"],
-    "rejected": ["chip-red", "Rejected (Resubmit)"]
+    "pending": ["chip-red", "KYC Pending (Driver)"],
+    "submitted": ["chip-amber", "KYC Pending Review (Admin)"],
+    "approved": ["chip-green", "KYC Approved"],
+    "rejected": ["chip-red", "KYC Rejected (Resubmit)"]
   };
   const [cls, label] = map[status] || map["pending"];
   return <span className={`chip ${cls} ${className}`}>{label}</span>;

@@ -8,15 +8,12 @@ from bson import ObjectId
 
 JWT_ALGORITHM = "HS256"
 
-ROLES = ["admin", "company_admin", "city_manager", "platform_admin"]
+ROLES = ["admin", "city_manager"]
 
 # Which modules each role may access (used for frontend hints; backend enforces per-endpoint)
 ROLE_ACCESS = {
     "admin": "all",
-    "operations_manager": ["fleet", "drivers", "rentals", "service", "locations", "documents", "incidents", "health", "reports", "dashboard"],
-    "city_manager": ["fleet", "drivers", "rentals", "service", "locations", "documents", "incidents", "health", "reports", "dashboard"],
-    "service_manager": ["service", "fleet", "health", "dashboard", "reports"],
-    "staff": ["fleet", "drivers", "rentals", "dashboard"],
+    "city_manager": ["dashboard", "fleet", "drivers", "rentals", "service", "locations", "incidents", "packages"],
 }
 
 
@@ -63,7 +60,10 @@ def _extract_token(request: Request):
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:]
-    
+    # Isolate driver cookies to avoid overriding admin cookies in local dev
+    if request.url.path.startswith("/api/driver"):
+        return request.cookies.get("driver_access_token") or request.cookies.get("access_token")
+        
     return request.cookies.get("access_token")
 
 

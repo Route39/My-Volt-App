@@ -1,26 +1,34 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 import { Check, X, MapPin, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
+import { useApp, CITIES } from "../context/AppContext";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 export default function KycApprovals() {
+  const { city: gCity } = useApp();
+  const [city, setCity] = useState(gCity === "all" ? "all" : gCity);
+  const [search, setSearch] = useState("");
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get("/admin/kyc/pending");
+      const p = city !== "all" ? { city } : {};
+      if (search) p.driver_name = search;
+      
+      const { data } = await api.get("/admin/kyc/pending", { params: p });
       setDrivers(data);
     } catch {
       toast.error("Failed to load pending KYC");
     } finally {
       setLoading(false);
     }
-  };
+  }, [city, search]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const action = async (id, type) => {
     try {
@@ -37,9 +45,35 @@ export default function KycApprovals() {
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-3xl font-extrabold text-slate-900">KYC Approvals</h1>
-        <p className="text-slate-500 mt-1">Review and approve driver KYC documents.</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-slate-900">KYC Approvals</h1>
+          <p className="text-slate-500 mt-1">Review and approve driver KYC documents.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={city} onValueChange={setCity}>
+            <SelectTrigger className="w-40 h-10 rounded-xl bg-white border-slate-200">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-white rounded-xl border-slate-200 text-slate-900">
+              <SelectItem value="all">All Cities</SelectItem>
+              {CITIES.map((c) => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search driver..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9 pr-4 h-10 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-48 transition-all"
+            />
+          </div>
+        </div>
       </div>
 
       {drivers.length === 0 ? (
