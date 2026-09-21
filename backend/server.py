@@ -109,7 +109,7 @@ async def add_notification(org_id, level, title, message, link=None, city=None):
 
 # ---------- auth models ----------
 class LoginBody(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -143,7 +143,8 @@ async def _check_lockout(identifier):
 
 @api.post("/auth/login")
 async def login(body: LoginBody, response: Response):
-    email = body.email.lower()
+    raw_id = body.email.strip()
+    email = f"{raw_id}@myvolt.local" if raw_id.isdigit() else raw_id.lower()
     await _check_lockout(email)
     user = await db.users.find_one({"email": email})
     if not user or not authlib.verify_password(body.password, user["password_hash"]):

@@ -57,8 +57,8 @@ export default function Login() {
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             <div>
-              <label className="mv-label">Email</label>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required
+              <label className="mv-label">Email or Phone</label>
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="text" required
                      data-testid="login-email"
                      className="mt-1.5 w-full h-11 px-3.5 rounded-xl bg-mv-surface border border-mv-border outline-none focus:border-mv-primary transition-colors" />
             </div>
