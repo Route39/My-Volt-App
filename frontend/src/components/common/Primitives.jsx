@@ -58,8 +58,20 @@ const STATUS_MAP = {
   "Needs Check": ["chip-red", "Needs Check"],
 };
 
+export function KycStatusChip({ status, className = "" }) {
+  const map = {
+    "pending": ["chip-red", "KYC Pending (Driver)"],
+    "submitted": ["chip-amber", "KYC Pending Review (Admin)"],
+    "approved": ["chip-green", "KYC Approved"],
+    "rejected": ["chip-red", "KYC Rejected (Resubmit)"]
+  };
+  const [cls, label] = map[status] || map["pending"];
+  return <span className={`chip ${cls} ${className}`}>{label}</span>;
+}
+
 export function StatusChip({ status, label, className = "", testid }) {
-  const [cls, txt] = STATUS_MAP[status] || ["chip-neutral", label || status];
+  if (!status) return null;
+  const [cls, txt] = STATUS_MAP[status] || STATUS_MAP[status?.toLowerCase()] || ["chip-neutral", label || status];
   return (
     <span className={`chip ${cls} ${className}`} data-testid={testid}>
       <span className="w-1.5 h-1.5 rounded-full bg-current" />

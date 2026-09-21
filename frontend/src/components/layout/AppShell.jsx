@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Car, Users, KeyRound, Wrench, ClipboardList, MapPin,
   FileText, AlertTriangle, HeartPulse, BarChart3, Settings, Search, LogOut,
-  Zap, MoreHorizontal, ChevronDown, Bike,
+  Zap, MoreHorizontal, ChevronDown, Bike, FileBadge, Banknote, Package
 } from "lucide-react";
 import { useAuth, roleLabel } from "../../context/AuthContext";
 import { useApp, CITIES } from "../../context/AppContext";
@@ -17,29 +17,28 @@ import { Avatar, AvatarFallback } from "../ui/avatar";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, mod: "dashboard" },
-  { to: "/fleet", label: "Fleet", icon: Car, mod: "fleet" },
   { to: "/drivers", label: "Drivers", icon: Users, mod: "drivers" },
+  { to: "/fleet", label: "Vehicles", icon: Car, mod: "fleet" },
+  { to: "/packages", label: "Rental Packages", icon: Package, mod: "packages" },
   { to: "/rentals", label: "Rentals", icon: KeyRound, mod: "rentals" },
-  { to: "/rental-drivers", label: "Rental Drivers", icon: Bike, mod: "rentals" },
+  { to: "/daily-collection", label: "Daily Collection", icon: Banknote, mod: "rentals" },
+  { to: "/odometer", label: "Odometer Logs", icon: Car, mod: "drivers" },
+  { to: "/kyc", label: "KYC Approvals", icon: FileBadge, mod: "drivers" },
   { to: "/service-requests", label: "Service Requests", icon: Wrench, mod: "service" },
   { to: "/vehicle-service", label: "Vehicle Service", icon: ClipboardList, mod: "service" },
-  { to: "/locations", label: "Locations", icon: MapPin, mod: "locations" },
-  { to: "/documents", label: "Documents", icon: FileText, mod: "documents" },
   { to: "/incidents", label: "Incidents", icon: AlertTriangle, mod: "incidents" },
-  { to: "/vehicle-health", label: "Vehicle Health", icon: HeartPulse, mod: "health" },
-  { to: "/reports", label: "Reports", icon: BarChart3, mod: "reports" },
   { to: "/settings", label: "Settings", icon: Settings, mod: "settings" },
 ];
 
 const ROLE_MODULES = {
   admin: null,
-  city_manager: ["dashboard", "fleet", "drivers", "rentals", "service", "locations", "documents", "incidents", "health", "reports"],
+  city_manager: ["dashboard", "fleet", "drivers", "rentals", "service", "locations", "incidents", "packages"],
 };
 const navForRole = (role) => { const a = ROLE_MODULES[role]; return a ? NAV.filter((n) => a.includes(n.mod)) : NAV; };
 
 const MOBILE_NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, mod: "dashboard" },
-  { to: "/fleet", label: "Fleet", icon: Car, mod: "fleet" },
+  { to: "/fleet", label: "Vehicles", icon: Car, mod: "fleet" },
   { to: "/rentals", label: "Rentals", icon: KeyRound, mod: "rentals" },
 ];
 
@@ -143,7 +142,6 @@ export default function AppShell({ children }) {
           </button>
           <div className="ml-auto flex items-center gap-2.5">
             {<CitySelector />}
-            <QuickActionButton onClick={() => setQaOpen(true)} />
             <Notifications />
           </div>
         </header>

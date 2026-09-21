@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2 } from "lucide-react";
+import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { StatusChip, Skeleton } from "../components/common/Primitives";
+import { StatusChip, Skeleton, KycStatusChip } from "../components/common/Primitives";
 import { Field, PrimaryBtn, GhostBtn, TextInput } from "../components/common/Page";
 import { fmtDate } from "../lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
@@ -54,7 +54,7 @@ export default function DriverProfile() {
 
       <Tabs defaultValue="personal" className="mt-6">
         <TabsList className="bg-mv-surface border border-mv-border flex-wrap h-auto">
-          {["personal", "documents", "vehicle", "rental", "history", "incidents"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize">{t}</TabsTrigger>)}
+          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize">{t}</TabsTrigger>)}
         </TabsList>
 
         <TabsContent value="personal" className="mt-4">
@@ -62,6 +62,31 @@ export default function DriverProfile() {
             {[["Name", d.name], ["Phone", d.phone], ["Address", d.address], ["Emergency Contact", d.emergency_contact], ["Licence No.", d.license_number], ["City", d.city]].map(([k, v]) => (
               <div key={k} className="mv-card p-4"><div className="mv-label">{k}</div><div className="text-sm font-medium mt-1">{v || "—"}</div></div>
             ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="kyc" className="mt-4">
+          <div className="mv-card p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-slate-900 text-lg">KYC Status</h3>
+                <p className="text-sm text-slate-500">Current verification state of the driver's documents.</p>
+              </div>
+              <KycStatusChip status={d.kyc_status || "pending"} />
+            </div>
+            {d.kyc_status === "pending" || d.kyc_status === "submitted" ? (
+              <div className="flex gap-3">
+                <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/approve`); toast.success("KYC Approved"); load(); }} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors">Approve KYC</button>
+                <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/reject`); toast.success("KYC Rejected"); load(); }} className="px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold transition-colors">Reject KYC</button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <KycDocCard title="Driving License (Front)" url={d.kyc_documents?.dl_front} />
+            <KycDocCard title="Driving License (Back)" url={d.kyc_documents?.dl_back} />
+            <KycDocCard title="Aadhaar Card" url={d.kyc_documents?.aadhaar} />
+            <KycDocCard title="PAN Card" url={d.kyc_documents?.pan} />
           </div>
         </TabsContent>
 
@@ -187,17 +212,91 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
 
 function DeleteDriverDialog({ open, setOpen, driver, onDone }) {
   const [deleting, setDeleting] = useState(false);
-  const del = async () => {
+  const [unpaidError, setUnpaidError] = useState(null);
+
+  const doDelete = async (force = false) => {
     setDeleting(true);
-    try { await api.delete(`/drivers/${driver.id}`); toast.success("Driver deleted"); onDone(); } catch { toast.error("Failed to delete"); } finally { setDeleting(false); }
+    setUnpaidError(null);
+    try {
+      await api.delete(`/drivers/${driver.id}?force=${force}`);
+      toast.success("Driver deleted successfully");
+      onDone();
+    } catch (e) {
+      const status = e.response?.status;
+      const detail = e.response?.data?.detail || "Failed to delete";
+      if (status === 409) {
+        // Unpaid balance warning — show force delete option
+        setUnpaidError(detail);
+      } else {
+        toast.error(detail);
+        setOpen(false);
+      }
+    } finally {
+      setDeleting(false);
+    }
   };
+
+  const handleClose = () => { setUnpaidError(null); setOpen(false); };
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
-        <DialogHeader><DialogTitle className="font-display flex items-center gap-2 text-red-500"><AlertTriangle className="w-5 h-5" /> Delete Driver</DialogTitle></DialogHeader>
-        <p className="text-sm text-mv-muted">Are you sure you want to permanently delete driver <strong>{driver?.name}</strong>? This action cannot be undone.</p>
-        <div className="flex justify-end gap-2 pt-2"><GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn><PrimaryBtn onClick={del} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">Delete</PrimaryBtn></div>
+        <DialogHeader>
+          <DialogTitle className="font-display flex items-center gap-2 text-red-500">
+            <AlertTriangle className="w-5 h-5" /> Delete Driver
+          </DialogTitle>
+        </DialogHeader>
+
+        {!unpaidError ? (
+          <>
+            <p className="text-sm text-mv-muted">
+              Are you sure you want to permanently delete driver <strong>{driver?.name}</strong>? 
+              All their rentals, payments and records will be deleted. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <GhostBtn onClick={handleClose}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={() => doDelete(false)} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">
+                {deleting ? "Deleting..." : "Delete"}
+              </PrimaryBtn>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" /> Unpaid Balance Found
+              </p>
+              <p className="text-sm text-amber-700 mt-1">{unpaidError}</p>
+            </div>
+            <p className="text-sm text-mv-muted mt-1">
+              You can still force delete this driver. All their data including unpaid dues will be permanently removed.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <GhostBtn onClick={handleClose}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={() => doDelete(true)} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">
+                {deleting ? "Deleting..." : "Force Delete Anyway"}
+              </PrimaryBtn>
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+function KycDocCard({ title, url }) {
+  if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
+  const fullUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') + url : process.env.REACT_APP_BACKEND_URL + url;
+  return (
+    <div className="space-y-2">
+      <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>
+      <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-sm relative group cursor-pointer" onClick={() => window.open(fullUrl, '_blank')}>
+        <img src={fullUrl} alt={title} className="w-full h-full object-contain" />
+        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <Search className="w-8 h-8 text-white" />
+        </div>
+      </div>
+    </div>
   );
 }

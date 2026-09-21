@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, LayoutGrid, List, Plus, Car, MapPin, User, Battery } from "lucide-react";
+import { Search, LayoutGrid, List, Plus, Car, MapPin, User, Battery, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
@@ -52,7 +52,7 @@ export default function Fleet() {
 
   return (
     <div>
-      <PageHeader title="Fleet" subtitle="Vehicle control system for your fleet">
+      <PageHeader title="Vehicles" subtitle="Vehicle control system for your fleet">
         {canEdit && <PrimaryBtn onClick={() => setShowAdd(true)} data-testid="add-vehicle-btn"><Plus className="w-4 h-4" /> Add Vehicle</PrimaryBtn>}
       </PageHeader>
 
@@ -94,7 +94,7 @@ export default function Fleet() {
       )}
 
       {items && items.length === 0 && (
-        <EmptyState icon={Car} title="Your fleet is waiting. 🚘" subtitle="Add vehicles to your fleet to start assigning drivers and rentals."
+        <EmptyState icon={Car} title="No vehicles yet. 🚘" subtitle="Add vehicles to start assigning drivers and rentals."
           action={canEdit && <PrimaryBtn onClick={() => setShowAdd(true)}><Plus className="w-4 h-4" /> Add Vehicle</PrimaryBtn>} />
       )}
 
@@ -106,25 +106,26 @@ export default function Fleet() {
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-xl bg-mv-surface2 border border-mv-border flex items-center justify-center"><Car className="w-4.5 h-4.5 text-mv-primary" /></div>
-                  <span className="font-display font-bold text-lg">{v.vehicle_number}</span>
+                  <span className="font-display font-bold text-lg">{v.vehicle_number}{v.registration_number ? ` - ${v.registration_number}` : ""}</span>
                 </div>
                 <StatusChip status={v.status} />
               </div>
-              <div className="text-sm text-mv-muted mt-3 font-mono">{v.registration_number}</div>
+              
               <div className="flex items-center gap-4 mt-3 text-xs text-mv-muted">
-                <span className="flex items-center gap-1"><User className="w-3.5 h-3.5" /> {v.current_driver_name || "—"}</span>
+                <span className="flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 opacity-70" /> 
+                  {v.current_driver_name ? (
+                    <span className="font-medium text-mv-text">{v.current_driver_name}</span>
+                  ) : (
+                    <span className="opacity-70">Driver Not Assigned</span>
+                  )}
+                </span>
                 <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {v.city}</span>
               </div>
               {v.status === "rented" && v.rental_end && (
                 <div className="mt-2 text-xs"><span className="text-mv-dim">Rental ends </span><span className="text-amber-400 font-medium">{relativeEnd(v.rental_end)}</span></div>
               )}
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="text-mv-dim flex items-center gap-1"><Battery className="w-3.5 h-3.5" /> Battery</span>
-                  <span className="font-semibold">{v.battery_percent}%</span>
-                </div>
-                <BatteryBar percent={v.battery_percent} />
-              </div>
+
             </button>
           ))}
         </div>
@@ -135,19 +136,23 @@ export default function Fleet() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-mv-border text-left mv-label">
-                <th className="px-4 py-3 font-semibold">Vehicle</th><th className="px-4 py-3 font-semibold">Registration</th>
+                <th className="px-4 py-3 font-semibold">Vehicle</th>
                 <th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Driver</th>
-                <th className="px-4 py-3 font-semibold">City</th><th className="px-4 py-3 font-semibold">Battery</th>
+                <th className="px-4 py-3 font-semibold">City</th>
               </tr></thead>
               <tbody>
                 {items.map((v) => (
                   <tr key={v.id} onClick={() => nav(`/fleet/${v.id}`)} className="border-b border-mv-border/50 hover:bg-mv-elevated cursor-pointer transition-colors">
-                    <td className="px-4 py-3 font-semibold">{v.vehicle_number}</td>
-                    <td className="px-4 py-3 font-mono text-mv-muted">{v.registration_number}</td>
+                    <td className="px-4 py-3 font-semibold">{v.vehicle_number}{v.registration_number ? ` - ${v.registration_number}` : ""}</td>
                     <td className="px-4 py-3"><StatusChip status={v.status} /></td>
-                    <td className="px-4 py-3">{v.current_driver_name || "—"}</td>
+                    <td className="px-4 py-3">
+                      {v.current_driver_name ? (
+                        <span className="font-medium">{v.current_driver_name}</span>
+                      ) : (
+                        <span className="text-mv-muted text-xs">Driver Not Assigned</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">{v.city}</td>
-                    <td className="px-4 py-3 w-40"><div className="flex items-center gap-2"><BatteryBar percent={v.battery_percent} className="flex-1" /><span className="text-xs">{v.battery_percent}%</span></div></td>
                   </tr>
                 ))}
               </tbody>
@@ -170,34 +175,62 @@ export default function Fleet() {
 }
 
 function AddVehicleDialog({ open, setOpen, onDone }) {
-  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", model: "Route39 Volt X1", city: "Chennai", battery_percent: 100, battery_capacity: "30 kWh", charger: "3.3 kW Portable" });
+  const { city: appCity } = useApp();
+  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", city: appCity === "all" ? "Bangalore" : appCity });
   const [saving, setSaving] = useState(false);
+  const [fetchingId, setFetchingId] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const fetchNextNumber = useCallback(async (c) => {
+    setFetchingId(true);
+    try {
+      const { data } = await api.get("/vehicles/next-number", { params: { city: c } });
+      set("vehicle_number", data.vehicle_number);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFetchingId(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      fetchNextNumber(form.city);
+    }
+  }, [open, form.city, fetchNextNumber]);
+
   const save = async () => {
-    if (!form.vehicle_number || !form.registration_number) { toast.error("Vehicle number & registration required"); return; }
+    if (!form.vehicle_number || !form.registration_number) { toast.error("Vehicle Code and Registration Number required"); return; }
     setSaving(true);
     try { await api.post("/vehicles", form); toast.success("Vehicle added ✓"); onDone(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed to add"); } finally { setSaving(false); }
   };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
+      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-md">
         <DialogHeader><DialogTitle className="font-display">Add Vehicle</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-2 gap-4 pt-2">
-          <Field label="Vehicle Number"><TextInput data-testid="veh-number" value={form.vehicle_number} onChange={(e) => set("vehicle_number", e.target.value)} placeholder="EV-1050" /></Field>
-          <Field label="Registration"><TextInput data-testid="veh-reg" value={form.registration_number} onChange={(e) => set("registration_number", e.target.value)} placeholder="TN 07 AB 1234" /></Field>
-          <Field label="Model"><TextInput value={form.model} onChange={(e) => set("model", e.target.value)} /></Field>
+        <div className="space-y-4 pt-2">
           <Field label="City">
             <Select value={form.city} onValueChange={(v) => set("city", v)}>
               <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-mv-surface border-mv-border text-mv-text">{CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
-          <Field label="Battery Capacity"><TextInput value={form.battery_capacity} onChange={(e) => set("battery_capacity", e.target.value)} /></Field>
-          <Field label="Charger"><TextInput value={form.charger} onChange={(e) => set("charger", e.target.value)} /></Field>
+          <Field label="Registration Number (e.g. TN39 XX 1234)">
+            <TextInput data-testid="veh-reg-number" value={form.registration_number} onChange={(e) => set("registration_number", e.target.value)} className="bg-mv-surface text-mv-text uppercase" />
+          </Field>
+          <Field label="Vehicle Code / ID (Auto Generated)">
+            <div className="relative cursor-not-allowed opacity-80">
+              <TextInput data-testid="veh-number" value={form.vehicle_number} readOnly disabled className="bg-mv-surface2 text-mv-dim font-bold tracking-wider cursor-not-allowed" />
+              {fetchingId && <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-mv-dim" />}
+            </div>
+          </Field>
         </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <PrimaryBtn onClick={save} disabled={saving} data-testid="save-vehicle-btn">Add Vehicle</PrimaryBtn>
+        <div className="flex justify-end gap-2 pt-4">
+          <PrimaryBtn onClick={save} disabled={saving || fetchingId} data-testid="save-vehicle-btn" className="w-full">
+            {saving ? "Adding..." : "Add Vehicle"}
+          </PrimaryBtn>
         </div>
       </DialogContent>
     </Dialog>

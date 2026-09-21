@@ -51,6 +51,8 @@ export default function DriverLogin() {
             <div className="mt-1.5 relative">
               <Smartphone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input value={phone} onChange={(e) => setPhone(e.target.value)} disabled={step === 2} required data-testid="driver-login-phone"
+                type="tel"
+                inputMode="numeric"
                 placeholder="+91 90000 00000"
                 className="w-full h-12 pl-10 pr-3.5 rounded-2xl bg-white border border-slate-200 outline-none focus:border-emerald-500 transition-colors disabled:bg-slate-50 disabled:text-slate-500" />
             </div>
@@ -59,7 +61,7 @@ export default function DriverLogin() {
           {step === 2 && (
             <div>
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">OTP Code</label>
-              <input value={otp} onChange={(e) => setOtp(e.target.value)} type="text" required data-testid="driver-login-otp"
+              <input value={otp} onChange={(e) => setOtp(e.target.value)} type="tel" inputMode="numeric" required data-testid="driver-login-otp"
                 placeholder="6-digit OTP"
                 maxLength={6}
                 className="mt-1.5 w-full h-12 px-3.5 text-center tracking-[0.5em] text-lg rounded-2xl bg-white border border-slate-200 outline-none focus:border-emerald-500 transition-colors" />

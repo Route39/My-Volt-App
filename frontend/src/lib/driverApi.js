@@ -5,12 +5,8 @@ export const API = `${BACKEND_URL}/api`;
 
 // Dedicated instance for the MyEVRental driver app.
 // withCredentials:false so the MyVolt admin cookie is never sent — driver auth is bearer-only (ev_token).
-const dapi = axios.create({ baseURL: API, withCredentials: false });
+const dapi = axios.create({ baseURL: API, withCredentials: true });
 
-dapi.interceptors.request.use((config) => {
-  const t = localStorage.getItem("ev_token");
-  if (t) config.headers.Authorization = `Bearer ${t}`;
-  return config;
-});
+// Removed localStorage token logic; relying completely on HttpOnly cookies
 
 export default dapi;

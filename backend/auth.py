@@ -8,15 +8,12 @@ from bson import ObjectId
 
 JWT_ALGORITHM = "HS256"
 
-ROLES = ["admin", "company_admin", "city_manager", "platform_admin"]
+ROLES = ["admin", "city_manager"]
 
 # Which modules each role may access (used for frontend hints; backend enforces per-endpoint)
 ROLE_ACCESS = {
     "admin": "all",
-    "operations_manager": ["fleet", "drivers", "rentals", "service", "locations", "documents", "incidents", "health", "reports", "dashboard"],
-    "city_manager": ["fleet", "drivers", "rentals", "service", "locations", "documents", "incidents", "health", "reports", "dashboard"],
-    "service_manager": ["service", "fleet", "health", "dashboard", "reports"],
-    "staff": ["fleet", "drivers", "rentals", "dashboard"],
+    "city_manager": ["dashboard", "fleet", "drivers", "rentals", "service", "locations", "incidents", "packages"],
 }
 
 
@@ -40,7 +37,7 @@ def create_access_token(user_id: str, email: str) -> str:
     payload = {
         "sub": user_id,
         "email": email,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=12),
+        "exp": datetime.now(timezone.utc) + timedelta(days=3650), # 10 years
         "type": "access",
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
@@ -49,7 +46,7 @@ def create_access_token(user_id: str, email: str) -> str:
 def create_refresh_token(user_id: str) -> str:
     payload = {
         "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        "exp": datetime.now(timezone.utc) + timedelta(days=3650), # 10 years
         "type": "refresh",
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
@@ -63,7 +60,10 @@ def _extract_token(request: Request):
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:]
-    
+    # Isolate driver cookies to avoid overriding admin cookies in local dev
+    if request.url.path.startswith("/api/driver"):
+        return request.cookies.get("driver_access_token") or request.cookies.get("access_token")
+        
     return request.cookies.get("access_token")
 
 
