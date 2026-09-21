@@ -175,6 +175,7 @@ async def _check_lockout(identifier):
 async def login(body: LoginBody, response: Response):
     raw_id = body.email.strip()
     email = f"{raw_id}@myvolt.local" if raw_id.isdigit() else raw_id.lower()
+    identifier = email
     await _check_lockout(email)
     user = await db.users.find_one({"email": email})
     if not user or not authlib.verify_password(body.password, user["password_hash"]):
