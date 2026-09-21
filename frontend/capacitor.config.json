@@ -1,5 +1,9 @@
 {
   "appId": "com.route39.myvolt",
   "appName": "MyVoltApp",
-  "webDir": "build"
+  "webDir": "build",
+  "server": {
+    "url": "https://myspace.attendy.in",
+    "cleartext": true
+  }
 }
