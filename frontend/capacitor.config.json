@@ -3,7 +3,7 @@
   "appName": "MyVoltApp",
   "webDir": "build",
   "server": {
-    "url": "https://myspace.attendy.in",
+    "url": "https://myvolt.attendy.in/driver/login",
     "cleartext": true
   }
 }
