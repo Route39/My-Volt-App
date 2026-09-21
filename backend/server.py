@@ -954,11 +954,15 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             
             # Find the actual date this payment was physically processed (useful for late retroactive payments)
             paid_on_date = None
+            payment_method = None
+            transaction_id = None
             for p in day_payments:
                 if p.get("payment_status") == "paid" and p.get("type") != "refund":
                     created = p.get("created_at")
                     if created:
                         paid_on_date = created.split("T")[0]
+                        payment_method = p.get("payment_method")
+                        transaction_id = p.get("transaction_id")
                         break
             
             today_paid = sum(p.get("amount", 0) for p in day_payments if p.get("type") != "refund")
@@ -1005,6 +1009,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     "outstanding_amount": outstanding_amount if d == datetime.now(timezone.utc).date() else max(0, daily_rate - today_paid),
                     "daily_status": daily_status,
                     "paid_on": paid_on_date,
+                    "payment_method": payment_method,
+                    "transaction_id": transaction_id,
                     "deposit": deposit,
                     "deposit_paid": deposit_paid,
                     "deposit_status": deposit_status,

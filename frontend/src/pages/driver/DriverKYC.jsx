@@ -3,6 +3,7 @@ import { Camera, MapPin, CheckCircle, Loader2, AlertTriangle } from "lucide-reac
 import dapi from "../../lib/driverApi";
 import { useDriver } from "../../context/DriverAuthContext";
 import { useNavigate } from "react-router-dom";
+import { useNativeCamera } from "../../hooks/useNativeCamera";
 
 export default function DriverKYC() {
   const { data, refresh } = useDriver();
@@ -12,8 +13,8 @@ export default function DriverKYC() {
   const [error, setError] = useState("");
   const [address, setAddress] = useState("");
 
-  const handleFile = (key) => (e) => {
-    if (e.target.files?.[0]) setFiles(f => ({ ...f, [key]: e.target.files[0] }));
+  const handleFile = (key) => (file) => {
+    if (file) setFiles(f => ({ ...f, [key]: file }));
   };
 
   const submit = async (e) => {
@@ -131,9 +132,18 @@ export default function DriverKYC() {
 }
 
 function UploadBtn({ label, file, onChange }) {
+  const { captureImage, loading } = useNativeCamera();
+
   return (
-    <label className={`relative h-28 rounded-2xl border-2 overflow-hidden flex flex-col items-center justify-center cursor-pointer transition-colors ${file ? 'border-emerald-500 bg-emerald-50/50 border-solid' : 'border-slate-200 border-dashed hover:border-slate-300 bg-slate-50'}`}>
-      <input type="file" accept="image/*" onChange={onChange} className="hidden" />
+    <button 
+      type="button"
+      disabled={loading}
+      onClick={async () => {
+        const captured = await captureImage();
+        if (captured) onChange(captured);
+      }}
+      className={`relative h-28 rounded-2xl border-2 overflow-hidden flex flex-col items-center justify-center transition-colors w-full ${file ? 'border-emerald-500 bg-emerald-50/50 border-solid' : 'border-slate-200 border-dashed hover:border-slate-300 bg-slate-50'}`}
+    >
       {file ? (
         <div className="absolute inset-0 w-full h-full">
           <img src={URL.createObjectURL(file)} alt="Preview" className="w-full h-full object-cover opacity-80" />
@@ -144,10 +154,14 @@ function UploadBtn({ label, file, onChange }) {
         </div>
       ) : (
         <>
-          <Camera className="w-6 h-6 text-slate-400 mb-1.5" />
-          <span className="font-medium text-slate-600 text-xs">{label}</span>
+          {loading ? (
+            <Loader2 className="w-6 h-6 text-emerald-500 animate-spin mb-1.5" />
+          ) : (
+            <Camera className="w-6 h-6 text-slate-400 mb-1.5" />
+          )}
+          <span className="font-medium text-slate-600 text-xs">{loading ? "Opening..." : label}</span>
         </>
       )}
-    </label>
+    </button>
   );
 }

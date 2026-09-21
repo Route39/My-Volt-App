@@ -204,12 +204,19 @@ export default function DailyCollection() {
                     <td className="px-5 py-4 font-display font-bold text-amber-500/90">{inr(it.daily_rate)}</td>
                     <td className="px-5 py-4">
                       {it.daily_status === "paid" ? (
-                        <div className="inline-flex flex-col gap-0.5">
-                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-bold tracking-wide">
+                        <div className="flex flex-col gap-1 mt-1 mb-1">
+                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
+                            {it.payment_method === "razorpay" && <span className="ml-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] uppercase tracking-wider border border-indigo-100">Razorpay</span>}
+                            {it.payment_method === "cash" && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[9px] uppercase tracking-wider border border-amber-100">Cash</span>}
                           </div>
+                          {it.transaction_id && (
+                            <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
+                              TXN {it.transaction_id}
+                            </div>
+                          )}
                           {it.paid_on && it.paid_on !== it.date && (
-                            <span className="text-[10px] font-bold text-emerald-600/80 ml-1">(Paid on {it.paid_on})</span>
+                            <div className="text-[10px] font-semibold text-slate-400">Paid on {it.paid_on}</div>
                           )}
                         </div>
                       ) : (

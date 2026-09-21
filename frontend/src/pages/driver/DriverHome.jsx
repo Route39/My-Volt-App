@@ -6,6 +6,7 @@ import dapi from "../../lib/driverApi";
 import PayModal from "./PayModal";
 import BlockedScreen from "./BlockedScreen";
 import { useNavigate } from "react-router-dom";
+import { useNativeCamera } from "../../hooks/useNativeCamera";
 
 const STATUS_UI = {
   active: { dot: "bg-emerald-500", label: "Active", text: "text-emerald-600" },
@@ -20,6 +21,7 @@ const greeting = () => {
 
 export default function DriverHome() {
   const { data, refresh } = useDriver();
+  const { captureImage, loading: camLoading } = useNativeCamera();
   const nav = useNavigate();
   const [pay, setPay] = useState(null);
   const [hideApproved, setHideApproved] = useState(false);
@@ -209,8 +211,14 @@ export default function DriverHome() {
               </div>
             ) : (
               <form onSubmit={submitOdo} className="space-y-4">
-                <label className={`relative h-32 w-full rounded-2xl border-2 border-dashed flex flex-col items-center justify-center cursor-pointer overflow-hidden transition-colors ${odoImage ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300 bg-slate-50'}`}>
-                  <input type="file" accept="image/*" onChange={(e) => setOdoImage(e.target.files?.[0])} className="hidden" />
+                <button 
+                  type="button" 
+                  onClick={async () => {
+                    const file = await captureImage();
+                    if (file) setOdoImage(file);
+                  }}
+                  disabled={camLoading}
+                  className={`relative h-32 w-full rounded-2xl border-2 flex flex-col items-center justify-center overflow-hidden transition-colors ${odoImage ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300 bg-slate-50'}`}>
                   {odoImage ? (
                     <div className="absolute inset-0 w-full h-full">
                       <img src={URL.createObjectURL(odoImage)} alt="Preview" className="w-full h-full object-cover opacity-80" />
@@ -221,11 +229,15 @@ export default function DriverHome() {
                     </div>
                   ) : (
                     <>
-                      <Camera className="w-6 h-6 text-slate-400 mb-1.5" />
-                      <span className="font-medium text-slate-600 text-sm">Tap to Capture</span>
+                      {camLoading ? (
+                        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin mb-1.5" />
+                      ) : (
+                        <Camera className="w-6 h-6 text-slate-400 mb-1.5" />
+                      )}
+                      <span className="font-medium text-slate-600 text-sm">{camLoading ? "Opening..." : "Tap to Capture"}</span>
                     </>
                   )}
-                </label>
+                </button>
 
               <input 
                 type="number" 
@@ -442,8 +454,8 @@ export default function DriverHome() {
       {/* Spacer to prevent content from hiding behind sticky bar */}
       <div className="h-24"></div>
 
-      {/* Sticky Bottom Payment Bar - always shown when package assigned */}
-      {isFullyAssigned && (
+      {/* Sticky Bottom Payment Bar - only shown when there's an outstanding balance */}
+      {isFullyAssigned && (account?.outstanding_amount || 0) > 0 && (
         <div className="fixed bottom-16 left-1/2 -translate-x-1/2 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] p-4 flex items-center justify-between z-40 max-w-md w-full">
           <div>
             {(account?.outstanding_amount || 0) > 0 ? (
