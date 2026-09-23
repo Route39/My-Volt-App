@@ -4,6 +4,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+import asyncio
 import logging
 import re
 import json
@@ -623,8 +624,7 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
                 daily_rent = drv.get("package_rate", 0) if drv else 0
             
             # Freeze the snapshot into the DB so old logs don't drift on package updates
-            import asyncio
-            asyncio.create_task(db.driver_odometer_logs.update_one(
+            await db.driver_odometer_logs.update_one(
                 {"_id": ObjectId(log["_id"])},
                 {"$set": {
                     "snapshot_daily_rent": daily_rent,
@@ -633,7 +633,7 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
                     "snapshot_overage_per_km": overage_per_km,
                     "snapshot_monthly_limit": monthly_limit
                 }}
-            ))
+            )
         
         driven_today = log.get("driven_today", 0) or 0
         extra_km = max(0, driven_today - daily_limit) if daily_limit > 0 else 0
