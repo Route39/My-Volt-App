@@ -270,7 +270,7 @@ export default function OdometerApprovals() {
       {imgModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-5 bg-slate-900/80 backdrop-blur-sm" onClick={() => setImgModal(null)}>
           <img
-            src={`http://localhost:8000${imgModal}`}
+            src={(process.env.REACT_APP_BACKEND_URL || "") + imgModal}
             alt="Odometer"
             className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl"
             onClick={e => e.stopPropagation()}

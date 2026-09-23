@@ -156,7 +156,7 @@ function AssignVehicleDialog({ open, setOpen, driver, onDone }) {
         <Field label="Available Vehicle">
           <Select value={vid} onValueChange={setVid}>
             <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="assign-vehicle-select"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
-            <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent>
+            <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.vehicle_number} · {v.city}{v.registration_number ? ` · ${v.registration_number}` : ''}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
         <div className="flex justify-end pt-1"><PrimaryBtn onClick={save} data-testid="save-assign-btn">Assign</PrimaryBtn></div>
@@ -287,7 +287,7 @@ function DeleteDriverDialog({ open, setOpen, driver, onDone }) {
 
 function KycDocCard({ title, url }) {
   if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
-  const fullUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') + url : process.env.REACT_APP_BACKEND_URL + url;
+  const fullUrl = (process.env.REACT_APP_BACKEND_URL || "") + url;
   return (
     <div className="space-y-2">
       <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>

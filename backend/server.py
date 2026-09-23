@@ -243,7 +243,7 @@ async def refresh(request: Request, response: Response):
 @api.get("/users")
 async def list_users(request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     users = await db.users.find({"organization_id": user["organization_id"]}).to_list(500)
     return [ser(u) for u in users]
 
@@ -341,7 +341,7 @@ async def set_package_password(body: PackagePasswordBody, request: Request):
 @api.post("/settings/package-password/verify")
 async def verify_package_password(body: PackagePasswordBody, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     org = await db.organizations.find_one({"org_id": user["organization_id"]})
     stored = org.get("package_password") if org else None
     if not stored:
@@ -447,7 +447,7 @@ async def get_vehicle(vid: str, request: Request):
 @api.post("/vehicles")
 async def create_vehicle(body: VehicleBody, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
     doc["organization_id"] = user["organization_id"]
     doc["created_at"] = now_iso()
@@ -459,7 +459,7 @@ async def create_vehicle(body: VehicleBody, request: Request):
 @api.put("/vehicles/{vid}")
 async def update_vehicle(vid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     for k in ("id", "_id", "assignments", "services", "documents", "incidents", "service_requests", "current_rental"):
         body.pop(k, None)
     await db.vehicles.update_one(org_filter(user, {"_id": oid(vid)}), {"$set": body})
@@ -494,7 +494,7 @@ async def delete_vehicle(vid: str, request: Request):
 @api.post("/vehicles/{vid}/transfer")
 async def transfer_vehicle(vid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     v = await db.vehicles.find_one(org_filter(user, {"_id": oid(vid)}))
     if not v:
         raise HTTPException(status_code=404, detail="Vehicle not found")
@@ -603,15 +603,23 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
         now_dt = datetime.now()
         days_in_month = calendar.monthrange(now_dt.year, now_dt.month)[1]
         
-        if plan:
-            monthly_limit = plan.get("monthly_km_limit", 0)
-            daily_limit = round(monthly_limit / days_in_month) if days_in_month else 0
-            overage_per_km = plan.get("overage_per_km", 0.0)
-            daily_rent = plan.get("amount", drv.get("package_rate", 0) if drv else 0)
+        if "snapshot_daily_rent" in log:
+            pkg_name = log.get("snapshot_package_name", pkg_name)
+            log["package_name"] = pkg_name
+            log["limit_kms"] = log.get("snapshot_monthly_limit", log["limit_kms"])
+            daily_limit = log.get("snapshot_daily_limit", 0)
+            overage_per_km = log.get("snapshot_overage_per_km", 0.0)
+            daily_rent = log.get("snapshot_daily_rent", 0)
         else:
-            daily_limit = 0
-            overage_per_km = 0.0
-            daily_rent = drv.get("package_rate", 0) if drv else 0
+            if plan:
+                monthly_limit = plan.get("monthly_km_limit", 0)
+                daily_limit = round(monthly_limit / days_in_month) if days_in_month else 0
+                overage_per_km = plan.get("overage_per_km", 0.0)
+                daily_rent = plan.get("amount", drv.get("package_rate", 0) if drv else 0)
+            else:
+                daily_limit = 0
+                overage_per_km = 0.0
+                daily_rent = drv.get("package_rate", 0) if drv else 0
         
         driven_today = log.get("driven_today", 0) or 0
         extra_km = max(0, driven_today - daily_limit) if daily_limit > 0 else 0
@@ -693,7 +701,7 @@ async def get_driver(did: str, request: Request):
 @api.delete("/drivers/{did}")
 async def delete_driver(did: str, request: Request, force: bool = False):
     user = await get_user(request)
-    require_role(user, ["admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     
     # Find driver by org only (not city-restricted) so any city manager in the org can delete
     drv = await db.drivers.find_one({"_id": oid(did), "organization_id": user["organization_id"]})
@@ -743,7 +751,7 @@ async def delete_driver(did: str, request: Request, force: bool = False):
 @api.post("/drivers")
 async def create_driver(body: DriverBody, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
     doc["organization_id"] = user.get("organization_id", "route39-org")
     doc["created_at"] = now_iso()
@@ -755,7 +763,7 @@ async def create_driver(body: DriverBody, request: Request):
 @api.put("/drivers/{did}")
 async def update_driver(did: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     for k in ("id", "_id", "assignments", "rentals", "incidents", "documents"):
         body.pop(k, None)
     res = await db.drivers.update_one({"_id": oid(did), "organization_id": user["organization_id"]}, {"$set": body})
@@ -767,7 +775,7 @@ async def update_driver(did: str, body: dict, request: Request):
 @api.post("/drivers/{did}/assign-vehicle")
 async def assign_vehicle(did: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     driver = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
     vehicle = await db.vehicles.find_one(org_filter(user, {"_id": oid(body["vehicle_id"])}))
     if not driver or not vehicle:
@@ -813,7 +821,7 @@ async def list_plans(request: Request):
 @api.post("/rental-plans")
 async def create_plan(body: PlanBody, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
     doc["organization_id"] = user["organization_id"]
     doc["created_at"] = now_iso()
@@ -824,7 +832,7 @@ async def create_plan(body: PlanBody, request: Request):
 @api.put("/rental-plans/{pid}")
 async def update_plan(pid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body.pop("id", None); body.pop("_id", None)
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
     return ser(await db.rental_plans.find_one({"_id": oid(pid)}))
@@ -973,58 +981,64 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             
             today_paid = sum(p.get("amount", 0) for p in day_payments if p.get("type") != "refund")
             
-            daily_rate = float(r.get("daily_rate", 0))
-            if daily_rate == 0 and r.get("package_name"):
-                plan = await db.rental_plans.find_one({
-                    "name": {"$regex": f"^{r['package_name']}$", "$options": "i"}, 
-                    "city": {"$regex": f"^{r.get('city', '')}$", "$options": "i"},
-                    "organization_id": user["organization_id"]
-                })
-                if plan:
-                    daily_rate = float(plan.get("amount", 0))
-            
-            # If viewing today, show actual outstanding. If viewing past, show historical daily rate + overages?
-            # Keeping it simple: use current outstanding if > 0 and it's today.
-            if outstanding_amount > 0 and d == datetime.now(timezone.utc).date():
-                daily_rate = outstanding_amount
-                
-            daily_status = "paid" if today_paid >= daily_rate else ("partial" if today_paid > 0 else "pending")
-            
-            # Odometer for THIS date
-            odo_log = await db.driver_odometer_logs.find_one({
+            odo_logs = await db.driver_odometer_logs.find({
                 "driver_id": r["driver_id"],
                 "date": d_str
-            })
+            }).to_list(100)
             
-            start_meter = odo_log.get("start_reading", 0) if odo_log else 0
-            end_meter = odo_log.get("end_reading", 0) if odo_log else 0
-            total_km = odo_log.get("driven_today", 0) if odo_log else 0
-            
-            # Only append if they actually drove or paid that day, or if it's today, OR if they owe rent for this day!
-            if d == datetime.now(timezone.utc).date() or odo_log or today_paid > 0 or d_str in acct.get("unpaid_dates", []):
-                out.append({
-                    "id": f"{rid}_{d_str}",
-                    "driver_name": r.get("driver_name", "Unknown"),
-                    "driver_avatar": driver_avatar,
-                    "vehicle_code": r.get("vehicle_number", r.get("vehicle_reg", "N/A")),
-                    "vehicle_reg": vehicle_reg_number,
-                    "city": r.get("city", "Unknown"),
-                    "status": r.get("status", "pending_payment"),
-                    "daily_rate": daily_rate,
-                    "today_paid": today_paid,
-                    "outstanding_amount": outstanding_amount if d == datetime.now(timezone.utc).date() else max(0, daily_rate - today_paid),
-                    "daily_status": daily_status,
-                    "paid_on": paid_on_date,
-                    "payment_method": payment_method,
-                    "transaction_id": transaction_id,
-                    "deposit": deposit,
-                    "deposit_paid": deposit_paid,
-                    "deposit_status": deposit_status,
-                    "start_meter": start_meter if start_meter else None,
-                    "end_meter": end_meter if end_meter else None,
-                    "total_km": total_km if total_km else None,
-                    "date": d_str,
-                })
+            if not odo_logs:
+                odo_logs = [None]
+                
+            for idx, odo_log in enumerate(odo_logs):
+                base_daily_rate = float(r.get("daily_rate", 0))
+                if odo_log and "snapshot_daily_rent" in odo_log:
+                    base_daily_rate = float(odo_log["snapshot_daily_rent"])
+                elif base_daily_rate == 0 and r.get("package_name"):
+                    plan = await db.rental_plans.find_one({
+                        "name": {"$regex": f"^{r['package_name']}$", "$options": "i"}, 
+                        "city": {"$regex": f"^{r.get('city', '')}$", "$options": "i"},
+                        "organization_id": user["organization_id"]
+                    })
+                    if plan:
+                        base_daily_rate = float(plan.get("amount", 0))
+                
+                # If viewing today, show actual outstanding for the first row, otherwise just show the trip rate
+                daily_rate = base_daily_rate
+                if outstanding_amount > 0 and d == datetime.now(timezone.utc).date() and idx == 0:
+                    daily_rate = outstanding_amount
+                    
+                # Distribute the today_paid across rows roughly (if there are multiple)
+                row_paid = today_paid if idx == 0 else 0
+                daily_status = "paid" if row_paid >= daily_rate else ("partial" if row_paid > 0 else "pending")
+                
+                start_meter = odo_log.get("start_reading", 0) if odo_log else 0
+                end_meter = odo_log.get("end_reading", 0) if odo_log else 0
+                total_km = odo_log.get("driven_today", 0) if odo_log else 0
+                
+                if d == datetime.now(timezone.utc).date() or odo_log or row_paid > 0 or d_str in acct.get("unpaid_dates", []):
+                    out.append({
+                        "id": f"{rid}_{d_str}_{idx}",
+                        "driver_name": r.get("driver_name", "Unknown"),
+                        "driver_avatar": driver_avatar,
+                        "vehicle_code": r.get("vehicle_number", r.get("vehicle_reg", "N/A")),
+                        "vehicle_reg": vehicle_reg_number,
+                        "city": r.get("city", "Unknown"),
+                        "status": r.get("status", "pending_payment"),
+                        "daily_rate": daily_rate,
+                        "today_paid": row_paid,
+                        "outstanding_amount": outstanding_amount if (d == datetime.now(timezone.utc).date() and idx == 0) else max(0, daily_rate - row_paid),
+                        "daily_status": daily_status,
+                        "paid_on": paid_on_date,
+                        "payment_method": payment_method,
+                        "transaction_id": transaction_id,
+                        "deposit": deposit,
+                        "deposit_paid": deposit_paid,
+                        "deposit_status": deposit_status,
+                        "start_meter": start_meter if start_meter else None,
+                        "end_meter": end_meter if end_meter else None,
+                        "total_km": total_km if total_km else None,
+                        "date": d_str,
+                    })
 
         
     return out
@@ -1051,7 +1065,7 @@ async def _next_rental_code(org_id):
 @api.post("/rentals")
 async def create_rental(body: RentalBody, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     driver = await db.drivers.find_one(org_filter(user, {"_id": oid(body.driver_id)}))
     vehicle = await db.vehicles.find_one(org_filter(user, {"_id": oid(body.vehicle_id)}))
     if not (driver and vehicle):
@@ -1088,7 +1102,7 @@ async def create_rental(body: RentalBody, request: Request):
 @api.post("/rentals/{rid}/payments")
 async def add_payment(rid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     r = await db.rentals.find_one(org_filter(user, {"_id": oid(rid)}))
     if not r:
         raise HTTPException(status_code=404, detail="Rental not found")
@@ -1127,7 +1141,7 @@ async def add_payment(rid: str, body: dict, request: Request):
 @api.post("/rentals/{rid}/activate")
 async def activate_rental(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     r = await db.rentals.find_one(org_filter(user, {"_id": oid(rid)}))
     if not r:
         raise HTTPException(status_code=404, detail="Rental not found")
@@ -1153,7 +1167,7 @@ async def activate_rental(rid: str, request: Request):
 @api.post("/rentals/{rid}/renew")
 async def renew_rental(rid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     r = await db.rentals.find_one(org_filter(user, {"_id": oid(rid)}))
     if not r:
         raise HTTPException(status_code=404, detail="Rental not found")
@@ -1185,7 +1199,7 @@ async def renew_rental(rid: str, body: dict, request: Request):
 async def suspend_rental(rid: str, request: Request, body: dict = None):
     user = await get_user(request)
     body = body or {}
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     r = await db.rentals.find_one(org_filter(user, {"_id": oid(rid)}))
     if not r:
         raise HTTPException(status_code=404, detail="Rental not found")
@@ -1198,7 +1212,7 @@ async def suspend_rental(rid: str, request: Request, body: dict = None):
 @api.post("/rentals/{rid}/close")
 async def close_rental(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     r = await db.rentals.find_one(org_filter(user, {"_id": oid(rid)}))
     if not r:
         raise HTTPException(status_code=404, detail="Rental not found")
@@ -1224,7 +1238,7 @@ async def list_handovers(request: Request, vehicle_id: Optional[str] = None, ren
 @api.post("/handovers")
 async def create_handover(body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body["organization_id"] = user["organization_id"]
     body["created_at"] = now_iso()
     body["type"] = "handover"
@@ -1245,7 +1259,7 @@ async def list_returns(request: Request, vehicle_id: Optional[str] = None, renta
 @api.post("/returns")
 async def create_return(body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body["organization_id"] = user["organization_id"]
     body["created_at"] = now_iso()
     body["type"] = "return"
@@ -1328,7 +1342,7 @@ async def list_services(request: Request, vehicle_id: Optional[str] = None, city
 @api.post("/vehicle-services")
 async def create_service(body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body["organization_id"] = user["organization_id"]
     body["created_at"] = now_iso()
     res = await db.vehicle_services.insert_one(body)
@@ -1363,7 +1377,7 @@ async def list_locations(request: Request, city: Optional[str] = None):
 @api.post("/locations")
 async def create_location(body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body["organization_id"] = user["organization_id"]
     body["created_at"] = now_iso()
     res = await db.locations.insert_one(body)
@@ -2185,6 +2199,13 @@ async def _driver_payload(user):
             out["driver"]["overage_per_km"] = 0.0
             
         start_str = rental.get("start", rental.get("start_date", ""))
+        
+        # Override with today's snapshot rate if they already took a trip today
+        today_str = _today_ist().strftime("%Y-%m-%d")
+        today_log = await db.driver_odometer_logs.find_one({"driver_id": did, "date": today_str})
+        if today_log and "snapshot_daily_rent" in today_log:
+            rental["daily_rate"] = float(today_log["snapshot_daily_rent"])
+            
         out["rental"] = {"id": str(rental["_id"]), "package_id": rental.get("package_id"),
                          "package_name": rental["package_name"], "daily_rate": rental["daily_rate"],
                          "start_date": start_str, "vehicle_reg": rental.get("vehicle_number", "")}
@@ -2384,7 +2405,7 @@ class AdminOdometerBody(BaseModel):
 @api.post("/admin/drivers/{driver_id}/odometer")
 async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     
     driver = await db.drivers.find_one(org_filter(user, {"_id": oid(driver_id)}))
     if not driver:
@@ -2510,6 +2531,17 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             }
         )
         
+        await db.driver_odometer_logs.update_one(
+            {"_id": ObjectId(active_trip_id)},
+            {"$set": {
+                "snapshot_daily_rent": daily_rate,
+                "snapshot_package_name": plan['name'] if plan else (rental.get('package_name', '') if rental else ''),
+                "snapshot_daily_limit": daily_limit_km,
+                "snapshot_overage_per_km": overage_per_km,
+                "snapshot_monthly_limit": monthly_limit_km if plan else 0
+            }}
+        )
+
         msg = f"Trip ended by admin! Driven: {driven} km."
         if overage_km > 0:
             msg += f" (Overage: {overage_km} km / ₹{overage_charge})"
@@ -2666,6 +2698,17 @@ async def submit_odometer(
             }
         )
         
+        
+        await db.driver_odometer_logs.update_one(
+            {"_id": ObjectId(active_trip_id)},
+            {"$set": {
+                "snapshot_daily_rent": daily_rate,
+                "snapshot_package_name": plan['name'] if plan else (rental.get('package_name', '') if rental else ''),
+                "snapshot_daily_limit": daily_limit_km,
+                "snapshot_overage_per_km": overage_per_km,
+                "snapshot_monthly_limit": monthly_limit_km if plan else 0
+            }}
+        )
         
         msg = f"Trip ended! Driven: {driven} km."
         if overage_km > 0:
@@ -2948,7 +2991,7 @@ async def create_rental_driver(body: NewRentalDriver, request: Request):
 @api.put("/rentals/{rid}")
 async def update_rental(rid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body.pop("_id", None); body.pop("id", None)
     await db.rentals.update_one(org_filter(user, {"_id": oid(rid)}), {"$set": body})
     return {"ok": True}
@@ -2956,7 +2999,7 @@ async def update_rental(rid: str, body: dict, request: Request):
 @api.delete("/rentals/{rid}")
 async def delete_rental(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     res = await db.rentals.delete_one(org_filter(user, {"_id": oid(rid)}))
     if res.deleted_count == 0: raise HTTPException(404)
     return {"ok": True}
@@ -2964,7 +3007,7 @@ async def delete_rental(rid: str, request: Request):
 @api.delete("/service-requests/{sid}")
 async def delete_service_request(sid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     res = await db.service_requests.delete_one(org_filter(user, {"_id": oid(sid)}))
     if res.deleted_count == 0: raise HTTPException(404)
     return {"ok": True}
@@ -2972,7 +3015,7 @@ async def delete_service_request(sid: str, request: Request):
 @api.put("/vehicle-services/{vsid}")
 async def update_vehicle_service(vsid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body.pop("_id", None); body.pop("id", None)
     await db.vehicle_services.update_one(org_filter(user, {"_id": oid(vsid)}), {"$set": body})
     return {"ok": True}
@@ -2980,7 +3023,7 @@ async def update_vehicle_service(vsid: str, body: dict, request: Request):
 @api.delete("/vehicle-services/{vsid}")
 async def delete_vehicle_service(vsid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     res = await db.vehicle_services.delete_one(org_filter(user, {"_id": oid(vsid)}))
     if res.deleted_count == 0: raise HTTPException(404)
     return {"ok": True}
@@ -2988,7 +3031,7 @@ async def delete_vehicle_service(vsid: str, request: Request):
 @api.put("/locations/{lid}")
 async def update_location(lid: str, body: dict, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body.pop("_id", None); body.pop("id", None)
     await db.locations.update_one(org_filter(user, {"_id": oid(lid)}), {"$set": body})
     return {"ok": True}
@@ -2996,7 +3039,7 @@ async def update_location(lid: str, body: dict, request: Request):
 @api.delete("/locations/{lid}")
 async def delete_location(lid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["city_manager", "staff"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     res = await db.locations.delete_one(org_filter(user, {"_id": oid(lid)}))
     if res.deleted_count == 0: raise HTTPException(404)
     return {"ok": True}

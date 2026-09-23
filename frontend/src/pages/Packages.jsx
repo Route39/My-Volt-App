@@ -48,14 +48,11 @@ export default function Packages() {
 
   if (view === "form") {
     return (
-      <PackageLock>
         <PackageForm editData={editData} onBack={() => setView("list")} onSaved={() => setView("list")} />
-      </PackageLock>
     );
   }
 
   return (
-    <PackageLock>
     <div className="max-w-7xl mx-auto space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -140,7 +137,6 @@ export default function Packages() {
         </div>
       )}
     </div>
-    </PackageLock>
   );
 }
 

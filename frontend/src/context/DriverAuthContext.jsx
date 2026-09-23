@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { Preferences } from '@capacitor/preferences';
 import dapi from "../lib/driverApi";
 
 const Ctx = createContext(null);
@@ -27,7 +28,7 @@ export function DriverAuthProvider({ children }) {
   const login = async (phone, otp) => {
     const { data } = await dapi.post("/driver/auth/login", { phone, otp });
     if (data.token) {
-      localStorage.setItem("driver_token", data.token);
+      await Preferences.set({ key: 'driver_token', value: data.token });
     }
     setAuthed(true);
     await refresh();
@@ -36,7 +37,7 @@ export function DriverAuthProvider({ children }) {
 
   const logout = async () => {
     try { await dapi.post("/driver/auth/logout"); } catch {}
-    localStorage.removeItem("driver_token");
+    await Preferences.remove({ key: 'driver_token' });
     setAuthed(false); setData(null);
   };
 

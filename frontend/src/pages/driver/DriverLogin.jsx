@@ -3,14 +3,24 @@ import { useNavigate } from "react-router-dom";
 import { Zap, Loader2, Smartphone } from "lucide-react";
 import { useDriver } from "../../context/DriverAuthContext";
 
+import { useEffect } from "react";
+
 export default function DriverLogin() {
-  const { login, requestOtp } = useDriver();
+  const { login, requestOtp, authed, loading: contextLoading } = useDriver();
   const nav = useNavigate();
   const [step, setStep] = useState(1);
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (authed) nav("/driver", { replace: true });
+  }, [authed, nav]);
+
+  if (contextLoading || authed) {
+    return <div className="min-h-screen flex items-center justify-center bg-white"><Loader2 className="w-6 h-6 animate-spin text-emerald-500" /></div>;
+  }
 
   const handleRequestOtp = async (e) => {
     e.preventDefault();

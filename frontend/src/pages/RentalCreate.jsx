@@ -134,7 +134,7 @@ export default function RentalCreate() {
         const payload = {
           driver_id: did,
           vehicle_id: drvVehicles[did],
-          start: new Date(dates.start).toISOString(),
+          start: new Date(dates.start + "T00:00:00").toISOString(),
           deposit: pkg?.deposit || 5000,
           package_name: pkg?.name,
           plan_id: pkg?.id,
@@ -143,7 +143,7 @@ export default function RentalCreate() {
         };
         
         if (dates.end) {
-            payload.end = new Date(dates.end).toISOString();
+            payload.end = new Date(dates.end + "T00:00:00").toISOString();
         }
 
         const { data } = await api.post("/rentals", payload);
