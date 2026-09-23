@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 import { Image as ImageIcon, Search } from "lucide-react";
 import { inr } from "../lib/format";
+import imgUrl from "../lib/imgUrl";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { useApp, CITIES } from "../context/AppContext";
 
@@ -242,7 +243,7 @@ export default function OdometerApprovals() {
                     <td className="px-3 py-4 text-center whitespace-nowrap">
                       <div className="flex gap-2 justify-center">
                         <button
-                          onClick={() => setImgModal(log.start_image_url || log.image_url)}
+                          onClick={() => setImgModal(imgUrl(log.start_image_url || log.image_url))}
                           className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg inline-flex"
                           title="View Start Photo"
                         >
@@ -250,7 +251,7 @@ export default function OdometerApprovals() {
                         </button>
                         {log.end_image_url && (
                           <button
-                            onClick={() => setImgModal(log.end_image_url)}
+                            onClick={() => setImgModal(imgUrl(log.end_image_url))}
                             className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg inline-flex"
                             title="View End Photo"
                           >
@@ -270,7 +271,7 @@ export default function OdometerApprovals() {
       {imgModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-5 bg-slate-900/80 backdrop-blur-sm" onClick={() => setImgModal(null)}>
           <img
-            src={imgModal.startsWith("data:") || imgModal.startsWith("http") ? imgModal : (process.env.REACT_APP_BACKEND_URL || "") + imgModal}
+            src={imgModal}
             alt="Odometer"
             className="max-w-full max-h-[90vh] rounded-2xl shadow-2xl"
             onClick={e => e.stopPropagation()}

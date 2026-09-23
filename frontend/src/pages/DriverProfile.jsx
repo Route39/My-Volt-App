@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { StatusChip, Skeleton, KycStatusChip } from "../components/common/Primitives";
 import { Field, PrimaryBtn, GhostBtn, TextInput } from "../components/common/Page";
 import { fmtDate } from "../lib/format";
+import imgUrl from "../lib/imgUrl";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -287,7 +288,7 @@ function DeleteDriverDialog({ open, setOpen, driver, onDone }) {
 
 function KycDocCard({ title, url }) {
   if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
-  const fullUrl = url.startsWith("data:") || url.startsWith("http") ? url : (process.env.REACT_APP_BACKEND_URL || "") + url;
+  const fullUrl = imgUrl(url);
   return (
     <div className="space-y-2">
       <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>

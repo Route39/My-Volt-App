@@ -4,6 +4,7 @@ import { Check, X, MapPin, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useApp, CITIES } from "../context/AppContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import imgUrl from "../lib/imgUrl";
 
 export default function KycApprovals() {
   const { city: gCity } = useApp();
@@ -159,7 +160,7 @@ export default function KycApprovals() {
 
 function DocCard({ title, url }) {
   if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
-  const fullUrl = url.startsWith("data:") || url.startsWith("http") ? url : (process.env.REACT_APP_BACKEND_URL || "") + url;
+  const fullUrl = imgUrl(url);
   return (
     <div className="space-y-2">
       <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>
