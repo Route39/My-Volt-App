@@ -13,8 +13,14 @@ export function DriverAuthProvider({ children }) {
     try {
       const { data } = await dapi.get("/driver/me");
       setData(data); setAuthed(true);
-    } catch {
-      setAuthed(false); setData(null);
+    } catch (err) {
+      if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+        setAuthed(false); setData(null);
+      } else {
+        const { value } = await Preferences.get({ key: "driver_token" });
+        if (value) setAuthed(true); // Maintain auth on offline/network errors
+        else setAuthed(false);
+      }
     } finally { setLoading(false); }
   }, []);
 

@@ -617,9 +617,23 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
                 overage_per_km = plan.get("overage_per_km", 0.0)
                 daily_rent = plan.get("amount", drv.get("package_rate", 0) if drv else 0)
             else:
+                monthly_limit = 0
                 daily_limit = 0
                 overage_per_km = 0.0
                 daily_rent = drv.get("package_rate", 0) if drv else 0
+            
+            # Freeze the snapshot into the DB so old logs don't drift on package updates
+            import asyncio
+            asyncio.create_task(db.driver_odometer_logs.update_one(
+                {"_id": ObjectId(log["_id"])},
+                {"$set": {
+                    "snapshot_daily_rent": daily_rent,
+                    "snapshot_package_name": pkg_name,
+                    "snapshot_daily_limit": daily_limit,
+                    "snapshot_overage_per_km": overage_per_km,
+                    "snapshot_monthly_limit": monthly_limit
+                }}
+            ))
         
         driven_today = log.get("driven_today", 0) or 0
         extra_km = max(0, driven_today - daily_limit) if daily_limit > 0 else 0
@@ -676,10 +690,14 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
         ]
     docs = await db.drivers.find(filt).sort("name", 1).to_list(1000)
     for d in docs:
-        if d.get("current_vehicle_id"):
-            v = await db.vehicles.find_one({"_id": oid(d["current_vehicle_id"])})
-            if v:
-                d["current_vehicle_reg"] = v.get("registration_number")
+        cv_id = d.get("current_vehicle_id")
+        if cv_id:
+            try:
+                v = await db.vehicles.find_one({"_id": oid(cv_id)})
+                if v:
+                    d["current_vehicle_reg"] = v.get("registration_number")
+            except Exception:
+                pass
     return [ser(d) for d in docs]
 
 
@@ -979,7 +997,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         transaction_id = p.get("transaction_id")
                         break
             
-            today_paid = sum(p.get("amount", 0) for p in day_payments if p.get("type") != "refund")
+            today_paid = sum(p.get("amount", 0) for p in day_payments if p.get("type") != "refund" and p.get("payment_status") == "paid")
             
             odo_logs = await db.driver_odometer_logs.find({
                 "driver_id": r["driver_id"],
@@ -1002,13 +1020,11 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     if plan:
                         base_daily_rate = float(plan.get("amount", 0))
                 
-                # If viewing today, show actual outstanding for the first row, otherwise just show the trip rate
                 daily_rate = base_daily_rate
-                if outstanding_amount > 0 and d == datetime.now(timezone.utc).date() and idx == 0:
-                    daily_rate = outstanding_amount
-                    
+                
                 # Distribute the today_paid across rows roughly (if there are multiple)
-                row_paid = today_paid if idx == 0 else 0
+                row_paid = min(today_paid, daily_rate)
+                today_paid = max(0, today_paid - row_paid)
                 daily_status = "paid" if row_paid >= daily_rate else ("partial" if row_paid > 0 else "pending")
                 
                 start_meter = odo_log.get("start_reading", 0) if odo_log else 0
@@ -2728,7 +2744,11 @@ async def driver_packages(request: Request):
 async def driver_payment_history(request: Request):
     user = await get_user(request)
     require_driver(user)
-    recs = await db.rental_payments.find({"organization_id": user["organization_id"], "driver_id": user["id"]}).sort("created_at", -1).to_list(500)
+    recs = await db.rental_payments.find({
+        "organization_id": user["organization_id"], 
+        "driver_id": user["id"],
+        "payment_status": {"$ne": "pending"}
+    }).sort("created_at", -1).to_list(500)
     return [ser(r) for r in recs]
 
 

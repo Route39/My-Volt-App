@@ -257,7 +257,7 @@ export default function RentalCreate() {
                           <SelectValue placeholder="Select Vehicle" />
                         </SelectTrigger>
                         <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-60">
-                          {assigned && <SelectItem value={assigned}>{getVehicle(assigned)?.vehicle_number}{getVehicle(assigned)?.registration_number ? ` - ${getVehicle(assigned)?.registration_number}` : ""} (Currently Selected)</SelectItem>}
+                          {assigned && !avail.some(v => v.id === assigned) && <SelectItem value={assigned}>{getVehicle(assigned)?.vehicle_number}{getVehicle(assigned)?.registration_number ? ` - ${getVehicle(assigned)?.registration_number}` : ""}</SelectItem>}
                           {avail.map(v => (
                             <SelectItem key={v.id} value={v.id}>{v.vehicle_number}{v.registration_number ? ` - ${v.registration_number}` : ""}</SelectItem>
                           ))}

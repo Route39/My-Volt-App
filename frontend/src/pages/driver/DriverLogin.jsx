@@ -63,7 +63,7 @@ export default function DriverLogin() {
               <input value={phone} onChange={(e) => setPhone(e.target.value)} disabled={step === 2} required data-testid="driver-login-phone"
                 type="tel"
                 inputMode="numeric"
-                placeholder="+91 90000 00000"
+                placeholder="98000 00275"
                 className="w-full h-12 pl-10 pr-3.5 rounded-2xl bg-white border border-slate-200 outline-none focus:border-emerald-500 transition-colors disabled:bg-slate-50 disabled:text-slate-500" />
             </div>
           </div>

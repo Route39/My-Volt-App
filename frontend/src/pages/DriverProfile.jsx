@@ -287,7 +287,7 @@ function DeleteDriverDialog({ open, setOpen, driver, onDone }) {
 
 function KycDocCard({ title, url }) {
   if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
-  const fullUrl = (process.env.REACT_APP_BACKEND_URL || "") + url;
+  const fullUrl = url.startsWith("data:") || url.startsWith("http") ? url : (process.env.REACT_APP_BACKEND_URL || "") + url;
   return (
     <div className="space-y-2">
       <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>

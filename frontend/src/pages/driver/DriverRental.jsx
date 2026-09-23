@@ -42,9 +42,9 @@ export default function DriverRental() {
           <>
             <div className="text-3xl font-extrabold text-amber-600 mt-1">{account.overdue_days} Day{account.overdue_days > 1 ? "s" : ""}</div>
             <div className="text-lg font-bold text-slate-900">{inr(account.outstanding_amount)}</div>
-            <div className="mt-3 space-y-2 text-sm">
+            <div className="mt-3 flex flex-wrap gap-2 text-sm">
               {account.unpaid_dates.map((d) => (
-                <div key={d} className="flex justify-between text-slate-600"><span>{fmtDate(d)}</span><span>{inr(rental?.daily_rate || 0)}</span></div>
+                <span key={d} className="px-2 py-1 bg-slate-100 text-slate-600 rounded font-medium">{fmtDate(d)}</span>
               ))}
             </div>
             <button onClick={() => setPay("outstanding")} data-testid="rental-pay-outstanding-btn"

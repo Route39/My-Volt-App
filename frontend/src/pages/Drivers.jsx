@@ -29,8 +29,13 @@ export default function Drivers() {
     if (status !== "all") p.status = status;
     if (city !== "all") p.city = city;
     if (q) p.q = q;
-    const { data } = await api.get("/drivers", { params: p });
-    setItems(data);
+    try {
+      const { data } = await api.get("/drivers", { params: p });
+      setItems(data);
+    } catch (e) {
+      console.error(e);
+      setItems([]);
+    }
   }, [status, city, q]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => setCity(gCity), [gCity]);
@@ -154,7 +159,14 @@ function AddDriverDialog({ open, setOpen, onDone }) {
 
   // Reset step and package when modal opens/closes or city changes
   useEffect(() => {
-    if (!open) { setStep(1); setForm(f => ({ ...f, package_name: "", package_rate: 0 })); }
+    if (!open) { 
+      setStep(1); 
+      setForm({
+        name: "", phone: "", city: "Chennai", address: "", 
+        emergency_contact: "", license_number: "", status: "active",
+        package_name: "", package_rate: 0
+      }); 
+    }
   }, [open]);
 
   useEffect(() => {
