@@ -52,6 +52,7 @@ app.add_middleware(
 if not os.path.exists("uploads"):
     os.makedirs("uploads")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/api/uploads", StaticFiles(directory="uploads"), name="api_uploads")
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO)
