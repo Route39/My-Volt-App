@@ -61,7 +61,7 @@ def _extract_token(request: Request):
     if auth.startswith("Bearer "):
         return auth[7:]
     # Isolate driver cookies to avoid overriding admin cookies in local dev
-    if request.url.path.startswith("/api/driver"):
+    if request.url.path.startswith("/api/driver/"):
         return request.cookies.get("driver_access_token") or request.cookies.get("access_token")
         
     return request.cookies.get("access_token")
