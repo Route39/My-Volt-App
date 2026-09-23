@@ -3084,7 +3084,7 @@ app.include_router(api)
 @app.on_event("startup")
 async def startup():
     try:
-        await db.users.create_index("email", unique=True)
+        await db.users.create_index("email", unique=True, sparse=True)
         await db.vehicles.create_index([("organization_id", 1), ("status", 1), ("city", 1)])
         await db.vehicles.create_index("registration_number")
         await db.drivers.create_index([("organization_id", 1), ("city", 1)])
