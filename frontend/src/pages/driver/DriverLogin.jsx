@@ -29,7 +29,10 @@ export default function DriverLogin() {
       await requestOtp(phone.replace(/\s+/g, "")); 
       setStep(2);
     }
-    catch (e2) { setError(e2.response?.data?.detail || "Failed to send OTP"); }
+    catch (e2) {
+      const msg = e2.response?.data?.detail || e2.message || "Failed to send OTP";
+      setError(typeof msg === "string" ? msg : JSON.stringify(msg));
+    }
     finally { setLoading(false); }
   };
 
