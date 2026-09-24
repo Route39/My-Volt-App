@@ -864,32 +864,39 @@ async def update_plan(pid: str, body: dict, request: Request):
     body.pop("id", None); body.pop("_id", None)
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
     
-    # Sync new amount to active rentals immediately for new billing
+    # Sync new amount only to drivers NOT currently on an active trip
     plan = await db.rental_plans.find_one({"_id": oid(pid)})
     if plan and "amount" in body:
         new_rate = float(body["amount"])
-        # Update driver_rentals
-        await db.driver_rentals.update_many(
-            {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}},
-            {"$set": {"daily_rate": new_rate}}
-        )
-        # Update rentals (B2B)
-        await db.rentals.update_many(
-            {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}},
-            {"$set": {"daily_rate": new_rate}}
-        )
-        # Update rental_accounts directly to reflect immediately in UI
-        drivers_to_update = []
-        cursor = db.driver_rentals.find({"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}})
-        async for r in cursor: drivers_to_update.append(r["driver_id"])
-        cursor = db.rentals.find({"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}})
-        async for r in cursor: drivers_to_update.append(r["driver_id"])
+        # Find drivers currently mid-trip (active_trip_id set) — exclude them from rate change
+        # Check both users (rental-admin flow) and drivers (B2B flow)
+        mid_trip_user_ids = set()
+        async for u in db.users.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
+            mid_trip_user_ids.add(str(u["_id"]))
+        async for d in db.drivers.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
+            mid_trip_user_ids.add(str(d["_id"]))
         
+        pkg_filter = {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}}
+        city_filter = {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}}
+        
+        if mid_trip_user_ids:
+            pkg_filter["driver_id"] = {"$nin": list(mid_trip_user_ids)}
+            city_filter["driver_id"] = {"$nin": list(mid_trip_user_ids)}
+        
+        # Update driver_rentals (skip mid-trip drivers)
+        await db.driver_rentals.update_many(pkg_filter, {"$set": {"daily_rate": new_rate}})
+        # Update rentals B2B (skip mid-trip drivers)
+        await db.rentals.update_many(city_filter, {"$set": {"daily_rate": new_rate}})
+        
+        # Update rental_accounts (skip mid-trip drivers)
+        drivers_to_update = []
+        async for r in db.driver_rentals.find(pkg_filter): drivers_to_update.append(r["driver_id"])
+        async for r in db.rentals.find(city_filter): drivers_to_update.append(r["driver_id"])
         if drivers_to_update:
-            await db.rental_accounts.update_many(
-                {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}},
-                {"$set": {"daily_rate": new_rate}}
-            )
+            acct_filter = {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}}
+            if mid_trip_user_ids:
+                acct_filter["driver_id"]["$nin"] = list(mid_trip_user_ids)
+            await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
 
     return ser(plan)
 
@@ -3014,20 +3021,25 @@ async def rental_admin_update_package(pid: str, body: dict, request: Request):
     pkg = await db.rental_packages.find_one({"_id": oid(pid)})
     if pkg and "daily_rate" in body:
         new_rate = float(body["daily_rate"])
-        # Update driver_rentals using this package
-        await db.driver_rentals.update_many(
-            {"organization_id": user["organization_id"], "package_id": pid, "status": {"$ne": "ended"}},
-            {"$set": {"daily_rate": new_rate, "package_name": pkg["name"]}}
-        )
-        # Update rental accounts to reflect immediately
+        # Find drivers currently mid-trip — they are protected from rate changes
+        mid_trip_user_ids = set()
+        async for u in db.users.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
+            mid_trip_user_ids.add(str(u["_id"]))
+        
+        drental_filter = {"organization_id": user["organization_id"], "package_id": pid, "status": {"$ne": "ended"}}
+        if mid_trip_user_ids:
+            drental_filter["driver_id"] = {"$nin": list(mid_trip_user_ids)}
+        
+        # Update driver_rentals only for drivers NOT on an active trip
+        await db.driver_rentals.update_many(drental_filter, {"$set": {"daily_rate": new_rate, "package_name": pkg["name"]}})
+        
+        # Update rental accounts — also skip mid-trip drivers
         drivers_to_update = []
-        async for r in db.driver_rentals.find({"organization_id": user["organization_id"], "package_id": pid, "status": {"$ne": "ended"}}):
+        async for r in db.driver_rentals.find(drental_filter):
             drivers_to_update.append(r["driver_id"])
         if drivers_to_update:
-            await db.rental_accounts.update_many(
-                {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}},
-                {"$set": {"daily_rate": new_rate}}
-            )
+            acct_filter = {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}}
+            await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
     return ser(pkg)
 
 class NewRentalDriver(BaseModel):
