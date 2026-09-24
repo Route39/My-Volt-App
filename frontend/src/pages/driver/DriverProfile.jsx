@@ -13,7 +13,7 @@ export default function DriverProfile() {
   if (!data) return null;
   const { driver, rental, account, deposit } = data;
 
-  const doLogout = () => { logout(); nav("/driver/login"); };
+  const doLogout = async () => { await logout(); nav("/driver/login"); };
 
   return (
     <div className="px-5 pt-6 space-y-5" data-testid="driver-profile">
