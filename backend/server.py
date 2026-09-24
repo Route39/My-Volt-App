@@ -1021,14 +1021,6 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 base_daily_rate = float(r.get("daily_rate", 0))
                 if odo_log and "snapshot_daily_rent" in odo_log:
                     base_daily_rate = float(odo_log["snapshot_daily_rent"])
-                elif base_daily_rate == 0 and r.get("package_name"):
-                    plan = await db.rental_plans.find_one({
-                        "name": {"$regex": f"^{r['package_name']}$", "$options": "i"}, 
-                        "city": {"$regex": f"^{r.get('city', '')}$", "$options": "i"},
-                        "organization_id": user["organization_id"]
-                    })
-                    if plan:
-                        base_daily_rate = float(plan.get("amount", 0))
                 
                 daily_rate = base_daily_rate
                 
@@ -1099,7 +1091,11 @@ async def create_rental(body: RentalBody, request: Request):
         
     pkg_name = body.package_name or driver.get("package_name", "Standard")
     pkg_rate = body.package_rate or driver.get("package_rate", 0)
-    
+    if pkg_rate == 0:
+        plan = await db.rental_plans.find_one({"name": {"$regex": f"^{pkg_name}$", "$options": "i"}, "organization_id": user["organization_id"]})
+        if plan:
+            pkg_rate = plan.get("amount", 0)
+            
     code = await _next_rental_code(user["organization_id"])
     doc = {
         "organization_id": user["organization_id"],
@@ -2520,7 +2516,6 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             if plan:
                 monthly_limit_km = plan.get("monthly_km_limit", 0)
                 overage_per_km = plan.get("overage_per_km", 0.0)
-                daily_rate = plan.get("amount", daily_rate)
                 
                 import calendar
                 now = datetime.now()
@@ -2676,7 +2671,6 @@ async def submit_odometer(
             if plan:
                 monthly_limit_km = plan.get("monthly_km_limit", 0)
                 overage_per_km = plan.get("overage_per_km", 0.0)
-                daily_rate = plan.get("amount", daily_rate)
                 
                 # New logic: Calculate daily overage
                 import calendar
