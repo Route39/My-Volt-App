@@ -596,7 +596,8 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
         log["driver_name"] = drv.get("name") if drv else "Unknown"
         log["driver_city"] = drv.get("city") if drv else ""
         log["driver_avatar"] = drv.get("avatar") if drv else None
-        log["monthly_kms"] = drv.get("current_month_kms", 0) if drv else 0
+        # Use snapshot progressive KMS if available (so each log shows the exact total at that time), fallback to current
+        log["monthly_kms"] = log.get("snapshot_monthly_kms_used", drv.get("current_month_kms", 0) if drv else 0)
         pkg_name = (drv.get("package_name") or "") if drv else ""
         drv_city = (drv.get("city") or "").lower() if drv else ""
         log["limit_kms"] = plan_limits.get(f"{drv_city}_{pkg_name.lower()}", 0) if drv else 0
@@ -864,39 +865,46 @@ async def update_plan(pid: str, body: dict, request: Request):
     body.pop("id", None); body.pop("_id", None)
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
     
-    # Sync new amount only to drivers NOT currently on an active trip
+    # Sync new amount only to drivers NOT currently on an active trip AND who do NOT have unpaid dues
     plan = await db.rental_plans.find_one({"_id": oid(pid)})
     if plan and "amount" in body:
         new_rate = float(body["amount"])
-        # Find drivers currently mid-trip (active_trip_id set) — exclude them from rate change
-        # Check both users (rental-admin flow) and drivers (B2B flow)
-        mid_trip_user_ids = set()
+        
+        # 1. Find drivers currently mid-trip (active_trip_id set)
+        locked_user_ids = set()
         async for u in db.users.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
-            mid_trip_user_ids.add(str(u["_id"]))
+            locked_user_ids.add(str(u["_id"]))
         async for d in db.drivers.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
-            mid_trip_user_ids.add(str(d["_id"]))
+            locked_user_ids.add(str(d["_id"]))
+            
+        # 2. Find drivers with unpaid dues (outstanding_amount > 0)
+        async for acct in db.rental_accounts.find({"organization_id": user["organization_id"], "outstanding_amount": {"$gt": 0}}):
+            locked_user_ids.add(str(acct["driver_id"]))
         
         pkg_filter = {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}}
         city_filter = {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}}
         
-        if mid_trip_user_ids:
-            pkg_filter["driver_id"] = {"$nin": list(mid_trip_user_ids)}
-            city_filter["driver_id"] = {"$nin": list(mid_trip_user_ids)}
+        if locked_user_ids:
+            pkg_filter["driver_id"] = {"$nin": list(locked_user_ids)}
+            city_filter["driver_id"] = {"$nin": list(locked_user_ids)}
         
-        # Update driver_rentals (skip mid-trip drivers)
+        # Update driver_rentals (skip locked drivers)
         await db.driver_rentals.update_many(pkg_filter, {"$set": {"daily_rate": new_rate}})
-        # Update rentals B2B (skip mid-trip drivers)
+        # Update rentals B2B (skip locked drivers)
         await db.rentals.update_many(city_filter, {"$set": {"daily_rate": new_rate}})
         
-        # Update rental_accounts (skip mid-trip drivers)
+        # Find all drivers that match this package (and are not locked) to update their accounts & profiles
         drivers_to_update = []
         async for r in db.driver_rentals.find(pkg_filter): drivers_to_update.append(r["driver_id"])
         async for r in db.rentals.find(city_filter): drivers_to_update.append(r["driver_id"])
+        
         if drivers_to_update:
+            # Update rental_accounts
             acct_filter = {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}}
-            if mid_trip_user_ids:
-                acct_filter["driver_id"]["$nin"] = list(mid_trip_user_ids)
             await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
+            # Update users (for package_rate in driver app)
+            for d_id in drivers_to_update:
+                await db.users.update_one({"_id": ObjectId(d_id)}, {"$set": {"package_rate": new_rate}})
 
     return ser(plan)
 
@@ -1105,6 +1113,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     })
 
         
+    out.sort(key=lambda x: x["date"], reverse=True)
     return out
 
 
@@ -2325,6 +2334,52 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
                     "today_date": today_ist,
                 }}
             )
+            
+            # ─── POST-PAYMENT RATE SYNC ─────────────────────────────────────────
+            # If the driver has paid off their dues completely, they are "free".
+            # If the admin changed the package amount while they were locked,
+            # apply the NEW rate NOW to all records (only if no active trip).
+            if new_outstanding <= 0:
+                user_doc = await db.users.find_one({"_id": ObjectId(did)})
+                active_trip_id = user_doc.get("active_trip_id") if user_doc else None
+                
+                if not active_trip_id:
+                    rental_doc = await db.rentals.find_one({"organization_id": org, "driver_id": did, "status": {"$ne": "ended"}})
+                    if rental_doc:
+                        sync_plan = None
+                        if rental_doc.get("plan_id"):
+                            sync_plan = await db.rental_plans.find_one({"_id": oid(rental_doc["plan_id"])})
+                        elif rental_doc.get("package_name"):
+                            sync_plan = await db.rental_plans.find_one({
+                                "name": {"$regex": f"^{rental_doc['package_name']}$", "$options": "i"},
+                                "city": {"$regex": f"^{rental_doc.get('city', '')}$", "$options": "i"},
+                                "organization_id": org
+                            })
+                        if sync_plan:
+                            new_rate = float(sync_plan.get("amount", 0))
+                            current_rate = float(rental_doc.get("daily_rate", 0))
+                            if new_rate > 0 and new_rate != current_rate:
+                                # Sync to driver_rentals
+                                await db.driver_rentals.update_many(
+                                    {"driver_id": did, "organization_id": org, "status": {"$ne": "ended"}},
+                                    {"$set": {"daily_rate": new_rate}}
+                                )
+                                # Sync to rentals (B2B)
+                                await db.rentals.update_many(
+                                    {"driver_id": did, "organization_id": org, "status": {"$ne": "ended"}},
+                                    {"$set": {"daily_rate": new_rate}}
+                                )
+                                # Sync to rental_accounts
+                                await db.rental_accounts.update_many(
+                                    {"driver_id": did, "organization_id": org},
+                                    {"$set": {"daily_rate": new_rate}}
+                                )
+                                # Sync to users record
+                                await db.users.update_one(
+                                    {"_id": ObjectId(did)},
+                                    {"$set": {"package_rate": new_rate}}
+                                )
+            # ─────────────────────────────────────────────────────────────────────
     rental = await _active_rental(org, did)
     if rental:
         acct = await _rental_account(rental)
@@ -2609,6 +2664,45 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             }
         )
         
+        # ─── POST-TRIP RATE SYNC ───────────────────────────────────────────────
+        acct_check = await db.rental_accounts.find_one({"driver_id": driver_id, "organization_id": user.get("organization_id")})
+        is_free_to_sync = not acct_check or acct_check.get("outstanding_amount", 0) <= 0
+        
+        if rental and is_free_to_sync:
+            sync_plan = None
+            if rental.get("plan_id"):
+                sync_plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+            elif rental.get("package_name"):
+                sync_plan = await db.rental_plans.find_one({
+                    "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                    "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                    "organization_id": user.get("organization_id")
+                })
+            if sync_plan:
+                new_rate = float(sync_plan.get("amount", 0))
+                if new_rate > 0 and new_rate != daily_rate:
+                    # Sync to driver_rentals
+                    await db.driver_rentals.update_many(
+                        {"driver_id": driver_id, "organization_id": user.get("organization_id"), "status": {"$ne": "ended"}},
+                        {"$set": {"daily_rate": new_rate}}
+                    )
+                    # Sync to rentals (B2B)
+                    await db.rentals.update_many(
+                        {"driver_id": driver_id, "organization_id": user.get("organization_id"), "status": {"$ne": "ended"}},
+                        {"$set": {"daily_rate": new_rate}}
+                    )
+                    # Sync to rental_accounts
+                    await db.rental_accounts.update_many(
+                        {"driver_id": driver_id, "organization_id": user.get("organization_id")},
+                        {"$set": {"daily_rate": new_rate}}
+                    )
+                    # Sync to users record
+                    await db.users.update_one(
+                        {"_id": ObjectId(driver_id)},
+                        {"$set": {"package_rate": new_rate}}
+                    )
+        # ─────────────────────────────────────────────────────────────────────
+        
         await db.driver_odometer_logs.update_one(
             {"_id": ObjectId(active_trip_id)},
             {"$set": {
@@ -2616,7 +2710,10 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
                 "snapshot_package_name": plan['name'] if plan else (rental.get('package_name', '') if rental else ''),
                 "snapshot_daily_limit": daily_limit_km,
                 "snapshot_overage_per_km": overage_per_km,
-                "snapshot_monthly_limit": monthly_limit_km if plan else 0
+                "snapshot_monthly_limit": monthly_limit_km if plan else 0,
+                "extra_km": overage_km,
+                "extra_km_charge": overage_charge,
+                "snapshot_monthly_kms_used": current_month_kms
             }}
         )
 
@@ -2777,8 +2874,12 @@ async def submit_odometer(
         
         # ─── POST-TRIP RATE SYNC ───────────────────────────────────────────────
         # After the trip ends, if the admin changed the package amount while the
-        # driver was protected (mid-trip), apply the NEW rate NOW to all records.
-        if rental:
+        # driver was protected (mid-trip), apply the NEW rate NOW to all records,
+        # BUT ONLY IF THEY OWE NO MONEY! If they owe money, they keep the old rate until paid.
+        acct_check = await db.rental_accounts.find_one({"driver_id": user["id"], "organization_id": user.get("organization_id")})
+        is_free_to_sync = not acct_check or acct_check.get("outstanding_amount", 0) <= 0
+        
+        if rental and is_free_to_sync:
             sync_plan = None
             if rental.get("plan_id"):
                 sync_plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
@@ -2820,7 +2921,10 @@ async def submit_odometer(
                 "snapshot_package_name": plan['name'] if plan else (rental.get('package_name', '') if rental else ''),
                 "snapshot_daily_limit": daily_limit_km,
                 "snapshot_overage_per_km": overage_per_km,
-                "snapshot_monthly_limit": monthly_limit_km if plan else 0
+                "snapshot_monthly_limit": monthly_limit_km if plan else 0,
+                "extra_km": overage_km,
+                "extra_km_charge": overage_charge,
+                "snapshot_monthly_kms_used": current_month_kms
             }}
         )
         
