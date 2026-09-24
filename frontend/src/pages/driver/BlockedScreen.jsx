@@ -10,6 +10,13 @@ export default function BlockedScreen() {
   if (!data) return null;
   const { account, rental, driver } = data;
 
+  const dailyRate = rental?.daily_rate || 0;
+  const unpaidDates = account?.unpaid_dates || [];
+  const outstanding = account?.outstanding_amount || 0;
+
+  // Build detailed lines — each unpaid date could have extra KM. Show base rent + extra if any.
+  const perDayAmount = unpaidDates.length > 0 ? Math.round(outstanding / unpaidDates.length) : dailyRate;
+
   return (
     <div className="min-h-[calc(100vh-4rem)] flex flex-col items-center justify-center px-6 text-center" data-testid="blocked-screen">
       <div className="w-20 h-20 rounded-full bg-red-100 flex items-center justify-center mb-5">
@@ -22,26 +29,42 @@ export default function BlockedScreen() {
 
       <div className="mt-6 w-full max-w-sm rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
         <div className="text-slate-500 text-sm">Outstanding</div>
-        <div className="text-4xl font-extrabold text-red-600 mt-1" data-testid="blocked-outstanding">{inr(account?.outstanding_amount || 0)}</div>
+        <div className="text-4xl font-extrabold text-red-600 mt-1" data-testid="blocked-outstanding">{inr(outstanding)}</div>
         <div className="mt-4 space-y-2 text-sm">
-          {(account?.unpaid_dates || []).map((d) => (
-            <div key={d} className="flex justify-between text-slate-600"><span>{d}</span><span>{inr(rental?.daily_rate || 0)}</span></div>
-          ))}
+          {unpaidDates.map((d) => {
+            const extraCharge = perDayAmount - dailyRate;
+            return (
+              <div key={d} className="flex justify-between items-start text-slate-600 border-b border-slate-50 pb-1">
+                <span className="text-left">
+                  <div className="font-medium">{d}</div>
+                  <div className="text-xs text-slate-400">Rent {inr(dailyRate)}{extraCharge > 0 ? ` + Extra KM ${inr(extraCharge)}` : ""}</div>
+                </span>
+                <span className="font-semibold text-slate-800">{inr(perDayAmount)}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex justify-between text-sm font-bold text-slate-800 border-t border-slate-100 pt-3">
+          <span>Total ({account?.overdue_days || 0} day{(account?.overdue_days || 0) > 1 ? "s" : ""})</span>
+          <span className="text-red-600">{inr(outstanding)}</span>
         </div>
         <button onClick={() => setOpen(true)} data-testid="blocked-pay-btn"
           className="mt-5 w-full h-12 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold transition-colors">
-          Pay Full Outstanding {inr(account?.outstanding_amount || 0)}
+          Pay Full Outstanding {inr(outstanding)}
         </button>
         <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
           <CheckCircle2 className="w-3.5 h-3.5" /> Account activates only after full payment
         </div>
       </div>
 
-      <PayModal open={open} kind="outstanding" title="Clear Outstanding Rent" amount={account?.outstanding_amount || 0}
+      <PayModal open={open} kind="outstanding" title="Clear Outstanding Rent" amount={outstanding}
         driverName={driver?.name} driverPhone={driver?.phone}
         lines={[
-          ...(account?.unpaid_dates || []).map((d) => ({ label: d, value: inr(rental?.daily_rate || 0) })),
-          { label: `Total (${account?.overdue_days || 0} days)`, value: inr(account?.outstanding_amount || 0), strong: true },
+          ...unpaidDates.map((d) => {
+            const extraCharge = perDayAmount - dailyRate;
+            return { label: `${d}${extraCharge > 0 ? ` (Rent + Extra KM)` : ""}`, value: inr(perDayAmount) };
+          }),
+          { label: `Total (${account?.overdue_days || 0} days)`, value: inr(outstanding), strong: true },
         ]}
         onClose={() => setOpen(false)} onDone={() => refresh()} />
     </div>

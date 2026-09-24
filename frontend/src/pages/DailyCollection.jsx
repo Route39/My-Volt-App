@@ -57,7 +57,7 @@ export default function DailyCollection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalRevenue = useMemo(() => items.reduce((acc, it) => acc + it.daily_rate, 0), [items]);
+  const totalRevenue = useMemo(() => items.reduce((acc, it) => acc + (it.total_charge ?? it.daily_rate), 0), [items]);
   const totalSettled = useMemo(() => items.reduce((acc, it) => acc + it.today_paid, 0), [items]);
   const totalUnsettled = totalRevenue - totalSettled;
 
@@ -159,6 +159,7 @@ export default function DailyCollection() {
               <th className="px-5 py-4">End Meter</th>
               <th className="px-5 py-4">Total KM</th>
               <th className="px-5 py-4 text-amber-500">Revenue</th>
+              <th className="px-5 py-4 text-red-500">Extra KM</th>
               <th className="px-5 py-4">Payment Status</th>
               <th className="px-5 py-4">Deposit</th>
             </tr>
@@ -201,7 +202,22 @@ export default function DailyCollection() {
                     <td className="px-5 py-4 text-mv-muted">{it.start_meter || "—"}</td>
                     <td className="px-5 py-4 text-mv-muted">{it.end_meter || "—"}</td>
                     <td className="px-5 py-4 font-medium">{it.total_km || "—"} km</td>
-                    <td className="px-5 py-4 font-display font-bold text-amber-500/90">{inr(it.daily_rate)}</td>
+                    <td className="px-5 py-4 font-display font-bold">
+                      <div className="text-amber-500/90">{inr(it.daily_rate)}</div>
+                      {(it.extra_km_charge > 0) && (
+                        <div className="text-[11px] text-red-500 font-semibold">+{inr(it.extra_km_charge)} extra</div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {(it.extra_km > 0) ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 text-xs font-bold">+{it.extra_km} km</span>
+                          <span className="text-[10px] text-red-500">@ ₹{it.overage_per_km}/km</span>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-emerald-600 font-semibold">Within Limit</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4">
                       {it.daily_status === "paid" ? (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
@@ -224,7 +240,7 @@ export default function DailyCollection() {
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
                             NOT PAID
                           </div>
-                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr(it.daily_rate - it.today_paid)}</span>
+                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr((it.total_charge ?? it.daily_rate) - it.today_paid)}</span>
                         </div>
                       )}
                     </td>

@@ -1048,10 +1048,16 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 
                 daily_rate = base_daily_rate
                 
+                # Extract extra KM data from the odometer log snapshot
+                extra_km = odo_log.get("extra_km", 0) if odo_log else 0
+                extra_km_charge = odo_log.get("extra_km_charge", 0.0) if odo_log else 0.0
+                overage_per_km = odo_log.get("snapshot_overage_per_km", 0.0) if odo_log else 0.0
+                total_charge = daily_rate + extra_km_charge
+                
                 # Distribute the today_paid across rows roughly (if there are multiple)
-                row_paid = min(today_paid, daily_rate)
+                row_paid = min(today_paid, total_charge)
                 today_paid = max(0, today_paid - row_paid)
-                daily_status = "paid" if row_paid >= daily_rate else ("partial" if row_paid > 0 else "pending")
+                daily_status = "paid" if row_paid >= total_charge else ("partial" if row_paid > 0 else "pending")
                 
                 # Assign exact transaction ID for this row
                 row_txn_id = None
@@ -1079,8 +1085,12 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "city": r.get("city", "Unknown"),
                         "status": r.get("status", "pending_payment"),
                         "daily_rate": daily_rate,
+                        "extra_km": extra_km,
+                        "extra_km_charge": extra_km_charge,
+                        "overage_per_km": overage_per_km,
+                        "total_charge": total_charge,
                         "today_paid": row_paid,
-                        "outstanding_amount": outstanding_amount if (d == datetime.now(timezone.utc).date() and idx == 0) else max(0, daily_rate - row_paid),
+                        "outstanding_amount": outstanding_amount if (d == datetime.now(timezone.utc).date() and idx == 0) else max(0, total_charge - row_paid),
                         "daily_status": daily_status,
                         "paid_on": row_paid_on,
                         "payment_method": row_pay_method,
