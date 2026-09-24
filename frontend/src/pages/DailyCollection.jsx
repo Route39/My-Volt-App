@@ -219,7 +219,15 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      {it.daily_status === "paid" ? (
+                      {(it.start_meter && !it.end_meter) ? (
+                        /* Trip still ongoing — start posted but no end KM yet */
+                        <div className="inline-flex flex-col gap-0.5">
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 text-xs font-bold tracking-wide">
+                            🔄 Trip In Progress
+                          </div>
+                          <span className="text-[11px] text-blue-500/80 ml-1">Yet to pay after ride ends</span>
+                        </div>
+                      ) : it.daily_status === "paid" ? (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
                           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
