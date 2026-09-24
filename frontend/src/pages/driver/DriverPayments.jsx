@@ -35,6 +35,11 @@ export default function DriverPayments() {
                 </div>
                 <div className="text-right">
                   <div className="font-extrabold text-slate-900">{inr(p.amount)}</div>
+                  {p.extra_charge > 0 && (
+                    <div className="text-[10px] text-red-500 font-semibold mb-1">
+                      Rent {inr(p.base_rent)} + Extra KM {inr(p.extra_charge)}
+                    </div>
+                  )}
                   <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold capitalize ${STATUS_UI[p.payment_status] || "bg-slate-100 text-slate-600"}`}>{p.payment_status}</span>
                 </div>
               </div>

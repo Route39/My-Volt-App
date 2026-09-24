@@ -2803,7 +2803,23 @@ async def driver_payment_history(request: Request):
         "driver_id": user["id"],
         "payment_status": {"$ne": "pending"}
     }).sort("created_at", -1).to_list(500)
-    return [ser(r) for r in recs]
+    
+    rental = await _active_rental(user["organization_id"], user["id"])
+    daily_rate = rental.get("daily_rate", 0) if rental else 0
+
+    results = []
+    for r in recs:
+        out = ser(r)
+        if out.get("kind") in ["daily", "outstanding"] and out.get("covers_dates"):
+            days = len(out["covers_dates"])
+            base_rent = daily_rate * days
+            extra_charge = max(0, out["amount"] - base_rent)
+            out["base_rent"] = base_rent
+            out["extra_charge"] = extra_charge
+            out["daily_rate"] = daily_rate
+        results.append(out)
+
+    return results
 
 
 class CreateOrderBody(BaseModel):
