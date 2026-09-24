@@ -2121,14 +2121,15 @@ async def _rental_account(rental):
     else:
         status = "active"
         
-    today_paid = existing.get("today_paid", False) if existing else False
-    # Only mark today as paid if:
-    # 1. Rate > 0 (there is an actual charge to pay), AND
-    # 2. Today is NOT in unpaid dates, AND
-    # 3. There is no outstanding amount
-    # If rate == 0, do NOT show as paid — show "Pay Now" so driver knows to set up the package
-    if rate > 0 and today.isoformat() not in unpaid and outstanding == 0:
+    # today_paid logic — the ONLY correct rule:
+    # 1. If the stored today_date in DB matches today AND stored today_paid is True → keep it True (payment was already made today)
+    # 2. Otherwise → False (new day, new rental, or never paid today)
+    # We NEVER auto-assume paid based on 0 outstanding — that causes brand new rentals to show "Paid" incorrectly.
+    stored_today_date = existing.get("today_date") if existing else None
+    if stored_today_date == today.isoformat() and existing.get("today_paid", False):
         today_paid = True
+    else:
+        today_paid = False
         
     reactivated_at = (existing or {}).get("reactivated_at")
     if existing and existing.get("status") == "blocked" and status == "active":
@@ -2261,12 +2262,14 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
         if existing_acct:
             new_outstanding = max(0.0, round(float(existing_acct.get("outstanding_amount", 0)) - float(rec["amount"]), 2))
             remaining_dates = [d for d in existing_acct.get("unpaid_dates", []) if d not in rec.get("covers_dates", [])]
+            today_ist = _today_ist().isoformat()
             await db.rental_accounts.update_one(
                 {"organization_id": org, "driver_id": did},
                 {"$set": {
                     "outstanding_amount": new_outstanding,
                     "unpaid_dates": remaining_dates if new_outstanding > 0 else [],
-                    "today_paid": new_outstanding == 0,
+                    "today_paid": True,
+                    "today_date": today_ist,
                 }}
             )
     rental = await _active_rental(org, did)
