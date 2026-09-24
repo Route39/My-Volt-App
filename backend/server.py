@@ -2279,13 +2279,6 @@ async def _driver_payload(user):
             elif not out["deposit"]:
                 out["deposit"] = {"status": "pending", "amount": plan.get("deposit", 5000)}
             
-            # Live plan rate: If the driver is NOT on an active trip, always reflect
-            # the current plan amount. Mid-trip protection means the snapshot_daily_rent
-            # in the odo log is used for billing — the rental record shows the current rate.
-            plan_amount = float(plan.get("amount", 0))
-            if plan_amount > 0 and not user.get("active_trip_id"):
-                # Driver is between trips — show the current plan amount live
-                rental["daily_rate"] = plan_amount
         else:
             out["driver"]["daily_limit_km"] = 0
             out["driver"]["overage_per_km"] = 0.0
