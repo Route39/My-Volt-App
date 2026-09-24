@@ -863,7 +863,35 @@ async def update_plan(pid: str, body: dict, request: Request):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     body.pop("id", None); body.pop("_id", None)
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
-    return ser(await db.rental_plans.find_one({"_id": oid(pid)}))
+    
+    # Sync new amount to active rentals immediately for new billing
+    plan = await db.rental_plans.find_one({"_id": oid(pid)})
+    if plan and "amount" in body:
+        new_rate = float(body["amount"])
+        # Update driver_rentals
+        await db.driver_rentals.update_many(
+            {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}},
+            {"$set": {"daily_rate": new_rate}}
+        )
+        # Update rentals (B2B)
+        await db.rentals.update_many(
+            {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}},
+            {"$set": {"daily_rate": new_rate}}
+        )
+        # Update rental_accounts directly to reflect immediately in UI
+        drivers_to_update = []
+        cursor = db.driver_rentals.find({"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}})
+        async for r in cursor: drivers_to_update.append(r["driver_id"])
+        cursor = db.rentals.find({"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}})
+        async for r in cursor: drivers_to_update.append(r["driver_id"])
+        
+        if drivers_to_update:
+            await db.rental_accounts.update_many(
+                {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}},
+                {"$set": {"daily_rate": new_rate}}
+            )
+
+    return ser(plan)
 
 
 # ---------- rentals ----------
@@ -2975,6 +3003,31 @@ async def rental_admin_create_package(body: PackageBody, request: Request):
     res = await db.rental_packages.insert_one(doc)
     return ser(await db.rental_packages.find_one({"_id": res.inserted_id}))
 
+
+@api.put("/rental-admin/packages/{pid}")
+async def rental_admin_update_package(pid: str, body: dict, request: Request):
+    user = await get_user(request)
+    await _require_rental_admin(user)
+    body.pop("_id", None); body.pop("id", None)
+    await db.rental_packages.update_one({"_id": oid(pid), "organization_id": user["organization_id"]}, {"$set": body})
+    pkg = await db.rental_packages.find_one({"_id": oid(pid)})
+    if pkg and "daily_rate" in body:
+        new_rate = float(body["daily_rate"])
+        # Update driver_rentals using this package
+        await db.driver_rentals.update_many(
+            {"organization_id": user["organization_id"], "package_id": pid, "status": {"$ne": "ended"}},
+            {"$set": {"daily_rate": new_rate, "package_name": pkg["name"]}}
+        )
+        # Update rental accounts to reflect immediately
+        drivers_to_update = []
+        async for r in db.driver_rentals.find({"organization_id": user["organization_id"], "package_id": pid, "status": {"$ne": "ended"}}):
+            drivers_to_update.append(r["driver_id"])
+        if drivers_to_update:
+            await db.rental_accounts.update_many(
+                {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}},
+                {"$set": {"daily_rate": new_rate}}
+            )
+    return ser(pkg)
 
 class NewRentalDriver(BaseModel):
     name: str

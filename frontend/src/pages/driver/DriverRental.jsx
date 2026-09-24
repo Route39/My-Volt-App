@@ -36,7 +36,7 @@ export default function DriverRental() {
           ) : account?.unpaid_dates?.includes(account?.today_date) ? (
             <button onClick={() => setPay("daily")} data-testid="rental-pay-rent-btn" className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold transition-colors">Pay Now</button>
           ) : (
-            <span className="inline-flex items-center gap-1.5 text-slate-400 font-semibold text-sm">Billed after trip ends</span>
+            <span className="inline-flex items-center gap-1.5 text-slate-400 font-semibold text-sm">Pending</span>
           )}
         </div>
       </div>
