@@ -2220,19 +2220,15 @@ async def _driver_payload(user):
             elif not out["deposit"]:
                 out["deposit"] = {"status": "pending", "amount": plan.get("deposit", 5000)}
             
-            rental["daily_rate"] = plan.get("amount", rental["daily_rate"])
+            # NOTE: Do NOT override rental["daily_rate"] from plan here.
+            # The rental's daily_rate is locked at creation time and must never change.
+            # Changing the package price only affects NEW rentals, not existing ones.
         else:
             out["driver"]["daily_limit_km"] = 0
             out["driver"]["overage_per_km"] = 0.0
             
         start_str = rental.get("start", rental.get("start_date", ""))
         
-        # Override with today's snapshot rate if they already took a trip today
-        today_str = _today_ist().strftime("%Y-%m-%d")
-        today_log = await db.driver_odometer_logs.find_one({"driver_id": did, "date": today_str})
-        if today_log and "snapshot_daily_rent" in today_log:
-            rental["daily_rate"] = float(today_log["snapshot_daily_rent"])
-            
         out["rental"] = {"id": str(rental["_id"]), "package_id": rental.get("package_id"),
                          "package_name": rental["package_name"], "daily_rate": rental["daily_rate"],
                          "start_date": start_str, "vehicle_reg": rental.get("vehicle_number", "")}
