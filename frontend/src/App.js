@@ -28,6 +28,7 @@ import OdometerApprovals from "@/pages/OdometerApprovals";
 import PlatformApp from "@/pages/platform/PlatformApp";
 import DriverApp from "@/pages/driver/DriverApp";
 import DailyCollection from "@/pages/DailyCollection";
+import PrivacyPolicy from "@/pages/PrivacyPolicy";
 
 const FLEET_PATHS = ["/fleet", "/drivers", "/rentals", "/service-requests", "/vehicle-service", "/locations", "/incidents"];
 
@@ -59,6 +60,7 @@ function Shell() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />

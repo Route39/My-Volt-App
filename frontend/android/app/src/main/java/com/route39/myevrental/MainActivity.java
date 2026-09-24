@@ -1,4 +1,4 @@
-package com.route39.myvolt;
+package com.route39.myevrental;
 
 import com.getcapacitor.BridgeActivity;
 

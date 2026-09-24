@@ -2436,23 +2436,43 @@ async def driver_login(body: DriverLogin, response: Response):
     await _check_lockout("driver:" + phone)
     
     u = await db.drivers.find_one({"phone": phone})
+    
+    # Auto-create dummy account for Google Reviewers if it doesn't exist yet
+    if phone == "9999999999" and not u:
+        admin_org = await db.users.find_one({"role": "admin"})
+        org_id = admin_org["organization_id"] if admin_org else "test-org"
+        res = await db.drivers.insert_one({
+            "name": "Google Reviewer",
+            "phone": "9999999999",
+            "organization_id": org_id,
+            "kyc_status": "approved",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        u = {"_id": res.inserted_id, "organization_id": org_id, "name": "Google Reviewer"}
+        
     if not u:
         raise HTTPException(status_code=401, detail="Invalid phone or OTP")
         
-    otp_record = await db.otp_codes.find_one({"phone": phone, "otp": body.otp})
-    if not otp_record:
-        # Increment lockout
-        await db.login_attempts.update_one(
-            {"identifier": "driver:" + phone},
-            {"$inc": {"count": 1}, "$set": {"locked_until": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}},
-            upsert=True)
-        raise HTTPException(status_code=401, detail="Invalid phone or OTP")
+    # Google Reviewer bypass
+    is_google_reviewer = (phone == "9999999999" and body.otp == "123456")
         
-    expires_at = datetime.fromisoformat(otp_record["expires_at"])
-    if datetime.now(timezone.utc) > expires_at:
-        raise HTTPException(status_code=401, detail="OTP has expired")
+    if not is_google_reviewer:
+        otp_record = await db.otp_codes.find_one({"phone": phone, "otp": body.otp})
+        if not otp_record:
+            # Increment lockout
+            await db.login_attempts.update_one(
+                {"identifier": "driver:" + phone},
+                {"$inc": {"count": 1}, "$set": {"locked_until": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}},
+                upsert=True)
+            raise HTTPException(status_code=401, detail="Invalid phone or OTP")
         
-    await db.otp_codes.delete_one({"phone": phone})
+    if not is_google_reviewer:
+        expires_at = datetime.fromisoformat(otp_record["expires_at"])
+        if datetime.now(timezone.utc) > expires_at:
+            raise HTTPException(status_code=401, detail="OTP has expired")
+            
+        await db.otp_codes.delete_one({"phone": phone})
+        
     await db.login_attempts.delete_one({"identifier": "driver:" + phone})
     token = set_driver_auth_cookies(response, str(u["_id"]), u.get("phone", ""))
     return {"token": token, "driver": ser(u)}

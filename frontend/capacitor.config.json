@@ -1,6 +1,6 @@
 {
-  "appId": "com.route39.myvolt",
-  "appName": "MyVoltApp",
+  "appId": "com.route39.myevrental",
+  "appName": "MyEVRental",
   "webDir": "build",
   "server": {
     "url": "https://myvolt.attendy.in/driver/login",
