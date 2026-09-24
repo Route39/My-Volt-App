@@ -1022,20 +1022,9 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 ]
             }).to_list(100)
             
-            # Find the actual date this payment was physically processed (useful for late retroactive payments)
-            paid_on_date = None
-            payment_method = None
-            transaction_id = None
-            for p in day_payments:
-                if p.get("payment_status") == "paid" and p.get("type") != "refund":
-                    created = p.get("created_at")
-                    if created:
-                        paid_on_date = created.split("T")[0]
-                        payment_method = p.get("payment_method")
-                        transaction_id = p.get("transaction_id")
-                        break
+            valid_payments = [p for p in day_payments if p.get("payment_status") == "paid" and p.get("type") != "refund"]
             
-            today_paid = sum(p.get("amount", 0) for p in day_payments if p.get("type") != "refund" and p.get("payment_status") == "paid")
+            today_paid = sum(p.get("amount", 0) for p in valid_payments)
             
             odo_logs = await db.driver_odometer_logs.find({
                 "driver_id": r["driver_id"],
@@ -1057,6 +1046,18 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 today_paid = max(0, today_paid - row_paid)
                 daily_status = "paid" if row_paid >= daily_rate else ("partial" if row_paid > 0 else "pending")
                 
+                # Assign exact transaction ID for this row
+                row_txn_id = None
+                row_pay_method = None
+                row_paid_on = None
+                if row_paid > 0 and valid_payments:
+                    p = valid_payments.pop(0)
+                    row_txn_id = p.get("transaction_id")
+                    row_pay_method = p.get("payment_method")
+                    created = p.get("created_at")
+                    if created:
+                        row_paid_on = created.split("T")[0]
+                
                 start_meter = odo_log.get("start_reading", 0) if odo_log else 0
                 end_meter = odo_log.get("end_reading", 0) if odo_log else 0
                 total_km = odo_log.get("driven_today", 0) if odo_log else 0
@@ -1074,9 +1075,9 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "today_paid": row_paid,
                         "outstanding_amount": outstanding_amount if (d == datetime.now(timezone.utc).date() and idx == 0) else max(0, daily_rate - row_paid),
                         "daily_status": daily_status,
-                        "paid_on": paid_on_date,
-                        "payment_method": payment_method,
-                        "transaction_id": transaction_id,
+                        "paid_on": row_paid_on,
+                        "payment_method": row_pay_method,
+                        "transaction_id": row_txn_id,
                         "deposit": deposit,
                         "deposit_paid": deposit_paid,
                         "deposit_status": deposit_status,

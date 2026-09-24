@@ -18,9 +18,9 @@ export default function DriverRental() {
       <h1 className="text-2xl font-extrabold text-slate-900">My Rental</h1>
 
       <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
-        <Row icon={Package} label="Package" value={`${rental?.package_name} · ${inr(rental?.daily_rate || 0)}/day`} />
-        <Row icon={Bike} label="Vehicle" value={rental?.vehicle_reg || "—"} />
-        <Row label="Rental Start" value={rental?.start_date ? fmtDate(rental.start_date) : "—"} />
+        <Row icon={Package} label="Package" value={`${rental?.package_name || rental?.plan_name || "Standard"} · ${inr(rental?.daily_rate || 0)}/day`} />
+        <Row icon={Bike} label="Vehicle" value={rental?.vehicle_reg || rental?.vehicle_number || "—"} />
+        <Row label="Rental Start" value={(rental?.start_date || rental?.start) ? fmtDate(rental.start_date || rental.start) : "—"} />
         <Row label="Deposit" value={`${inr(deposit?.amount || 5000)} · ${deposit?.status === "paid" ? "Paid" : "Pending"}`} />
       </div>
 
