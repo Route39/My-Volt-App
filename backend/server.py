@@ -2270,9 +2270,13 @@ async def _driver_payload(user):
             elif not out["deposit"]:
                 out["deposit"] = {"status": "pending", "amount": plan.get("deposit", 5000)}
             
-            # NOTE: Do NOT override rental["daily_rate"] from plan here.
-            # The rental's daily_rate is locked at creation time and must never change.
-            # Changing the package price only affects NEW rentals, not existing ones.
+            # Live plan rate: If the driver is NOT on an active trip, always reflect
+            # the current plan amount. Mid-trip protection means the snapshot_daily_rent
+            # in the odo log is used for billing — the rental record shows the current rate.
+            plan_amount = float(plan.get("amount", 0))
+            if plan_amount > 0 and not user.get("active_trip_id"):
+                # Driver is between trips — show the current plan amount live
+                rental["daily_rate"] = plan_amount
         else:
             out["driver"]["daily_limit_km"] = 0
             out["driver"]["overage_per_km"] = 0.0
@@ -2771,6 +2775,43 @@ async def submit_odometer(
             }
         )
         
+        # ─── POST-TRIP RATE SYNC ───────────────────────────────────────────────
+        # After the trip ends, if the admin changed the package amount while the
+        # driver was protected (mid-trip), apply the NEW rate NOW to all records.
+        if rental:
+            sync_plan = None
+            if rental.get("plan_id"):
+                sync_plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+            elif rental.get("package_name"):
+                sync_plan = await db.rental_plans.find_one({
+                    "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                    "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                    "organization_id": user.get("organization_id")
+                })
+            if sync_plan:
+                new_rate = float(sync_plan.get("amount", 0))
+                if new_rate > 0 and new_rate != daily_rate:
+                    # Sync to driver_rentals
+                    await db.driver_rentals.update_many(
+                        {"driver_id": user["id"], "organization_id": user.get("organization_id"), "status": {"$ne": "ended"}},
+                        {"$set": {"daily_rate": new_rate}}
+                    )
+                    # Sync to rentals (B2B)
+                    await db.rentals.update_many(
+                        {"driver_id": user["id"], "organization_id": user.get("organization_id"), "status": {"$ne": "ended"}},
+                        {"$set": {"daily_rate": new_rate}}
+                    )
+                    # Sync to rental_accounts
+                    await db.rental_accounts.update_many(
+                        {"driver_id": user["id"], "organization_id": user.get("organization_id")},
+                        {"$set": {"daily_rate": new_rate}}
+                    )
+                    # Sync to users record (package_rate shown in driver app)
+                    await db.users.update_one(
+                        {"_id": ObjectId(user["id"])},
+                        {"$set": {"package_rate": new_rate}}
+                    )
+        # ─────────────────────────────────────────────────────────────────────
         
         await db.driver_odometer_logs.update_one(
             {"_id": ObjectId(active_trip_id)},
