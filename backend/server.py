@@ -2160,9 +2160,12 @@ async def _rental_account(rental):
     
     overdue = len(unpaid)
     
-    if outstanding >= (rate * 2) and rate > 0:
+    # Block based on NUMBER OF UNPAID DAYS, not outstanding amount.
+    # Using amount-ratio was wrong: extra KM on 1 day could make outstanding >= 2x daily_rate
+    # and incorrectly block the driver even though they only owe for 1 day.
+    if overdue >= 2 and rate > 0:
         status = "blocked"
-    elif outstanding >= rate and rate > 0:
+    elif overdue >= 1 and rate > 0:
         status = "overdue"
     else:
         status = "active"
