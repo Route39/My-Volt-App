@@ -31,9 +31,13 @@ export default function DriverRental() {
           <div className="text-2xl font-extrabold text-slate-900">{inr(rental?.daily_rate || 0)}</div>
           {(rental?.daily_rate || 0) === 0 ? (
             <span className="inline-flex items-center gap-1.5 text-amber-500 font-semibold text-sm">⚠ Package not set</span>
-          ) : account?.today_paid
-            ? <span className="inline-flex items-center gap-1.5 text-emerald-600 font-semibold text-sm"><ShieldCheck className="w-4 h-4" /> Paid</span>
-            : <button onClick={() => setPay("daily")} data-testid="rental-pay-rent-btn" className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold transition-colors">Pay Now</button>}
+          ) : account?.today_paid ? (
+            <span className="inline-flex items-center gap-1.5 text-emerald-600 font-semibold text-sm"><ShieldCheck className="w-4 h-4" /> Paid</span>
+          ) : account?.unpaid_dates?.includes(account?.today_date) ? (
+            <button onClick={() => setPay("daily")} data-testid="rental-pay-rent-btn" className="h-11 px-5 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold transition-colors">Pay Now</button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-slate-400 font-semibold text-sm">Billed after trip ends</span>
+          )}
         </div>
       </div>
 
