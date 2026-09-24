@@ -2122,8 +2122,13 @@ async def _rental_account(rental):
         status = "active"
         
     today_paid = existing.get("today_paid", False) if existing else False
-    if today.isoformat() not in unpaid and outstanding == 0:
-        today_paid = True # Assume paid if not unpaid and no outstanding
+    # Only mark today as paid if:
+    # 1. Rate > 0 (there is an actual charge to pay), AND
+    # 2. Today is NOT in unpaid dates, AND
+    # 3. There is no outstanding amount
+    # If rate == 0, do NOT show as paid — show "Pay Now" so driver knows to set up the package
+    if rate > 0 and today.isoformat() not in unpaid and outstanding == 0:
+        today_paid = True
         
     reactivated_at = (existing or {}).get("reactivated_at")
     if existing and existing.get("status") == "blocked" and status == "active":
