@@ -454,32 +454,20 @@ export default function DriverHome() {
       {/* Spacer to prevent content from hiding behind sticky bar */}
       <div className="h-24"></div>
 
-      {/* Sticky Bottom Payment Bar - shown when there's outstanding or rent isn't paid today */}
-      {isFullyAssigned && ((account?.outstanding_amount || 0) > 0 || !account?.today_paid) && (
+      {/* Sticky Bottom Payment Bar - shown ONLY when there is actual outstanding amount to pay */}
+      {isFullyAssigned && (account?.outstanding_amount || 0) > 0 && (
         <div className="fixed bottom-16 left-1/2 -translate-x-1/2 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] p-4 flex items-center justify-between z-40 max-w-md w-full">
           <div>
-            {(account?.outstanding_amount || 0) > 0 ? (
-              <>
-                {/* After trip ended - show exact rent + overage */}
-                <div className="text-2xl font-bold text-amber-600 leading-none mb-1">
-                  {inr(account.outstanding_amount)}
-                </div>
-                <div className="text-xs text-slate-500">
-                  <span className="text-slate-700 font-medium">Rent {inr(rental?.daily_rate || 0)}</span>
-                  {(account.outstanding_amount - (rental?.daily_rate || 0)) > 0 && (
-                    <span className="text-red-500 font-semibold"> + Extra KM {inr(account.outstanding_amount - (rental?.daily_rate || 0))}</span>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                {/* During trip or no outstanding - show daily rate */}
-                <div className="text-2xl font-bold text-slate-900 leading-none mb-1">
-                  {inr(rental?.daily_rate || 0)}
-                </div>
-                <div className="text-xs text-slate-500">Daily Rental Amount</div>
-              </>
-            )}
+            {/* Show exact rent + overage breakdown */}
+            <div className="text-2xl font-bold text-amber-600 leading-none mb-1">
+              {inr(account.outstanding_amount)}
+            </div>
+            <div className="text-xs text-slate-500">
+              <span className="text-slate-700 font-medium">Rent {inr(rental?.daily_rate || 0)}</span>
+              {(account.outstanding_amount - (rental?.daily_rate || 0)) > 0 && (
+                <span className="text-red-500 font-semibold"> + Extra KM {inr(account.outstanding_amount - (rental?.daily_rate || 0))}</span>
+              )}
+            </div>
           </div>
           <button 
             onClick={() => setPay("daily")}

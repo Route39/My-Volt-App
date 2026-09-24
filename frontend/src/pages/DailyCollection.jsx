@@ -240,7 +240,7 @@ export default function DailyCollection() {
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
                             NOT PAID
                           </div>
-                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr((it.total_charge ?? it.daily_rate) - it.today_paid)}</span>
+                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr(Math.max(it.outstanding_amount || 0, (it.total_charge ?? it.daily_rate) - it.today_paid))}</span>
                         </div>
                       )}
                     </td>
