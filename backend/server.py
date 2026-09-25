@@ -634,17 +634,24 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
                 overage_per_km = 0.0
                 daily_rent = drv.get("package_rate", 0) if drv else 0
             
-            # Freeze the snapshot into the DB so old logs don't drift on package updates
-            await db.driver_odometer_logs.update_one(
-                {"_id": ObjectId(log["_id"])},
-                {"$set": {
-                    "snapshot_daily_rent": daily_rent,
-                    "snapshot_package_name": pkg_name,
-                    "snapshot_daily_limit": daily_limit,
-                    "snapshot_overage_per_km": overage_per_km,
-                    "snapshot_monthly_limit": monthly_limit
-                }}
-            )
+            # Freeze the snapshot into the DB so old logs don't drift on package updates.
+            # Only do this once the trip has actually finished. A log that's still
+            # "active" (ongoing) predates the start-time snapshot fix and must NOT be
+            # frozen with today's live package values here — that would let a mid-trip
+            # admin edit leak into a trip that's still running. It gets its real,
+            # correct snapshot the moment the trip ends (see submit_odometer /
+            # admin_submit_odometer), so for now this is just a live display estimate.
+            if log.get("status") != "active":
+                await db.driver_odometer_logs.update_one(
+                    {"_id": ObjectId(log["_id"])},
+                    {"$set": {
+                        "snapshot_daily_rent": daily_rent,
+                        "snapshot_package_name": pkg_name,
+                        "snapshot_daily_limit": daily_limit,
+                        "snapshot_overage_per_km": overage_per_km,
+                        "snapshot_monthly_limit": monthly_limit
+                    }}
+                )
         
         driven_today = log.get("driven_today", 0) or 0
         extra_km = max(0, driven_today - daily_limit) if daily_limit > 0 else 0
@@ -2155,6 +2162,40 @@ async def _active_rental(org, did):
     return await db.rentals.find_one({"organization_id": org, "driver_id": did, "status": {"$ne": "closed"}})
 
 
+async def _get_package_snapshot(org, did):
+    """Resolve a driver's package (rate + KM limits) LIVE from rental_plans.
+
+    IMPORTANT: only call this when STARTING a new trip, to freeze it onto that
+    trip's odometer log. Never call this mid-trip or at trip-end for billing/limits
+    — that is exactly what let an admin's package edit leak into an already-running
+    trip. Once frozen (snapshot_* fields on the log), those values are what must be
+    used for that trip's entire lifetime, no matter what the package looks like now.
+    """
+    rental = await _active_rental(org, did)
+    if not rental:
+        return None
+    plan = None
+    if rental.get("plan_id"):
+        plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+    elif rental.get("package_name"):
+        plan = await db.rental_plans.find_one({
+            "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+            "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+            "organization_id": org
+        })
+    monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
+    import calendar
+    now = datetime.now()
+    days_in_month = calendar.monthrange(now.year, now.month)[1]
+    return {
+        "daily_rate": rental.get("daily_rate", 0),
+        "package_name": (plan.get("name") if plan else rental.get("package_name", "")) or "",
+        "monthly_km_limit": monthly_km_limit,
+        "daily_limit_km": round(monthly_km_limit / days_in_month) if days_in_month else 0,
+        "overage_per_km": plan.get("overage_per_km", 0.0) if plan else 0.0,
+    }
+
+
 async def _rental_account(rental):
     """Fetch a driver's rental account server-side. Single source of truth for post-paid odometer billing."""
     org = rental["organization_id"]
@@ -2262,26 +2303,41 @@ async def _driver_payload(user):
                 "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
                 "organization_id": org
             })
-            
-        out["driver"]["package_limit_km"] = plan.get("monthly_km_limit", 0) if plan else 0
-        out["driver"]["monthly_km_limit"] = plan.get("monthly_km_limit", 0) if plan else 0
+        
+        # While a trip is running, show whatever KM limit / overage rate was frozen
+        # onto it at START — not whatever the admin has the package set to right
+        # now. Only a driver with no active trip sees the live/current package,
+        # since that's what their NEXT (fresh) trip will actually use.
+        active_log = None
+        if user.get("active_trip_id"):
+            active_log = await db.driver_odometer_logs.find_one({"_id": ObjectId(user["active_trip_id"])})
+        
+        if active_log and "snapshot_daily_rent" in active_log:
+            monthly_km_limit = active_log.get("snapshot_monthly_limit", 0)
+            daily_limit_km = active_log.get("snapshot_daily_limit", 0)
+            overage_per_km = active_log.get("snapshot_overage_per_km", 0.0)
+        else:
+            monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
+            overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
+            if plan:
+                import calendar
+                from datetime import datetime
+                now = datetime.now()
+                days_in_month = calendar.monthrange(now.year, now.month)[1]
+                daily_limit_km = round(monthly_km_limit / days_in_month) if days_in_month else 0
+            else:
+                daily_limit_km = 0
+        
+        out["driver"]["package_limit_km"] = monthly_km_limit
+        out["driver"]["monthly_km_limit"] = monthly_km_limit
+        out["driver"]["daily_limit_km"] = daily_limit_km
+        out["driver"]["overage_per_km"] = overage_per_km
         
         if plan:
-            import calendar
-            from datetime import datetime
-            now = datetime.now()
-            days_in_month = calendar.monthrange(now.year, now.month)[1]
-            out["driver"]["daily_limit_km"] = round(plan.get("monthly_km_limit", 0) / days_in_month) if days_in_month else 0
-            out["driver"]["overage_per_km"] = plan.get("overage_per_km", 0.0)
-            
             if out["deposit"] and out["deposit"].get("status") != "paid":
                 out["deposit"]["amount"] = plan.get("deposit", out["deposit"]["amount"])
             elif not out["deposit"]:
                 out["deposit"] = {"status": "pending", "amount": plan.get("deposit", 5000)}
-            
-        else:
-            out["driver"]["daily_limit_km"] = 0
-            out["driver"]["overage_per_km"] = 0.0
             
         start_str = rental.get("start", rental.get("start_date", ""))
         
@@ -2573,6 +2629,11 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         # START TRIP
         acct = await db.rental_accounts.find_one({"driver_id": driver_id})
         
+        # Freeze whatever package is active RIGHT NOW onto this trip. Any admin edit
+        # to the package after this point must not affect this trip — only a fresh
+        # trip started after the edit should see the new rate/limit/overage.
+        snap = await _get_package_snapshot(driver.get("organization_id"), driver_id)
+        
         # (Removed daily rent addition at start; it will be added at end trip)
         res = await db.driver_odometer_logs.insert_one({
             "driver_id": driver_id,
@@ -2581,7 +2642,12 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             "start_reading": reading,
             "start_image_url": url,
             "status": "active",
-            "created_at": now_iso()
+            "created_at": now_iso(),
+            "snapshot_daily_rent": snap["daily_rate"] if snap else 0,
+            "snapshot_package_name": snap["package_name"] if snap else "",
+            "snapshot_daily_limit": snap["daily_limit_km"] if snap else 0,
+            "snapshot_overage_per_km": snap["overage_per_km"] if snap else 0.0,
+            "snapshot_monthly_limit": snap["monthly_km_limit"] if snap else 0
         })
         
         await db.drivers.update_one(
@@ -2622,35 +2688,39 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             }}
         )
         
-        # Calculate Billing and Overages
+        # Calculate Billing and Overages — use the package that was FROZEN onto this
+        # trip when it started (see the "START TRIP" branch above), never whatever
+        # the package looks like right now. This is what stops a mid-trip admin edit
+        # from changing the bill/limits of a trip that's already running.
         rental = await _active_rental(driver.get("organization_id"), driver_id)
-        daily_rate = rental.get("daily_rate", 0) if rental else 0
-        
-        limit_km = 0
-        overage_per_km = 0.0
-        
-        if rental:
+        if "snapshot_daily_rent" in log:
+            daily_rate = log.get("snapshot_daily_rent", 0)
+            daily_limit_km = log.get("snapshot_daily_limit", 0)
+            overage_per_km = log.get("snapshot_overage_per_km", 0.0)
+            monthly_limit_km = log.get("snapshot_monthly_limit", 0)
+            plan_name = log.get("snapshot_package_name", "")
+        else:
+            # Legacy trip: started before this fix existed, so it has no frozen
+            # snapshot. Fall back to a live lookup just this once so it doesn't
+            # crash — every trip started from now on always has a snapshot.
+            daily_rate = rental.get("daily_rate", 0) if rental else 0
             plan = None
-            if rental.get("package_id"):
-                plan = await db.rental_plans.find_one({"_id": oid(rental["package_id"])})
-            elif rental.get("package_name"):
-                plan = await db.rental_plans.find_one({
-                    "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"}, 
-                    "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
-                    "organization_id": driver.get("organization_id")
-                })
-                
-            daily_limit_km = 0
-            overage_per_km = 0.0
-            if plan:
-                monthly_limit_km = plan.get("monthly_km_limit", 0)
-                overage_per_km = plan.get("overage_per_km", 0.0)
-                
-                import calendar
-                now = datetime.now()
-                days_in_month = calendar.monthrange(now.year, now.month)[1]
-                
-                daily_limit_km = round(monthly_limit_km / days_in_month) if days_in_month else 0
+            if rental:
+                if rental.get("package_id"):
+                    plan = await db.rental_plans.find_one({"_id": oid(rental["package_id"])})
+                elif rental.get("package_name"):
+                    plan = await db.rental_plans.find_one({
+                        "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                        "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                        "organization_id": driver.get("organization_id")
+                    })
+            monthly_limit_km = plan.get("monthly_km_limit", 0) if plan else 0
+            overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
+            import calendar
+            now = datetime.now()
+            days_in_month = calendar.monthrange(now.year, now.month)[1]
+            daily_limit_km = round(monthly_limit_km / days_in_month) if days_in_month else 0
+            plan_name = (plan.get("name") if plan else (rental.get("package_name", "") if rental else "")) or ""
                 
         overage_km = max(0, driven - daily_limit_km)
         overage_charge = overage_km * overage_per_km
@@ -2724,10 +2794,10 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             {"_id": ObjectId(active_trip_id)},
             {"$set": {
                 "snapshot_daily_rent": daily_rate,
-                "snapshot_package_name": plan['name'] if plan else (rental.get('package_name', '') if rental else ''),
+                "snapshot_package_name": plan_name,
                 "snapshot_daily_limit": daily_limit_km,
                 "snapshot_overage_per_km": overage_per_km,
-                "snapshot_monthly_limit": monthly_limit_km if plan else 0,
+                "snapshot_monthly_limit": monthly_limit_km,
                 "extra_km": overage_km,
                 "extra_km_charge": overage_charge,
                 "snapshot_monthly_kms_used": current_month_kms
@@ -2767,6 +2837,11 @@ async def submit_odometer(
         if acct and acct.get("outstanding_amount", 0) > 0:
             raise HTTPException(400, f"You must pay your outstanding rent (₹{acct['outstanding_amount']}) before starting today's trip.")
             
+        # Freeze whatever package is active RIGHT NOW onto this trip. Any admin edit
+        # to the package after this point must not affect this trip — only a fresh
+        # trip started after the edit should see the new rate/limit/overage.
+        snap = await _get_package_snapshot(user.get("organization_id"), user["id"])
+        
         # (Removed daily rent addition at start; it will be added at end trip)
         res = await db.driver_odometer_logs.insert_one({
             "driver_id": user["id"],
@@ -2775,7 +2850,12 @@ async def submit_odometer(
             "start_reading": reading,
             "start_image_url": url,
             "status": "active",
-            "created_at": now_iso()
+            "created_at": now_iso(),
+            "snapshot_daily_rent": snap["daily_rate"] if snap else 0,
+            "snapshot_package_name": snap["package_name"] if snap else "",
+            "snapshot_daily_limit": snap["daily_limit_km"] if snap else 0,
+            "snapshot_overage_per_km": snap["overage_per_km"] if snap else 0.0,
+            "snapshot_monthly_limit": snap["monthly_km_limit"] if snap else 0
         })
         
         await db.drivers.update_one(
@@ -2819,36 +2899,39 @@ async def submit_odometer(
             }}
         )
         
-        # Calculate Billing and Overages
+        # Calculate Billing and Overages — use the package that was FROZEN onto this
+        # trip when it started (see the "START TRIP" branch above), never whatever
+        # the package looks like right now. This is what stops a mid-trip admin edit
+        # from changing the bill/limits of a trip that's already running.
         rental = await _active_rental(user.get("organization_id"), user["id"])
-        daily_rate = rental.get("daily_rate", 0) if rental else 0
-        
-        limit_km = 0
-        overage_per_km = 0.0
-        
-        if rental:
+        if "snapshot_daily_rent" in log:
+            daily_rate = log.get("snapshot_daily_rent", 0)
+            daily_limit_km = log.get("snapshot_daily_limit", 0)
+            overage_per_km = log.get("snapshot_overage_per_km", 0.0)
+            monthly_limit_km = log.get("snapshot_monthly_limit", 0)
+            plan_name = log.get("snapshot_package_name", "")
+        else:
+            # Legacy trip: started before this fix existed, so it has no frozen
+            # snapshot. Fall back to a live lookup just this once so it doesn't
+            # crash — every trip started from now on always has a snapshot.
+            daily_rate = rental.get("daily_rate", 0) if rental else 0
             plan = None
-            if rental.get("package_id"):
-                plan = await db.rental_plans.find_one({"_id": oid(rental["package_id"])})
-            elif rental.get("package_name"):
-                plan = await db.rental_plans.find_one({
-                    "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"}, 
-                    "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
-                    "organization_id": user.get("organization_id")
-                })
-                
-            daily_limit_km = 0
-            overage_per_km = 0.0
-            if plan:
-                monthly_limit_km = plan.get("monthly_km_limit", 0)
-                overage_per_km = plan.get("overage_per_km", 0.0)
-                
-                # New logic: Calculate daily overage
-                import calendar
-                now = datetime.now()
-                days_in_month = calendar.monthrange(now.year, now.month)[1]
-                
-                daily_limit_km = round(monthly_limit_km / days_in_month) if days_in_month else 0
+            if rental:
+                if rental.get("package_id"):
+                    plan = await db.rental_plans.find_one({"_id": oid(rental["package_id"])})
+                elif rental.get("package_name"):
+                    plan = await db.rental_plans.find_one({
+                        "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                        "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                        "organization_id": user.get("organization_id")
+                    })
+            monthly_limit_km = plan.get("monthly_km_limit", 0) if plan else 0
+            overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
+            import calendar
+            now = datetime.now()
+            days_in_month = calendar.monthrange(now.year, now.month)[1]
+            daily_limit_km = round(monthly_limit_km / days_in_month) if days_in_month else 0
+            plan_name = (plan.get("name") if plan else (rental.get("package_name", "") if rental else "")) or ""
                 
         # Overage calculated ONLY for today's driven km
         overage_km = max(0, driven - daily_limit_km)
@@ -2935,10 +3018,10 @@ async def submit_odometer(
             {"_id": ObjectId(active_trip_id)},
             {"$set": {
                 "snapshot_daily_rent": daily_rate,
-                "snapshot_package_name": plan['name'] if plan else (rental.get('package_name', '') if rental else ''),
+                "snapshot_package_name": plan_name,
                 "snapshot_daily_limit": daily_limit_km,
                 "snapshot_overage_per_km": overage_per_km,
-                "snapshot_monthly_limit": monthly_limit_km if plan else 0,
+                "snapshot_monthly_limit": monthly_limit_km,
                 "extra_km": overage_km,
                 "extra_km_charge": overage_charge,
                 "snapshot_monthly_kms_used": current_month_kms
