@@ -201,7 +201,11 @@ export default function DailyCollection() {
                     </td>
                     <td className="px-5 py-4 text-mv-muted">{it.start_meter || "—"}</td>
                     <td className="px-5 py-4 text-mv-muted">{it.end_meter || "—"}</td>
-                    <td className="px-5 py-4 font-medium">{it.total_km || "—"} km</td>
+                    <td className="px-5 py-4 font-medium">
+                      {it.total_km ? `${it.total_km} km` : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">No Trip</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4 font-display font-bold">
                       <div className="text-amber-500/90">{inr(it.daily_rate)}</div>
                       {(it.extra_km_charge > 0) && (
