@@ -107,7 +107,7 @@ export default function DriverHome() {
   const km_percentage = Math.min(100, (current_month_kms / limit_km) * 100);
 
   const st = STATUS_UI[account?.status || "active"];
-  const depositPaid = deposit?.status === "paid";
+  const depositPaid = !deposit || deposit.amount === 0 || deposit.status === "paid";
   const kyc = driver.kyc_status;
   
   const today = new Date().toISOString().split("T")[0];
