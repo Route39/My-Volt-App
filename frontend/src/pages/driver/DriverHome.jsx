@@ -365,31 +365,7 @@ export default function DriverHome() {
           </div>
           
           <div className="col-span-2 mt-2 pt-4 border-t border-emerald-600/30">
-            <div className="grid grid-cols-2 gap-3">
-              
-              {/* Left: Daily KM Limit */}
-              <div className="bg-emerald-800/50 rounded-2xl p-3">
-                <div className="text-[10px] text-emerald-300/70 font-semibold uppercase tracking-wider mb-2">Daily Limit</div>
-                <div className="text-2xl font-extrabold leading-none">
-                  {driver.daily_limit_km || 0}
-                  <span className="text-xs font-normal text-emerald-300/80 ml-1">km / day</span>
-                </div>
-                {(driver.today_driven_km > 0) && (
-                  <div className="mt-2 space-y-0.5">
-                    <div className="text-[11px] text-emerald-300/80">
-                      Today ridden: <span className="font-bold text-white">{driver.today_driven_km} km</span>
-                    </div>
-                    {(driver.today_overage_km > 0) && (
-                      <div className="text-[11px] text-red-300 font-semibold">
-                        Extra: +{driver.today_overage_km} km @ ₹{driver.overage_per_km || 0}/km
-                      </div>
-                    )}
-                  </div>
-                )}
-                {!(driver.today_driven_km > 0) && (
-                  <div className="text-[11px] text-emerald-300/60 mt-2">No trip today yet</div>
-                )}
-              </div>
+            <div className="grid grid-cols-1 gap-3">
 
               {/* Right: Monthly KM Limit */}
               <div className="bg-emerald-800/50 rounded-2xl p-3">

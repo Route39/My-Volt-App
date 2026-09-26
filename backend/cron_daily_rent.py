@@ -3,6 +3,10 @@ import os
 from datetime import datetime
 import calendar
 from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+
+# Load environment variables from .env file so the cron job knows where the DB is
+load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 client = AsyncIOMotorClient(MONGO_URI)

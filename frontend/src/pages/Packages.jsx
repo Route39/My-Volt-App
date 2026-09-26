@@ -111,10 +111,6 @@ export default function Packages() {
                             <span className="font-extrabold text-mv-primary text-xl">{isActive ? inr(pkg.amount) : "—"}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm">
-                            <span className="text-mv-muted">Daily Limit</span>
-                            <span className="font-semibold text-mv-text">{isActive ? `${pkg.daily_limit_km} km` : "—"}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-sm">
                             <span className="text-mv-muted">Monthly Limit</span>
                             <span className="font-semibold text-mv-text">{isActive ? `${pkg.monthly_km_limit} km` : "—"}</span>
                           </div>
