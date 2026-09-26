@@ -148,7 +148,6 @@ function PackageForm({ editData, onBack, onSaved }) {
     city: city,
     amount: pkg?.amount || "",
     deposit: pkg?.deposit || 5000,
-    daily_limit_km: pkg?.daily_limit_km || "",
     monthly_km_limit: pkg?.monthly_km_limit || "",
     overage_per_km: pkg?.overage_per_km || "",
     active: pkg?.active ?? true
@@ -157,21 +156,10 @@ function PackageForm({ editData, onBack, onSaved }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Helper to pre-calculate daily limits perfectly as user wanted (monthly/current month days)
-  const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-
-  const handleMonthlyLimitChange = (val) => {
-    const num = Number(val);
-    set("monthly_km_limit", val);
-    if (!isNaN(num) && num > 0) {
-      set("daily_limit_km", Math.round(num / daysInMonth));
-    } else {
-      set("daily_limit_km", "");
-    }
-  };
+  const handleLimitChange = (e) => set("monthly_km_limit", e.target.value);;
 
   const save = async () => {
-    if (!form.name || form.amount === "" || form.daily_limit_km === "" || form.monthly_km_limit === "" || form.overage_per_km === "" || form.deposit === "") {
+    if (!form.name || form.amount === "" || form.monthly_km_limit === "" || form.overage_per_km === "" || form.deposit === "") {
       return toast.error("Please fill all fields accurately");
     }
     setSaving(true);
@@ -182,7 +170,6 @@ function PackageForm({ editData, onBack, onSaved }) {
         city: form.city,
         amount: Number(form.amount),
         deposit: Number(form.deposit),
-        daily_limit_km: Number(form.daily_limit_km),
         monthly_km_limit: Number(form.monthly_km_limit),
         overage_per_km: Number(form.overage_per_km),
         active: form.active

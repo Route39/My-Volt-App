@@ -415,7 +415,7 @@ export default function DriverHome() {
 
             </div>
             <div className="text-[10px] text-emerald-300/60 leading-tight mt-2 text-center">
-              Overage ₹{driver.overage_per_km || 0}/km above daily limit · Extra km billed separately
+              Overage ₹{driver.overage_per_km || 0}/km above monthly limit · Extra km billed separately
             </div>
           </div>
         </div>

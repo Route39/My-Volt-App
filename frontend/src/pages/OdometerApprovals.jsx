@@ -132,7 +132,6 @@ export default function OdometerApprovals() {
               <th className="px-3 py-4 whitespace-nowrap">Start KM</th>
               <th className="px-3 py-4 whitespace-nowrap">End KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-indigo-600">Today Driven</th>
-              <th className="px-3 py-4 whitespace-nowrap">Daily Limit</th>
               <th className="px-3 py-4 whitespace-nowrap text-red-500">Extra KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Monthly KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Status</th>
@@ -150,10 +149,8 @@ export default function OdometerApprovals() {
                 const percent = Math.min(100, Math.max(0, limit ? (log.monthly_kms / limit) * 100 : 0));
                 const overLimit = limit > 0 && log.monthly_kms > limit;
                 const driven = log.driven_today || 0;
-                const dailyLimit = log.daily_limit_km || 0;
                 const extraKm = log.extra_km || 0;
                 const extraCharge = log.extra_km_charge || 0;
-                const withinLimit = dailyLimit > 0 && driven <= dailyLimit;
                 const overDaily = extraKm > 0;
 
                 return (
