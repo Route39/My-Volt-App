@@ -208,6 +208,11 @@ export default function DriverHome() {
                 <h2 className="text-xl font-extrabold text-slate-900 mb-2">Payment Required</h2>
                 <p className="text-slate-500 text-sm mb-6">
                   You have an outstanding balance of {inr(account.outstanding_amount)}. Please pay it to start today's trip.
+                  <br /><br />
+                  <span className="block text-xs font-medium text-slate-400">Note: Daily rental amount must be paid whether you operate the vehicle or keep it idle.</span>
+                  {account?.unpaid_dates?.length > 0 && (
+                    <span className="block mt-2 text-xs font-bold text-red-500">Unpaid Dates: {account.unpaid_dates.join(", ")}</span>
+                  )}
                 </p>
                 <button 
                   onClick={() => { setShowEndModal(false); setPay("daily"); }}
