@@ -101,7 +101,18 @@ export default function Drivers() {
                 <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5" /> {d.city}</div>
                 {d.package_name && <div className="flex items-center gap-2 text-mv-primary"><KeyRound className="w-3.5 h-3.5" /> {d.package_name} Plan</div>}
               </div>
-              {d.rental_status === "active" && <div className="mt-3"><StatusChip status="active" label="Rental Active" /></div>}
+              {d.rental_status === "active" && d.rental_block_status !== "blocked" && <div className="mt-3"><StatusChip status="active" label="Rental Active" /></div>}
+              {d.rental_block_status === "blocked" && (
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-100 text-red-600 text-[10px] font-bold">Blocked (Unpaid)</span>
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    if(window.confirm("Unblock this driver? They will have 24 hours to pay.")) {
+                      try { await api.post(`/admin/drivers/${d.id}/unblock`); load(); } catch(err) { alert("Failed to unblock"); }
+                    }
+                  }} className="text-[10px] text-emerald-600 font-bold hover:underline px-2 py-1 bg-emerald-50 rounded-lg">Unblock Driver</button>
+                </div>
+              )}
             </button>
           ))}
         </div>
@@ -125,8 +136,24 @@ export default function Drivers() {
                 <td className="px-4 py-3 text-mv-muted">{d.package_name || "N/A"}</td>
                 <td className="px-4 py-3">{d.city}</td>
                 <td className="px-4 py-3"><KycStatusChip status={d.kyc_status || "pending"} /></td>
-                <td className="px-4 py-3"><StatusChip status={d.status} /></td>
+                <td className="px-4 py-3">
+                  <StatusChip status={d.status} />
+                  {d.rental_block_status === "blocked" && (
+                    <div className="mt-1">
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-600 text-[9px] font-bold">Blocked (Unpaid)</span>
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                  {d.rental_block_status === "blocked" && (
+                    <button onClick={async () => {
+                      if(window.confirm("Unblock this driver? They will have 24 hours to pay.")) {
+                        try { await api.post(`/admin/drivers/${d.id}/unblock`); load(); } catch(err) { alert("Failed to unblock"); }
+                      }
+                    }} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded text-[10px] font-bold mr-2 transition-colors border border-emerald-200">
+                      Unblock
+                    </button>
+                  )}
                   <button onClick={async () => {
                     if(window.confirm("Delete driver completely?")) {
                       await api.delete(`/drivers/${d.id}`);

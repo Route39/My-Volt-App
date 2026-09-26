@@ -89,7 +89,7 @@ async def get_user(request: Request):
 
 
 def org_filter(user: dict, extra: dict = None):
-    f = {"organization_id": user.get("organization_id")}
+    f = {"organization_id": user.get("organization_id") or "route39-org"}
     # City managers are restricted to their assigned city
     if user.get("role") == "city_manager" and user.get("city"):
         f["city"] = user["city"]
@@ -716,6 +716,19 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
                     d["current_vehicle_reg"] = v.get("registration_number")
             except Exception:
                 pass
+                
+        # Inject real-time rental block status
+        rent_acct = await db.rental_accounts.find_one({"driver_id": str(d["_id"])})
+        if rent_acct:
+            today_str = _today_ist().isoformat()
+            status = rent_acct.get("status", "active")
+            grace = rent_acct.get("grace_period_until")
+            if status == "blocked" and grace and grace >= today_str:
+                status = "active"
+            d["rental_block_status"] = status
+        else:
+            d["rental_block_status"] = "active"
+            
     return [ser(d) for d in docs]
 
 
@@ -789,7 +802,7 @@ async def create_driver(body: DriverBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
-    doc["organization_id"] = user.get("organization_id", "route39-org")
+    doc["organization_id"] = user.get("organization_id") or "route39-org"
     doc["created_at"] = now_iso()
     res = await db.drivers.insert_one(doc)
     await log_audit(user, "driver_created", "driver", str(res.inserted_id), f"Driver {body.name} added")
@@ -806,6 +819,21 @@ async def update_driver(did: str, body: dict, request: Request):
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Driver not found")
     return ser(await db.drivers.find_one({"_id": oid(did)}))
+
+
+@api.post("/admin/drivers/{did}/unblock")
+async def unblock_driver(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    tomorrow = (_today_ist() + timedelta(days=1)).isoformat()
+    res = await db.rental_accounts.update_one(
+        org_filter(user, {"driver_id": did}),
+        {"$set": {"grace_period_until": tomorrow}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Rental account not found")
+    await log_audit(user, "driver_unblocked", "driver", did, "Driver manually unblocked for 24h grace period")
+    return {"ok": True}
 
 
 @api.post("/drivers/{did}/assign-vehicle")
@@ -2215,14 +2243,18 @@ async def _rental_account(rental):
     
     overdue = len(unpaid)
     
+    grace_period_until = existing.get("grace_period_until") if existing else None
+
     # Block based on NUMBER OF UNPAID DAYS, not outstanding amount.
-    # Using amount-ratio was wrong: extra KM on 1 day could make outstanding >= 2x daily_rate
-    # and incorrectly block the driver even though they only owe for 1 day.
     if overdue >= 2 and rate > 0:
         status = "blocked"
     elif overdue >= 1 and rate > 0:
         status = "overdue"
     else:
+        status = "active"
+
+    # Admin manual unblock logic
+    if status == "blocked" and grace_period_until and grace_period_until >= today.isoformat():
         status = "active"
         
     # today_paid logic — the ONLY correct rule:
