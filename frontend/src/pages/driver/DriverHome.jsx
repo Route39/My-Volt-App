@@ -51,18 +51,22 @@ export default function DriverHome() {
     }
     
     // Auto-hide approved banner after 10s
+    let timer;
     if (kycStatus === "approved" && !isApprovedHidden) {
-      const timer = setTimeout(async () => {
+      timer = setTimeout(async () => {
         setHideApproved(true);
         try { await dapi.post("/driver/kyc/ack-approved"); } catch (e) {}
       }, 10000);
-      return () => clearTimeout(timer);
     }
     
     // Auto-show deposit popup if unpaid
     if (data && data.deposit && data.deposit.amount > 0 && data.deposit.status !== "paid") {
       setPay("deposit");
     }
+    
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [data, kycStatus, hideApproved]);
 
   const handleCloseModal = async () => {
