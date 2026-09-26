@@ -85,7 +85,10 @@ def oid(id_str):
 
 
 async def get_user(request: Request):
-    return await authlib.current_user_from_request(request, db)
+    user = await authlib.current_user_from_request(request, db)
+    if not user.get("organization_id"):
+        user["organization_id"] = "route39-org"
+    return user
 
 
 def org_filter(user: dict, extra: dict = None):
@@ -753,11 +756,10 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     
     # Find driver by org only (not city-restricted) so any city manager in the org can delete
-    drv = await db.drivers.find_one({"_id": oid(did), "organization_id": user.get("organization_id")})
+    org = user.get("organization_id") or "route39-org"
+    drv = await db.drivers.find_one({"_id": oid(did), "organization_id": org})
     if not drv:
         raise HTTPException(status_code=404, detail="Driver not found")
-    
-    org = user.get("organization_id")
     
     # Check for unpaid balance unless force delete
     if not force:
