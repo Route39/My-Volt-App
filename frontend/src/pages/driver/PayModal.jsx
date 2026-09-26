@@ -103,9 +103,9 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center" data-testid="pay-modal">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={phase !== "processing" ? close : undefined} />
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={phase !== "processing" && kind !== "deposit" ? close : undefined} />
       <div className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-[rise_.25s_ease]">
-        {phase !== "processing" && (
+        {phase !== "processing" && kind !== "deposit" && (
           <button onClick={close} data-testid="pay-close" className="absolute top-4 right-4 text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
         )}
 
