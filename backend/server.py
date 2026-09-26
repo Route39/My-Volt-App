@@ -2184,14 +2184,11 @@ async def _get_package_snapshot(org, did):
             "organization_id": org
         })
     monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
-    import calendar
-    now = datetime.now()
-    days_in_month = calendar.monthrange(now.year, now.month)[1]
     return {
         "daily_rate": rental.get("daily_rate", 0),
         "package_name": (plan.get("name") if plan else rental.get("package_name", "")) or "",
         "monthly_km_limit": monthly_km_limit,
-        "daily_limit_km": round(monthly_km_limit / days_in_month) if days_in_month else 0,
+        "daily_limit_km": 0,
         "overage_per_km": plan.get("overage_per_km", 0.0) if plan else 0.0,
     }
 
@@ -2320,11 +2317,7 @@ async def _driver_payload(user):
             monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
             overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
             if plan:
-                import calendar
-                from datetime import datetime
-                now = datetime.now()
-                days_in_month = calendar.monthrange(now.year, now.month)[1]
-                daily_limit_km = round(monthly_km_limit / days_in_month) if days_in_month else 0
+                daily_limit_km = 0
             else:
                 daily_limit_km = 0
         
@@ -2716,13 +2709,11 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
                     })
             monthly_limit_km = plan.get("monthly_km_limit", 0) if plan else 0
             overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
-            import calendar
-            now = datetime.now()
-            days_in_month = calendar.monthrange(now.year, now.month)[1]
-            daily_limit_km = round(monthly_limit_km / days_in_month) if days_in_month else 0
+            daily_limit_km = 0
             plan_name = (plan.get("name") if plan else (rental.get("package_name", "") if rental else "")) or ""
                 
-        overage_km = max(0, driven - daily_limit_km)
+        # Admin submit: Overage calculated against MONTHLY limit
+        overage_km = max(0, (current_month_kms + driven) - monthly_limit_km) - max(0, current_month_kms - monthly_limit_km)
         overage_charge = overage_km * overage_per_km
         
         total_charge = daily_rate + overage_charge
@@ -2927,14 +2918,11 @@ async def submit_odometer(
                     })
             monthly_limit_km = plan.get("monthly_km_limit", 0) if plan else 0
             overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
-            import calendar
-            now = datetime.now()
-            days_in_month = calendar.monthrange(now.year, now.month)[1]
-            daily_limit_km = round(monthly_limit_km / days_in_month) if days_in_month else 0
+            daily_limit_km = 0
             plan_name = (plan.get("name") if plan else (rental.get("package_name", "") if rental else "")) or ""
                 
-        # Overage calculated ONLY for today's driven km
-        overage_km = max(0, driven - daily_limit_km)
+        # Overage calculated against MONTHLY limit across all days
+        overage_km = max(0, (current_month_kms + driven) - monthly_limit_km) - max(0, current_month_kms - monthly_limit_km)
         overage_charge = overage_km * overage_per_km
         
         # ALL driven KMs (including extra/overage) reduce the monthly total
