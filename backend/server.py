@@ -1012,10 +1012,17 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
     for r in rentals:
         rid = str(r["_id"])
         
-        deposit = r.get("deposit", 5000)
-        total_paid = r.get("paid", 0)
-        deposit_paid = min(total_paid, deposit)
-        deposit_status = "paid" if deposit_paid >= deposit else "pending"
+        sec_dep = await db.security_deposits.find_one({"driver_id": r["driver_id"], "organization_id": user.get("organization_id")})
+        if sec_dep:
+            deposit = sec_dep.get("amount", 5000)
+            deposit_paid = deposit if sec_dep.get("status") == "paid" else 0
+            deposit_status = sec_dep.get("status", "pending")
+            deposit_txn_id = sec_dep.get("transaction_id", "")
+        else:
+            deposit = r.get("deposit", 5000)
+            deposit_paid = 0
+            deposit_status = "pending"
+            deposit_txn_id = ""
         
         drv_doc = await db.drivers.find_one({"_id": ObjectId(r["driver_id"])}) if r.get("driver_id") else None
         driver_avatar = drv_doc.get("avatar") if drv_doc else None
@@ -1113,6 +1120,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "deposit": deposit,
                         "deposit_paid": deposit_paid,
                         "deposit_status": deposit_status,
+                        "deposit_transaction_id": deposit_txn_id,
                         "start_meter": start_meter if start_meter else None,
                         "end_meter": end_meter if end_meter else None,
                         "total_km": total_km if total_km else None,

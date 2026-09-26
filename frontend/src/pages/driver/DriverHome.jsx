@@ -414,7 +414,9 @@ export default function DriverHome() {
         <div className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid="home-deposit">
           <div className="flex items-center gap-1.5 text-slate-500 text-xs"><Wallet className="w-3.5 h-3.5" /> Security Deposit</div>
           <div className="text-xl font-extrabold mt-1 text-slate-900">{inr(deposit?.amount || 0)}</div>
-          <div className={`text-[11px] mt-0.5 ${depositPaid ? "text-emerald-600" : "text-amber-600"}`}>{depositPaid ? "✓ Paid" : "Pending"}</div>
+          <div className={`text-[11px] mt-0.5 ${depositPaid ? "text-emerald-600" : "text-amber-600"}`}>
+            {depositPaid ? `✓ Paid (TXN: ${deposit?.transaction_id || 'Cash/Manual'})` : "Pending"}
+          </div>
         </div>
       </div>
       

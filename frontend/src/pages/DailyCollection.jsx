@@ -252,8 +252,15 @@ export default function DailyCollection() {
                         </div>
                       )}
                     </td>
-                    <td className="px-5 py-4 font-display font-bold flex items-center gap-1 text-slate-500">
-                      {inr(it.deposit_paid)} <span className="text-xs text-mv-muted font-sans font-normal">/ {inr(it.deposit)}</span>
+                    <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1 text-slate-500">
+                      <div className="flex items-center gap-1">
+                        {inr(it.deposit_paid)} <span className="text-xs text-mv-muted font-sans font-normal">/ {inr(it.deposit)}</span>
+                      </div>
+                      {it.deposit_status === "paid" && it.deposit > 0 && (
+                        <div className="text-[10px] text-emerald-600 font-bold font-sans">
+                          ✓ Paid {it.deposit_transaction_id ? `(TXN: ${it.deposit_transaction_id})` : ""}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
