@@ -107,7 +107,7 @@ def require_role(user, allowed):
 
 async def log_audit(user, action, entity_type, entity_id=None, summary=""):
     await db.audit_logs.insert_one({
-        "organization_id": user["organization_id"],
+        "organization_id": user.get("organization_id"),
         "actor_id": user["id"],
         "actor_name": user.get("name", ""),
         "action": action,
@@ -255,7 +255,7 @@ async def refresh(request: Request, response: Response):
 async def list_users(request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    users = await db.users.find({"organization_id": user["organization_id"]}).to_list(500)
+    users = await db.users.find({"organization_id": user.get("organization_id")}).to_list(500)
     return [ser(u) for u in users]
 
 
@@ -276,7 +276,7 @@ async def create_user(body: RegisterBody, request: Request):
         "name": body.name,
         "role": body.role if body.role in authlib.ROLES else "staff",
         "city": body.city,
-        "organization_id": user["organization_id"],
+        "organization_id": user.get("organization_id"),
         "created_at": now_iso(),
     }
     res = await db.users.insert_one(doc)
@@ -335,7 +335,7 @@ class PackagePasswordBody(BaseModel):
 async def get_package_password_status(request: Request):
     user = await get_user(request)
     require_role(user, ["admin"])
-    org = await db.organizations.find_one({"org_id": user["organization_id"]})
+    org = await db.organizations.find_one({"org_id": user.get("organization_id")})
     return {"has_password": bool(org and org.get("package_password"))}
 
 @api.post("/settings/package-password")
@@ -343,7 +343,7 @@ async def set_package_password(body: PackagePasswordBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin"])
     await db.organizations.update_one(
-        {"org_id": user["organization_id"]},
+        {"org_id": user.get("organization_id")},
         {"$set": {"package_password": body.password}},
         upsert=True
     )
@@ -353,7 +353,7 @@ async def set_package_password(body: PackagePasswordBody, request: Request):
 async def verify_package_password(body: PackagePasswordBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    org = await db.organizations.find_one({"org_id": user["organization_id"]})
+    org = await db.organizations.find_one({"org_id": user.get("organization_id")})
     stored = org.get("package_password") if org else None
     if not stored:
         return {"ok": True}  # No password set, allow access
@@ -460,7 +460,7 @@ async def create_vehicle(body: VehicleBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
-    doc["organization_id"] = user["organization_id"]
+    doc["organization_id"] = user.get("organization_id")
     doc["created_at"] = now_iso()
     res = await db.vehicles.insert_one(doc)
     await log_audit(user, "vehicle_created", "vehicle", str(res.inserted_id), f"Vehicle {body.vehicle_number} added")
@@ -481,7 +481,7 @@ async def update_vehicle(vid: str, body: dict, request: Request):
 async def delete_vehicle(vid: str, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    org = user["organization_id"]
+    org = user.get("organization_id")
     
     veh = await db.vehicles.find_one(org_filter(user, {"_id": oid(vid)}))
     if not veh: raise HTTPException(404, "Vehicle not found")
@@ -513,16 +513,16 @@ async def transfer_vehicle(vid: str, body: dict, request: Request):
     from_city = v["city"]
     await db.vehicles.update_one({"_id": oid(vid)}, {"$set": {"city": to_city, "parking": body.get("parking")}})
     await db.vehicle_transfers.insert_one({
-        "organization_id": user["organization_id"], "vehicle_id": vid, "vehicle_number": v["vehicle_number"],
+        "organization_id": user.get("organization_id"), "vehicle_id": vid, "vehicle_number": v["vehicle_number"],
         "from_city": from_city, "to_city": to_city, "reason": body.get("reason", ""),
         "notes": body.get("notes", ""), "status": "completed", "created_at": now_iso()})
     await db.audit_logs.insert_one({
-        "organization_id": user["organization_id"], "actor_id": user["id"], "actor_name": user.get("name"),
+        "organization_id": user.get("organization_id"), "actor_id": user["id"], "actor_name": user.get("name"),
         "action": "vehicle_transferred", "entity_type": "vehicle", "entity_id": vid,
         "summary": f"Vehicle {v['vehicle_number']} moved {from_city} to {to_city}",
         "city": to_city, "created_at": now_iso(),
     })
-    await add_notification(user["organization_id"], "blue", "Vehicle transferred",
+    await add_notification(user.get("organization_id"), "blue", "Vehicle transferred",
                            f"{v['vehicle_number']} moved to {to_city}", link=f"/fleet/{vid}", city=to_city)
     return ser(await db.vehicles.find_one({"_id": oid(vid)}))
 
@@ -561,7 +561,7 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     
     # Get all drivers for this org first
-    drv_filter = {"organization_id": user["organization_id"]}
+    drv_filter = {"organization_id": user.get("organization_id")}
     if city and city != "all":
         drv_filter["city"] = city
     if driver_name:
@@ -740,11 +740,11 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     
     # Find driver by org only (not city-restricted) so any city manager in the org can delete
-    drv = await db.drivers.find_one({"_id": oid(did), "organization_id": user["organization_id"]})
+    drv = await db.drivers.find_one({"_id": oid(did), "organization_id": user.get("organization_id")})
     if not drv:
         raise HTTPException(status_code=404, detail="Driver not found")
     
-    org = user["organization_id"]
+    org = user.get("organization_id")
     
     # Check for unpaid balance unless force delete
     if not force:
@@ -802,7 +802,7 @@ async def update_driver(did: str, body: dict, request: Request):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     for k in ("id", "_id", "assignments", "rentals", "incidents", "documents"):
         body.pop(k, None)
-    res = await db.drivers.update_one({"_id": oid(did), "organization_id": user["organization_id"]}, {"$set": body})
+    res = await db.drivers.update_one({"_id": oid(did), "organization_id": user.get("organization_id")}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Driver not found")
     return ser(await db.drivers.find_one({"_id": oid(did)}))
@@ -819,7 +819,7 @@ async def assign_vehicle(did: str, body: dict, request: Request):
     await db.driver_vehicle_assignments.update_many(
         {"driver_id": did, "end": None}, {"$set": {"end": now_iso()}})
     assignment = {
-        "organization_id": user["organization_id"],
+        "organization_id": user.get("organization_id"),
         "driver_id": did, "driver_name": driver["name"],
         "vehicle_id": body["vehicle_id"], "vehicle_number": vehicle["vehicle_number"],
         "city": vehicle["city"], "start": now_iso(), "end": None,
@@ -850,7 +850,7 @@ class PlanBody(BaseModel):
 @api.get("/rental-plans")
 async def list_plans(request: Request):
     user = await get_user(request)
-    docs = await db.rental_plans.find({"organization_id": user["organization_id"]}).to_list(200)
+    docs = await db.rental_plans.find({"organization_id": user.get("organization_id")}).to_list(200)
     return [ser(d) for d in docs]
 
 
@@ -859,7 +859,7 @@ async def create_plan(body: PlanBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
-    doc["organization_id"] = user["organization_id"]
+    doc["organization_id"] = user.get("organization_id")
     doc["created_at"] = now_iso()
     res = await db.rental_plans.insert_one(doc)
     return ser(await db.rental_plans.find_one({"_id": res.inserted_id}))
@@ -879,17 +879,17 @@ async def update_plan(pid: str, body: dict, request: Request):
         
         # 1. Find drivers currently mid-trip (active_trip_id set)
         locked_user_ids = set()
-        async for u in db.users.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
+        async for u in db.users.find({"organization_id": user.get("organization_id"), "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
             locked_user_ids.add(str(u["_id"]))
-        async for d in db.drivers.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
+        async for d in db.drivers.find({"organization_id": user.get("organization_id"), "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
             locked_user_ids.add(str(d["_id"]))
             
         # 2. Find drivers with unpaid dues (outstanding_amount > 0)
-        async for acct in db.rental_accounts.find({"organization_id": user["organization_id"], "outstanding_amount": {"$gt": 0}}):
+        async for acct in db.rental_accounts.find({"organization_id": user.get("organization_id"), "outstanding_amount": {"$gt": 0}}):
             locked_user_ids.add(str(acct["driver_id"]))
         
-        pkg_filter = {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}}
-        city_filter = {"organization_id": user["organization_id"], "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}}
+        pkg_filter = {"organization_id": user.get("organization_id"), "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "status": {"$ne": "ended"}}
+        city_filter = {"organization_id": user.get("organization_id"), "package_name": {"$regex": f"^{plan['name']}$", "$options": "i"}, "city": {"$regex": f"^{plan.get('city', '')}$", "$options": "i"}, "status": {"$ne": "ended"}}
         
         if locked_user_ids:
             pkg_filter["driver_id"] = {"$nin": list(locked_user_ids)}
@@ -907,7 +907,7 @@ async def update_plan(pid: str, body: dict, request: Request):
         
         if drivers_to_update:
             # Update rental_accounts
-            acct_filter = {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}}
+            acct_filter = {"organization_id": user.get("organization_id"), "driver_id": {"$in": drivers_to_update}}
             await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
             # Update users (for package_rate in driver app)
             for d_id in drivers_to_update:
@@ -1154,13 +1154,13 @@ async def create_rental(body: RentalBody, request: Request):
     pkg_name = body.package_name or driver.get("package_name", "Standard")
     pkg_rate = body.package_rate or driver.get("package_rate", 0)
     if pkg_rate == 0:
-        plan = await db.rental_plans.find_one({"name": {"$regex": f"^{pkg_name}$", "$options": "i"}, "organization_id": user["organization_id"]})
+        plan = await db.rental_plans.find_one({"name": {"$regex": f"^{pkg_name}$", "$options": "i"}, "organization_id": user.get("organization_id")})
         if plan:
             pkg_rate = plan.get("amount", 0)
             
-    code = await _next_rental_code(user["organization_id"])
+    code = await _next_rental_code(user.get("organization_id"))
     doc = {
-        "organization_id": user["organization_id"],
+        "organization_id": user.get("organization_id"),
         "rental_code": code,
         "driver_id": body.driver_id, "driver_name": driver["name"],
         "vehicle_id": body.vehicle_id, "vehicle_number": vehicle["vehicle_number"],
@@ -1192,7 +1192,7 @@ async def add_payment(rid: str, body: dict, request: Request):
         raise HTTPException(status_code=404, detail="Rental not found")
     amount = float(body.get("amount", 0))
     payment = {
-        "organization_id": user["organization_id"],
+        "organization_id": user.get("organization_id"),
         "rental_id": rid, "rental_code": r["rental_code"], "city": r["city"],
         "type": body.get("type", "payment"),
         "amount": amount,
@@ -1211,7 +1211,7 @@ async def add_payment(rid: str, body: dict, request: Request):
     
     if payment["type"] != "refund":
         await db.rental_accounts.update_one(
-            {"organization_id": user["organization_id"], "driver_id": r["driver_id"]},
+            {"organization_id": user.get("organization_id"), "driver_id": r["driver_id"]},
             {
                 "$inc": {"outstanding_amount": -amount},
                 "$pullAll": {"unpaid_dates": body.get("covers_dates", [])}
@@ -1239,11 +1239,11 @@ async def activate_rental(rid: str, request: Request):
         "rental_status": "active"}})
     await db.driver_vehicle_assignments.update_many({"driver_id": r["driver_id"], "end": None}, {"$set": {"end": now_iso()}})
     await db.driver_vehicle_assignments.insert_one({
-        "organization_id": user["organization_id"], "driver_id": r["driver_id"], "driver_name": r["driver_name"],
+        "organization_id": user.get("organization_id"), "driver_id": r["driver_id"], "driver_name": r["driver_name"],
         "vehicle_id": r["vehicle_id"], "vehicle_number": r["vehicle_number"], "city": r["city"],
         "start": now_iso(), "end": None, "notes": f"Via rental {r['rental_code']}", "created_at": now_iso()})
     await log_audit(user, "rental_activated", "rental", rid, f"Rental {r['rental_code']} activated")
-    await add_notification(user["organization_id"], "green", "Rental activated",
+    await add_notification(user.get("organization_id"), "green", "Rental activated",
                            f"{r['rental_code']} activated for {r['driver_name']}", link=f"/rentals/{rid}", city=r["city"])
     return {"ok": True}
 
@@ -1274,7 +1274,7 @@ async def renew_rental(rid: str, body: dict, request: Request):
     await db.rentals.update_one({"_id": oid(rid)}, {"$set": update})
     await db.vehicles.update_one({"_id": oid(update.get("vehicle_id", r["vehicle_id"]))}, {"$set": {"rental_end": update["end"]}})
     await log_audit(user, "rental_renewed", "rental", rid, f"Rental {r['rental_code']} renewed")
-    await add_notification(user["organization_id"], "green", "Rental renewed",
+    await add_notification(user.get("organization_id"), "green", "Rental renewed",
                            f"{r['rental_code']} renewed for {r['driver_name']}", link=f"/rentals/{rid}", city=r["city"])
     return {"ok": True}
 
@@ -1323,7 +1323,7 @@ async def list_handovers(request: Request, vehicle_id: Optional[str] = None, ren
 async def create_handover(body: dict, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    body["organization_id"] = user["organization_id"]
+    body["organization_id"] = user.get("organization_id")
     body["created_at"] = now_iso()
     body["type"] = "handover"
     res = await db.vehicle_handovers.insert_one(body)
@@ -1344,7 +1344,7 @@ async def list_returns(request: Request, vehicle_id: Optional[str] = None, renta
 async def create_return(body: dict, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    body["organization_id"] = user["organization_id"]
+    body["organization_id"] = user.get("organization_id")
     body["created_at"] = now_iso()
     body["type"] = "return"
     res = await db.vehicle_returns.insert_one(body)
@@ -1377,8 +1377,8 @@ async def get_sr(sid: str, request: Request):
 @api.post("/service-requests")
 async def create_sr(body: dict, request: Request):
     user = await get_user(request)
-    count = await db.service_requests.count_documents({"organization_id": user["organization_id"]})
-    body["organization_id"] = user["organization_id"]
+    count = await db.service_requests.count_documents({"organization_id": user.get("organization_id")})
+    body["organization_id"] = user.get("organization_id")
     body["code"] = f"SR-{2000 + count + 1}"
     body["status"] = body.get("status", "new")
     body["created_at"] = now_iso()
@@ -1387,7 +1387,7 @@ async def create_sr(body: dict, request: Request):
     await log_audit(user, "service_request_created", "service_request", str(res.inserted_id),
                     f"Service request {body['code']} created")
     lvl = "red" if body.get("priority") == "critical" else "amber"
-    await add_notification(user["organization_id"], lvl, "Service request created",
+    await add_notification(user.get("organization_id"), lvl, "Service request created",
                            f"{body['code']} - {body.get('issue_type','')} - {body.get('vehicle_number','')}",
                            link="/service-requests", city=body.get("city"))
     return ser(await db.service_requests.find_one({"_id": res.inserted_id}))
@@ -1427,7 +1427,7 @@ async def list_services(request: Request, vehicle_id: Optional[str] = None, city
 async def create_service(body: dict, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    body["organization_id"] = user["organization_id"]
+    body["organization_id"] = user.get("organization_id")
     body["created_at"] = now_iso()
     res = await db.vehicle_services.insert_one(body)
     await log_audit(user, "service_completed", "vehicle_service", str(res.inserted_id),
@@ -1439,7 +1439,7 @@ async def create_service(body: dict, request: Request):
         if body.get("next_service_date"):
             upd["next_service_date"] = body["next_service_date"]
         await db.vehicles.update_one({"_id": oid(body["vehicle_id"])}, {"$set": upd})
-        await add_notification(user["organization_id"], "green", "Service completed",
+        await add_notification(user.get("organization_id"), "green", "Service completed",
                                f"{body.get('vehicle_number','')} - {body.get('issue','service')}",
                                link=f"/fleet/{body['vehicle_id']}", city=body.get("city"))
     return ser(await db.vehicle_services.find_one({"_id": res.inserted_id}))
@@ -1454,7 +1454,7 @@ async def list_locations(request: Request, city: Optional[str] = None):
     locs = await _find("locations", user, extra)
     for l in locs:
         l["current_vehicles"] = await db.vehicles.count_documents(
-            {"organization_id": user["organization_id"], "parking": l["name"]})
+            {"organization_id": user.get("organization_id"), "parking": l["name"]})
     return locs
 
 
@@ -1462,7 +1462,7 @@ async def list_locations(request: Request, city: Optional[str] = None):
 async def create_location(body: dict, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    body["organization_id"] = user["organization_id"]
+    body["organization_id"] = user.get("organization_id")
     body["created_at"] = now_iso()
     res = await db.locations.insert_one(body)
     return ser(await db.locations.find_one({"_id": res.inserted_id}))
@@ -1503,7 +1503,7 @@ async def list_documents(request: Request, owner_type: Optional[str] = None, own
 @api.post("/documents")
 async def create_document(body: dict, request: Request):
     user = await get_user(request)
-    body["organization_id"] = user["organization_id"]
+    body["organization_id"] = user.get("organization_id")
     body["created_at"] = now_iso()
     res = await db.documents.insert_one(body)
     await log_audit(user, "document_updated", "document", str(res.inserted_id),
@@ -1524,14 +1524,14 @@ async def list_incidents(request: Request, city: Optional[str] = None, status: O
 @api.post("/incidents")
 async def create_incident(body: dict, request: Request):
     user = await get_user(request)
-    count = await db.incidents.count_documents({"organization_id": user["organization_id"]})
-    body["organization_id"] = user["organization_id"]
+    count = await db.incidents.count_documents({"organization_id": user.get("organization_id")})
+    body["organization_id"] = user.get("organization_id")
     body["code"] = f"INC-{3000 + count + 1}"
     body["status"] = body.get("status", "reported")
     body["created_at"] = now_iso()
     res = await db.incidents.insert_one(body)
     await log_audit(user, "incident_reported", "incident", str(res.inserted_id), f"Incident {body['code']} reported")
-    await add_notification(user["organization_id"], "red", "Incident reported",
+    await add_notification(user.get("organization_id"), "red", "Incident reported",
                            f"{body['code']} - {body.get('incident_type','')}", link="/incidents", city=body.get("city"))
     return ser(await db.incidents.find_one({"_id": res.inserted_id}))
 
@@ -1763,7 +1763,7 @@ class CustomerBody(BaseModel):
 @api.get("/customers")
 async def list_customers(request: Request, q: Optional[str] = None):
     user = await get_user(request)
-    filt = {"organization_id": user["organization_id"]}
+    filt = {"organization_id": user.get("organization_id")}
     if q:
         filt["$or"] = [{"name": {"$regex": q, "$options": "i"}}, {"phone": {"$regex": q, "$options": "i"}},
                        {"company": {"$regex": q, "$options": "i"}}]
@@ -1771,7 +1771,7 @@ async def list_customers(request: Request, q: Optional[str] = None):
     out = []
     for c in docs:
         s = ser(c)
-        s["order_count"] = await db.orders.count_documents({"organization_id": user["organization_id"], "customer_id": s["id"]})
+        s["order_count"] = await db.orders.count_documents({"organization_id": user.get("organization_id"), "customer_id": s["id"]})
         out.append(s)
     return out
 
@@ -1783,7 +1783,7 @@ async def get_customer(cid: str, request: Request):
     if not c:
         raise HTTPException(status_code=404, detail="Customer not found")
     out = ser(c)
-    orders = await db.orders.find({"organization_id": user["organization_id"], "customer_id": cid}).sort("created_at", -1).to_list(500)
+    orders = await db.orders.find({"organization_id": user.get("organization_id"), "customer_id": cid}).sort("created_at", -1).to_list(500)
     out["orders"] = [ser(o) for o in orders]
     counts = {"total": len(out["orders"])}
     for st in ORDER_STAGES:
@@ -1796,7 +1796,7 @@ async def get_customer(cid: str, request: Request):
 async def create_customer(body: CustomerBody, request: Request):
     user = await get_user(request)
     doc = body.model_dump()
-    doc["organization_id"] = user["organization_id"]
+    doc["organization_id"] = user.get("organization_id")
     doc["created_at"] = now_iso()
     res = await db.customers.insert_one(doc)
     await log_audit(user, "customer_created", "customer", str(res.inserted_id), f"Customer {body.name} added")
@@ -1878,12 +1878,12 @@ async def create_order(body: OrderBody, request: Request):
     cust = await db.customers.find_one(org_filter(user, {"_id": oid(body.customer_id)}))
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
-    count = await db.orders.count_documents({"organization_id": user["organization_id"]})
+    count = await db.orders.count_documents({"organization_id": user.get("organization_id")})
     code = body.order_number or f"ORD-{1000 + count + 1}"
     total = float(body.total_amount or 0); paid = float(body.paid_amount or 0)
     doc = body.model_dump()
     doc.update({
-        "organization_id": user["organization_id"], "order_number": code,
+        "organization_id": user.get("organization_id"), "order_number": code,
         "customer_name": cust["name"], "customer_phone": cust.get("phone", ""),
         "status": "received", "total_amount": total, "paid_amount": paid,
         "balance": max(total - paid, 0),
@@ -1895,7 +1895,7 @@ async def create_order(body: OrderBody, request: Request):
         doc["timeline"].append({"at": now_iso(), "by": user.get("name"), "text": f"Assigned to {body.assigned_to}"})
     res = await db.orders.insert_one(doc)
     await log_audit(user, "order_created", "order", str(res.inserted_id), f"Order {code} created for {cust['name']}")
-    await add_notification(user["organization_id"], "blue", "New order received", f"{code} · {cust['name']} · {body.product or ''}", link="/orders")
+    await add_notification(user.get("organization_id"), "blue", "New order received", f"{code} · {cust['name']} · {body.product or ''}", link="/orders")
     return _order_ser(await db.orders.find_one({"_id": res.inserted_id}))
 
 
@@ -1927,7 +1927,7 @@ async def update_order(oid_: str, body: dict, request: Request):
     if body.get("status") and body["status"] != o.get("status"):
         await log_audit(user, "order_status_changed", "order", oid_, f"{o['order_number']} → {body['status']}")
         if body["status"] == "completed":
-            await add_notification(user["organization_id"], "green", "Order completed", f"{o['order_number']} · {o.get('customer_name','')}", link="/orders")
+            await add_notification(user.get("organization_id"), "green", "Order completed", f"{o['order_number']} · {o.get('customer_name','')}", link="/orders")
     return _order_ser(await db.orders.find_one({"_id": oid(oid_)}))
 
 
@@ -1938,7 +1938,7 @@ async def add_attachment(oid_: str, body: dict, request: Request):
     if not o:
         raise HTTPException(status_code=404, detail="Order not found")
     max_mb = 10
-    org = await db.organizations.find_one({"org_id": user["organization_id"]})
+    org = await db.organizations.find_one({"org_id": user.get("organization_id")})
     if org:
         max_mb = org.get("max_file_mb", 10)
     data = body.get("data", "")
@@ -1965,7 +1965,7 @@ async def delete_attachment(oid_: str, aid: str, request: Request):
 @api.get("/order-dashboard")
 async def order_dashboard(request: Request):
     user = await get_user(request)
-    base = {"organization_id": user["organization_id"]}
+    base = {"organization_id": user.get("organization_id")}
     orders = await db.orders.find(base).to_list(5000)
     kpis = {"total": len(orders)}
     for st in ORDER_STAGES:
@@ -2005,7 +2005,7 @@ async def order_dashboard(request: Request):
 @api.get("/order-reports")
 async def order_reports(request: Request):
     user = await get_user(request)
-    orders = await db.orders.find({"organization_id": user["organization_id"]}).to_list(5000)
+    orders = await db.orders.find({"organization_id": user.get("organization_id")}).to_list(5000)
     by_status = {st: sum(1 for o in orders if o.get("status") == st) for st in ORDER_STAGES}
     overdue = sum(1 for o in orders if order_due_status(o) == "overdue")
     by_assignee = {}
@@ -2031,7 +2031,7 @@ async def order_search(request: Request, q: str = Query(...)):
     if not q:
         return {"orders": [], "customers": []}
     rx = {"$regex": q, "$options": "i"}
-    base = {"organization_id": user["organization_id"]}
+    base = {"organization_id": user.get("organization_id")}
     orders = await db.orders.find({**base, "$or": [{"order_number": rx}, {"customer_name": rx}, {"product": rx}]}).limit(6).to_list(6)
     customers = await db.customers.find({**base, "$or": [{"name": rx}, {"phone": rx}, {"company": rx}]}).limit(6).to_list(6)
     return {"orders": [ser(o) for o in orders], "customers": [ser(c) for c in customers]}
@@ -2153,7 +2153,7 @@ def require_driver(user):
 
 async def _require_rental_admin(user):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
-    org = await db.organizations.find_one({"org_id": user["organization_id"]})
+    org = await db.organizations.find_one({"org_id": user.get("organization_id")})
     if (org or {}).get("industry", "fleet") != "fleet":
         raise HTTPException(status_code=403, detail="Rental management is not enabled for this organization")
 
@@ -2264,7 +2264,7 @@ async def _rental_account(rental):
 
 
 async def _driver_payload(user):
-    org = user["organization_id"]
+    org = user.get("organization_id")
     did = user["id"]
     rental = await _active_rental(org, did)
     dep = await db.security_deposits.find_one({"organization_id": org, "driver_id": did})
@@ -2824,6 +2824,10 @@ async def submit_odometer(
     
     if not active_trip_id:
         # START TRIP
+        deposit = await db.security_deposits.find_one({"driver_id": user["id"]})
+        if deposit and deposit.get("status") != "paid" and deposit.get("amount", 0) > 0:
+            raise HTTPException(400, "You must pay your Security Deposit before starting a trip.")
+            
         acct = await db.rental_accounts.find_one({"driver_id": user["id"]})
         if acct and acct.get("outstanding_amount", 0) > 0:
             raise HTTPException(400, f"You must pay your outstanding rent (₹{acct['outstanding_amount']}) before starting today's trip.")
@@ -3026,7 +3030,7 @@ async def submit_odometer(
 async def driver_packages(request: Request):
     user = await get_user(request)
     require_driver(user)
-    pk = await db.rental_packages.find({"organization_id": user["organization_id"], "status": "active"}).sort("daily_rate", 1).to_list(100)
+    pk = await db.rental_packages.find({"organization_id": user.get("organization_id"), "status": "active"}).sort("daily_rate", 1).to_list(100)
     return [ser(p) for p in pk]
 
 
@@ -3035,12 +3039,12 @@ async def driver_payment_history(request: Request):
     user = await get_user(request)
     require_driver(user)
     recs = await db.rental_payments.find({
-        "organization_id": user["organization_id"], 
+        "organization_id": user.get("organization_id"), 
         "driver_id": user["id"],
         "payment_status": {"$ne": "pending"}
     }).sort("created_at", -1).to_list(500)
     
-    rental = await _active_rental(user["organization_id"], user["id"])
+    rental = await _active_rental(user.get("organization_id"), user["id"])
     daily_rate = rental.get("daily_rate", 0) if rental else 0
 
     results = []
@@ -3066,7 +3070,7 @@ class CreateOrderBody(BaseModel):
 async def driver_create_order(body: CreateOrderBody, request: Request):
     user = await get_user(request)
     require_driver(user)
-    org = user["organization_id"]
+    org = user.get("organization_id")
     did = user["id"]
     kind = body.kind
     rental = await _active_rental(org, did)
@@ -3134,7 +3138,7 @@ async def driver_verify(body: VerifyBody, request: Request):
     user = await get_user(request)
     require_driver(user)
     rec = await db.rental_payments.find_one({"_id": oid(body.payment_id),
-                                             "organization_id": user["organization_id"], "driver_id": user["id"]})
+                                             "organization_id": user.get("organization_id"), "driver_id": user["id"]})
     if not rec:
         raise HTTPException(status_code=404, detail="Payment not found")
     if rec.get("payment_status") == "paid":
@@ -3159,7 +3163,7 @@ async def driver_verify(body: VerifyBody, request: Request):
         method = "sandbox"
     await _apply_paid(rec, txn, method)
     acct = None
-    rental = await _active_rental(user["organization_id"], user["id"])
+    rental = await _active_rental(user.get("organization_id"), user["id"])
     if rental:
         acct = await _rental_account(rental)
     return {"ok": True, "transaction_id": txn, "paid_at": now_iso(), "kind": rec["kind"], "amount": rec["amount"], "account": acct}
@@ -3193,7 +3197,7 @@ async def driver_webhook(request: Request):
 async def rental_admin_summary(request: Request):
     user = await get_user(request)
     await _require_rental_admin(user)
-    org = user["organization_id"]
+    org = user.get("organization_id")
     rentals = await db.driver_rentals.find({"organization_id": org, "status": {"$ne": "ended"}}).to_list(2000)
     active = overdue = blocked = 0
     today_expected = today_collected = outstanding_total = 0
@@ -3220,7 +3224,7 @@ async def rental_admin_summary(request: Request):
 async def rental_admin_drivers(request: Request, status: Optional[str] = None):
     user = await get_user(request)
     await _require_rental_admin(user)
-    org = user["organization_id"]
+    org = user.get("organization_id")
     rentals = await db.driver_rentals.find({"organization_id": org, "status": {"$ne": "ended"}}).sort("created_at", -1).to_list(2000)
     rows = []
     for r in rentals:
@@ -3240,7 +3244,7 @@ async def rental_admin_drivers(request: Request, status: Optional[str] = None):
 async def rental_admin_driver(driver_id: str, request: Request):
     user = await get_user(request)
     await _require_rental_admin(user)
-    org = user["organization_id"]
+    org = user.get("organization_id")
     r = await db.driver_rentals.find_one({"organization_id": org, "driver_id": driver_id})
     if not r:
         raise HTTPException(status_code=404, detail="Rental driver not found")
@@ -3254,7 +3258,7 @@ async def rental_admin_driver(driver_id: str, request: Request):
 async def rental_admin_packages(request: Request):
     user = await get_user(request)
     await _require_rental_admin(user)
-    pk = await db.rental_packages.find({"organization_id": user["organization_id"]}).sort("daily_rate", 1).to_list(100)
+    pk = await db.rental_packages.find({"organization_id": user.get("organization_id")}).sort("daily_rate", 1).to_list(100)
     return [ser(p) for p in pk]
 
 
@@ -3268,7 +3272,7 @@ class PackageBody(BaseModel):
 async def rental_admin_create_package(body: PackageBody, request: Request):
     user = await get_user(request)
     await _require_rental_admin(user)
-    doc = {"organization_id": user["organization_id"], "name": body.name, "daily_rate": int(body.daily_rate),
+    doc = {"organization_id": user.get("organization_id"), "name": body.name, "daily_rate": int(body.daily_rate),
            "status": body.status, "created_at": now_iso()}
     res = await db.rental_packages.insert_one(doc)
     return ser(await db.rental_packages.find_one({"_id": res.inserted_id}))
@@ -3279,16 +3283,16 @@ async def rental_admin_update_package(pid: str, body: dict, request: Request):
     user = await get_user(request)
     await _require_rental_admin(user)
     body.pop("_id", None); body.pop("id", None)
-    await db.rental_packages.update_one({"_id": oid(pid), "organization_id": user["organization_id"]}, {"$set": body})
+    await db.rental_packages.update_one({"_id": oid(pid), "organization_id": user.get("organization_id")}, {"$set": body})
     pkg = await db.rental_packages.find_one({"_id": oid(pid)})
     if pkg and "daily_rate" in body:
         new_rate = float(body["daily_rate"])
         # Find drivers currently mid-trip — they are protected from rate changes
         mid_trip_user_ids = set()
-        async for u in db.users.find({"organization_id": user["organization_id"], "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
+        async for u in db.users.find({"organization_id": user.get("organization_id"), "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
             mid_trip_user_ids.add(str(u["_id"]))
         
-        drental_filter = {"organization_id": user["organization_id"], "package_id": pid, "status": {"$ne": "ended"}}
+        drental_filter = {"organization_id": user.get("organization_id"), "package_id": pid, "status": {"$ne": "ended"}}
         if mid_trip_user_ids:
             drental_filter["driver_id"] = {"$nin": list(mid_trip_user_ids)}
         
@@ -3300,7 +3304,7 @@ async def rental_admin_update_package(pid: str, body: dict, request: Request):
         async for r in db.driver_rentals.find(drental_filter):
             drivers_to_update.append(r["driver_id"])
         if drivers_to_update:
-            acct_filter = {"organization_id": user["organization_id"], "driver_id": {"$in": drivers_to_update}}
+            acct_filter = {"organization_id": user.get("organization_id"), "driver_id": {"$in": drivers_to_update}}
             await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
     return ser(pkg)
 
@@ -3317,7 +3321,7 @@ class NewRentalDriver(BaseModel):
 async def create_rental_driver(body: NewRentalDriver, request: Request):
     user = await get_user(request)
     await _require_rental_admin(user)
-    org = user["organization_id"]
+    org = user.get("organization_id")
     phone = re.sub(r"\s+", "", body.phone or "")
     if await db.users.find_one({"phone": phone, "role": "driver"}):
         raise HTTPException(status_code=400, detail="Driver phone already exists")

@@ -58,6 +58,11 @@ export default function DriverHome() {
       }, 10000);
       return () => clearTimeout(timer);
     }
+    
+    // Auto-show deposit popup if unpaid
+    if (data && data.deposit && data.deposit.amount > 0 && data.deposit.status !== "paid") {
+      setPay("deposit");
+    }
   }, [data, kycStatus, hideApproved]);
 
   const handleCloseModal = async () => {
@@ -67,6 +72,8 @@ export default function DriverHome() {
   
   const submitOdo = async (e) => {
     e.preventDefault();
+    if (!data?.deposit || data.deposit.status !== "paid") return setOdoError("You must pay the Security Deposit before starting a trip.");
+    if (data?.account && data.account.outstanding_amount > 0) return setOdoError("You must pay your outstanding rent before starting a trip.");
     if (!odoReading) return setOdoError("Reading is required");
     if (!odoImage) return setOdoError("Image is required");
     setOdoLoading(true);

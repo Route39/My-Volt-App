@@ -275,22 +275,12 @@ function PackageForm({ editData, onBack, onSaved }) {
               <input 
                 type="number" 
                 value={form.monthly_km_limit} 
-                onChange={e => handleMonthlyLimitChange(e.target.value)} 
+                onChange={handleLimitChange} 
                 className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors"
                 placeholder="5000" 
               />
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-sm font-bold text-mv-text mb-1">Daily Limit (KM)</label>
-              <input 
-                type="number" 
-                value={form.daily_limit_km} 
-                className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface/50 text-mv-muted font-medium cursor-not-allowed"
-                disabled 
-              />
-              <p className="text-xs text-mv-primary/80 mt-1.5 font-medium">Auto-calculated: (Monthly Limit ÷ {daysInMonth} days)</p>
-            </div>
 
             <div className="space-y-1">
               <label className="block text-sm font-bold text-mv-text mb-1">Extra KM Charge (₹ per km)</label>
