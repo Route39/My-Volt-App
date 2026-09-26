@@ -416,13 +416,13 @@ export default function DriverHome() {
           <div className={`text-xl font-extrabold mt-1 ${account?.outstanding_amount ? "text-amber-600" : "text-slate-900"}`}>{inr(account?.outstanding_amount || 0)}</div>
           {account?.overdue_days > 0 && <div className="text-[11px] text-amber-600 mt-0.5">{account.overdue_days} day{account.overdue_days > 1 ? "s" : ""} unpaid</div>}
         </div>
-        <div className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid="home-deposit">
-          <div className="flex items-center gap-1.5 text-slate-500 text-xs"><Wallet className="w-3.5 h-3.5" /> Security Deposit</div>
-          <div className="text-xl font-extrabold mt-1 text-slate-900">{inr(deposit?.amount || 0)}</div>
-          <div className={`text-[11px] mt-0.5 ${depositPaid ? "text-emerald-600" : "text-amber-600"}`}>
-            {depositPaid ? `✓ Paid (TXN: ${deposit?.transaction_id || 'Cash/Manual'})` : "Pending"}
+        {!depositPaid && deposit?.amount > 0 && (
+          <div className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid="home-deposit">
+            <div className="flex items-center gap-1.5 text-slate-500 text-xs"><Wallet className="w-3.5 h-3.5" /> Security Deposit</div>
+            <div className="text-xl font-extrabold mt-1 text-slate-900">{inr(deposit.amount)}</div>
+            <div className="text-[11px] mt-0.5 text-amber-600">Pending</div>
           </div>
-        </div>
+        )}
       </div>
       
       {/* Account status */}
