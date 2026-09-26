@@ -6,11 +6,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
 # Load environment variables from .env file so the cron job knows where the DB is
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-client = AsyncIOMotorClient(MONGO_URI)
-db = client["myvolt"]
+MONGO_URL = os.getenv("MONGO_URL", os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+DB_NAME = os.getenv("DB_NAME", "myvolt")
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
 async def run_daily_rent():
     print("Starting daily rent cron job...")
