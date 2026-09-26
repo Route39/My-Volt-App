@@ -189,12 +189,7 @@ export default function OdometerApprovals() {
                         </div>
                       ) : <span className="text-slate-400">—</span>}
                     </td>
-                    
-                    {/* Daily Limit */}
-                    <td className="px-3 py-4 whitespace-nowrap">
-                      <span className="text-slate-600 font-medium">{dailyLimit > 0 ? `${dailyLimit} km` : "—"}</span>
-                    </td>
-                    
+
                     {/* Extra KM */}
                     <td className="px-3 py-4 whitespace-nowrap">
                       {driven > 0 ? (
