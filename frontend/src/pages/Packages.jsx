@@ -257,6 +257,7 @@ function PackageForm({ editData, onBack, onSaved }) {
                 className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
                 placeholder="800" 
               />
+              <p className="text-[10px] font-semibold text-emerald-600 mt-1">✓ Automated: 3 free days given at the end of the month (e.g. 28 days charged for 31-day month).</p>
             </div>
 
             <div className="space-y-1">
@@ -268,6 +269,7 @@ function PackageForm({ editData, onBack, onSaved }) {
                 className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold text-mv-primary"
                 placeholder="5000" 
               />
+              <p className="text-[10px] font-semibold text-red-500 mt-1">Compulsory: Driver blocked from starting trips if unpaid.</p>
             </div>
             
             <div className="space-y-1">

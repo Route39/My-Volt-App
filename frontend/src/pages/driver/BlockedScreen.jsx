@@ -24,7 +24,7 @@ export default function BlockedScreen() {
       </div>
       <h1 className="text-2xl font-extrabold text-slate-900">Rental Account Blocked</h1>
       <p className="text-slate-500 text-sm mt-2 max-w-xs">
-        Your rental account has {account?.overdue_days} days of outstanding rent. Clear the full amount to reactivate.
+        Your rental account has {account?.overdue_days} days of outstanding rent. Your Driver App is blocked and <strong className="text-red-500">your vehicle will be repossessed/taken back immediately.</strong> Clear the full amount to reactivate.
       </p>
 
       <div className="mt-6 w-full max-w-sm rounded-3xl bg-white border border-slate-100 p-6 shadow-sm">
