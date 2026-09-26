@@ -2342,6 +2342,20 @@ async def _driver_payload(user):
                 "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
                 "organization_id": org
             })
+            
+        if plan and not dep:
+            dep = {
+                "organization_id": org, 
+                "driver_id": did, 
+                "amount": plan.get("deposit", 5000),
+                "status": "pending", 
+                "transaction_id": None, 
+                "paid_at": None, 
+                "created_at": now_iso()
+            }
+            res = await db.security_deposits.insert_one(dep)
+            dep["_id"] = res.inserted_id
+            out["deposit"] = ser(dep)
         
         # While a trip is running, show whatever KM limit / overage rate was frozen
         # onto it at START — not whatever the admin has the package set to right
