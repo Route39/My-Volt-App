@@ -2716,7 +2716,7 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         overage_km = max(0, (current_month_kms + driven) - monthly_limit_km) - max(0, current_month_kms - monthly_limit_km)
         overage_charge = overage_km * overage_per_km
         
-        total_charge = daily_rate + overage_charge
+        total_charge = overage_charge
         
         if total_charge > 0:
             await db.rental_accounts.update_one(
@@ -2929,7 +2929,7 @@ async def submit_odometer(
         # Extra KM also billed separately as overage charge
         current_month_kms += driven
         
-        total_charge = daily_rate + overage_charge
+        total_charge = overage_charge
         
         if total_charge > 0:
             total_charge = round(float(total_charge), 2)
