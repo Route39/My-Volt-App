@@ -120,7 +120,7 @@ export default function DriverHome() {
   const isTripActiveToday = isFullyAssigned && activeTripId && driver?.last_odometer_date === today;
   const isTripCompletedToday = isFullyAssigned && !activeTripId && driver?.last_odometer_date === today;
   
-  const showOdoModal = (needsStartTrip || needsEndTripForced || showEndModal) && isFullyAssigned;
+  const showOdoModal = (needsStartTrip || needsEndTripForced || showEndModal) && isFullyAssigned && depositPaid;
   
   const modalTitle = activeTripId ? "End Trip Odometer" : "Start Trip Odometer";
   const modalDesc = activeTripId 
