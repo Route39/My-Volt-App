@@ -31,7 +31,7 @@ export default function DriverProfile() {
       <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
         <Row icon={Bike} label="Vehicle" value={rental?.vehicle_reg || driver.vehicle_reg || "—"} />
         <Row icon={Package} label="Package" value={rental ? `${rental.package_name} · ${inr(rental.daily_rate)}/day` : "—"} />
-        <Row icon={Wallet} label="Security Deposit" value={`${inr(deposit?.amount || 5000)} · ${deposit?.status === "paid" ? "Paid" : "Pending"}`} />
+        <Row icon={Wallet} label="Security Deposit" value={`${inr(deposit?.amount ?? 0)} · ${deposit?.status === "paid" ? "Paid" : "Pending"}`} />
         <Row icon={ShieldCheck} label="Account Status"
           value={<span className={`font-bold uppercase ${STATUS_UI[account?.status || "active"]}`}>{account?.status || "active"}</span>} />
         <Row label="Outstanding" value={inr(account?.outstanding_amount || 0)} />

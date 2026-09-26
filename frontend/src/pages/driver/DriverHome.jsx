@@ -487,10 +487,10 @@ export function PayModals({ pay, setPay, data, refresh }) {
           ] : []),
           { label: "Total Payable", value: inr(account?.outstanding_amount || 0), strong: true },
         ]} {...common} />
-      <PayModal open={pay === "deposit"} kind="deposit" title="Security Deposit" amount={deposit?.amount || 5000}
+      <PayModal open={pay === "deposit"} kind="deposit" title="Security Deposit" amount={deposit?.amount ?? 0}
         lines={[
-          { label: "Refundable Security Deposit", value: inr(deposit?.amount || 5000) },
-          { label: "Total Payable", value: inr(deposit?.amount || 5000), strong: true },
+          { label: "Refundable Security Deposit", value: inr(deposit?.amount ?? 0) },
+          { label: "Total Payable", value: inr(deposit?.amount ?? 0), strong: true },
         ]} {...common} />
       <PayModal open={pay === "outstanding"} kind="outstanding" title="Outstanding Balance" amount={account?.outstanding_amount || 0}
         lines={[
