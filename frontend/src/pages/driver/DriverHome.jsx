@@ -33,7 +33,15 @@ export default function DriverHome() {
   const [odoImage, setOdoImage] = useState(null);
   const [odoLoading, setOdoLoading] = useState(false);
   const [odoError, setOdoError] = useState("");
-  
+  const [promptPayAfterTrip, setPromptPayAfterTrip] = useState(false);
+
+  // After a trip ends, auto-open the "pay daily rent" popup if rent is due
+  useEffect(() => {
+    if (promptPayAfterTrip && data && !data.driver?.active_trip_id) {
+      if ((data.account?.outstanding_amount || 0) > 0) setPay("daily");
+      setPromptPayAfterTrip(false);
+    }
+  }, [promptPayAfterTrip, data]);  
   // Safe extraction for initial hook state
   const kycStatus = data?.driver?.kyc_status;
   const [showKycModal, setShowKycModal] = useState(false);
@@ -77,11 +85,12 @@ export default function DriverHome() {
   const submitOdo = async (e) => {
     e.preventDefault();
     if (!data?.deposit || data.deposit.status !== "paid") return setOdoError("You must pay the Security Deposit before starting a trip.");
-    if (data?.account && data.account.outstanding_amount > 0) return setOdoError("You must pay your outstanding rent before starting a trip.");
+    if (!data?.driver?.active_trip_id && data?.account && data.account.outstanding_amount > 0) return setOdoError("You must pay your outstanding rent before starting a trip.");
     if (!odoReading) return setOdoError("Reading is required");
     if (!odoImage) return setOdoError("Image is required");
     setOdoLoading(true);
     setOdoError("");
+    const wasEndingTrip = !!data?.driver?.active_trip_id;
     try {
       const fd = new FormData();
       fd.append("reading", odoReading);
@@ -93,6 +102,7 @@ export default function DriverHome() {
       // Small delay to ensure DB write propagates before re-reading
       await new Promise(r => setTimeout(r, 400));
       await refresh();
+      if (wasEndingTrip) setPromptPayAfterTrip(true);
     } catch (err) {
       setOdoError(err.response?.data?.detail || "Failed to upload");
     } finally {
@@ -377,7 +387,7 @@ export default function DriverHome() {
           </div>
           <div>
             <div className="text-emerald-300/80 mb-0.5 text-xs">Value</div>
-            <div className="font-semibold">{inr(driver?.package_rate || rental?.daily_rate || 0)}</div>
+            <div className="font-semibold">{inr(rental?.daily_rate || driver?.package_rate || 0)}</div>
           </div>
           
           <div className="col-span-2 mt-2 pt-4 border-t border-emerald-600/30">
