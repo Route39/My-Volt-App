@@ -267,6 +267,7 @@ export default function DailyCollection() {
                           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-[10px] font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3 h-3" /> PAID
                           </div>
+                          <span className="text-emerald-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
                           {it.deposit_transaction_id && (
                             <div className="text-[9px] font-mono text-slate-400 bg-slate-50 px-1 py-0.5 rounded w-max border border-slate-200 mt-0.5">
                               TXN {it.deposit_transaction_id}
