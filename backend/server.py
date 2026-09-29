@@ -810,6 +810,13 @@ async def create_driver(body: DriverBody, request: Request):
     doc = body.model_dump()
     doc["organization_id"] = user.get("organization_id") or "route39-org"
     doc["created_at"] = now_iso()
+    # Normalize the phone the same way driver login does (strip spaces) and block duplicates
+    phone = re.sub(r"\s+", "", body.phone or "")
+    if not phone:
+        raise HTTPException(status_code=400, detail="Mobile number is required")
+    if await db.drivers.find_one({"phone": phone}):
+        raise HTTPException(status_code=400, detail="Mobile number already exists")
+    doc["phone"] = phone
     res = await db.drivers.insert_one(doc)
     await log_audit(user, "driver_created", "driver", str(res.inserted_id), f"Driver {body.name} added")
     return ser(await db.drivers.find_one({"_id": res.inserted_id}))
@@ -821,6 +828,13 @@ async def update_driver(did: str, body: dict, request: Request):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     for k in ("id", "_id", "assignments", "rentals", "incidents", "documents"):
         body.pop(k, None)
+    if "phone" in body:
+        phone = re.sub(r"\s+", "", body.get("phone") or "")
+        if not phone:
+            raise HTTPException(status_code=400, detail="Mobile number is required")
+        if await db.drivers.find_one({"phone": phone, "_id": {"$ne": oid(did)}}):
+            raise HTTPException(status_code=400, detail="Mobile number already exists")
+        body["phone"] = phone
     res = await db.drivers.update_one({"_id": oid(did), "organization_id": user.get("organization_id")}, {"$set": body})
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -1101,7 +1115,14 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 ]
             }).to_list(100)
             
-            valid_payments = [p for p in day_payments if p.get("payment_status") == "paid" and p.get("type") != "refund"]
+            # Security-deposit payments are stored in the same collection but must NOT count
+            # towards daily rent / extra-KM settlement (or supply its transaction id).
+            valid_payments = [
+                p for p in day_payments
+                if p.get("payment_status") == "paid"
+                and p.get("type") != "refund"
+                and p.get("kind") != "deposit"
+            ]
             
             today_paid = sum(p.get("amount", 0) for p in valid_payments)
             
@@ -1147,7 +1168,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 end_meter = odo_log.get("end_reading", 0) if odo_log else 0
                 total_km = odo_log.get("driven_today", 0) if odo_log else 0
                 
-                if d == datetime.now(timezone.utc).date() or odo_log or row_paid > 0 or d_str in acct.get("unpaid_dates", []):
+                if d == datetime.now(timezone.utc).date() or odo_log or row_paid > 0 or d_str in (acct or {}).get("unpaid_dates", []):
                     out.append({
                         "id": f"{rid}_{d_str}_{idx}",
                         "driver_name": r.get("driver_name", "Unknown"),
@@ -2916,7 +2937,7 @@ async def submit_odometer(
     
     today = datetime.utcnow().strftime("%Y-%m-%d")
     current_month_str = datetime.utcnow().strftime("%Y-%m")
-    
+
     ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
     filename = f"{user['id']}_odo_{uuid.uuid4().hex[:8]}.{ext}"
     path = f"uploads/{filename}"

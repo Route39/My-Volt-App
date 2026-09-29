@@ -39,8 +39,9 @@ export default function DailyCollection() {
         const today = new Date();
         const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
         const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-        p.from_date = firstDay.toISOString().split('T')[0];
-        p.to_date = lastDay.toISOString().split('T')[0];
+        const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        p.from_date = ymd(firstDay);
+        p.to_date = ymd(lastDay);
       } else if (dateFilter === "custom") {
         if (fromDate) p.from_date = fromDate;
         if (toDate) p.to_date = toDate;
@@ -238,6 +239,10 @@ export default function DailyCollection() {
                             {it.payment_method === "razorpay" && <span className="ml-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] uppercase tracking-wider border border-indigo-100">Razorpay</span>}
                             {it.payment_method === "cash" && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[9px] uppercase tracking-wider border border-amber-100">Cash</span>}
                           </div>
+                          <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.total_charge ?? it.today_paid)}</span>
+                          {it.extra_km_charge > 0 && (
+                            <span className="text-[10px] text-slate-500">Rent {inr(it.daily_rate)} + Extra KM {inr(it.extra_km_charge)}</span>
+                          )}
                           {it.transaction_id && (
                             <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
                               TXN {it.transaction_id}
