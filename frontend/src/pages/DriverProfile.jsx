@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search } from "lucide-react";
+import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search, Ban, Clock, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -21,6 +21,7 @@ export default function DriverProfile() {
   const [assign, setAssign] = useState(false);
   const [edit, setEdit] = useState(false);
   const [del, setDel] = useState(false);
+  const [blockType, setBlockType] = useState(null);
 
   const load = useCallback(async () => { const { data } = await api.get(`/drivers/${id}`); setD(data); }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -37,7 +38,7 @@ export default function DriverProfile() {
       <div className="mv-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 mv-rise">
         <Avatar className="w-20 h-20"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-xl">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
         <div className="flex-1">
-          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1><StatusChip status={d.status} />{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
+          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1><StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
           <div className="flex items-center gap-5 mt-2 text-sm text-mv-muted flex-wrap">
             <span className="flex items-center gap-1.5"><Phone className="w-4 h-4" /> {d.phone}</span>
             <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {d.city}</span>
@@ -48,7 +49,14 @@ export default function DriverProfile() {
           <div className="flex gap-2">
             <GhostBtn onClick={() => setAssign(true)} data-testid="assign-vehicle-btn"><ArrowRightLeft className="w-4 h-4" /> Change Vehicle</GhostBtn>
             <GhostBtn onClick={() => setEdit(true)}><Edit className="w-4 h-4" /> Edit</GhostBtn>
-            <GhostBtn onClick={() => setDel(true)} className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn>
+            {d.admin_block ? (
+              <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
+            ) : (
+              <>
+                <GhostBtn onClick={() => setBlockType("temporary")} className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"><Clock className="w-4 h-4" /> Temporary Block</GhostBtn>
+                <GhostBtn onClick={() => setBlockType("permanent")} className="text-red-500 hover:text-red-600 hover:bg-red-50"><Ban className="w-4 h-4" /> Permanent Block</GhostBtn>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -137,6 +145,7 @@ export default function DriverProfile() {
 
       <AssignVehicleDialog open={assign} setOpen={setAssign} driver={d} onDone={() => { setAssign(false); load(); }} />
       <EditDriverDialog open={edit} setOpen={setEdit} driver={d} onDone={() => { setEdit(false); load(); }} />
+      <BlockDriverDialog type={blockType} setType={setBlockType} driver={d} onDone={() => { setBlockType(null); load(); }} />
       <DeleteDriverDialog open={del} setOpen={setDel} driver={d} onDone={() => { setDel(false); nav("/drivers"); }} />
     </div>
   );
@@ -299,5 +308,52 @@ function KycDocCard({ title, url }) {
         </div>
       </div>
     </div>
+  );
+}
+function BlockDriverDialog({ type, setType, driver, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
+  useEffect(() => { setReason(""); }, [type]);
+  const cfg = {
+    temporary: { title: "Temporary Block", msg: `${driver?.name} will be temporarily blocked and cannot use the driver app until you unblock.`, btn: "Temporarily Block", cls: "bg-amber-500 hover:bg-amber-600 text-white" },
+    permanent: { title: "Permanent Block", msg: `${driver?.name} will be permanently blocked from the driver app.`, btn: "Permanently Block", cls: "bg-red-500 hover:bg-red-600 text-white" },
+    unblock: { title: "Unblock Driver", msg: `${driver?.name} will be able to use the driver app again.`, btn: "Unblock", cls: "bg-emerald-500 hover:bg-emerald-600 text-white" },
+  }[type];
+
+  const go = async () => {
+    setBusy(true);
+    try {
+      if (type === "unblock") await api.post(`/drivers/${driver.id}/admin-unblock`);
+      else {
+        if (!reason.trim()) { toast.error("Please enter a reason"); setBusy(false); return; }
+        await api.post(`/drivers/${driver.id}/admin-block`, { type, reason: reason.trim() });
+      }
+      toast.success(type === "unblock" ? "Driver unblocked" : "Driver blocked");
+      onDone();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={!!type} onOpenChange={(o) => !o && setType(null)}>
+      <DialogContent className="max-w-md">
+        {cfg && (
+          <>
+            <DialogHeader><DialogTitle>{cfg.title}</DialogTitle></DialogHeader>
+            <p className="text-sm text-mv-muted">{cfg.msg}</p>
+            {type !== "unblock" && (
+              <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3}
+                placeholder="Reason for blocking (shown to driver)"
+                className="w-full mt-3 p-3 rounded-xl border border-mv-border bg-mv-surface2 text-sm outline-none focus:ring-2 focus:ring-mv-primary/30" />
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <GhostBtn onClick={() => setType(null)}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={go} disabled={busy} className={cfg.cls}>{busy ? "Please wait..." : cfg.btn}</PrimaryBtn>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
