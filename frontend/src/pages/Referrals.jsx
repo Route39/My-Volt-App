@@ -184,12 +184,7 @@ function ReferralDialog({ value, setValue, fixedReferrerId, fixedReferrerName, f
                   fixedReferrerCode || value?.referrer_code,
                 ].filter(Boolean).join(" · ")} />
                             ) : (
-                                <Select value={f.referrer_driver_id} onValueChange={(v) => set("referrer_driver_id", v)}>
-                                    <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select driver" /></SelectTrigger>
-                                    <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">
-                                        {drivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}{d.driver_code ? ` · ${d.driver_code}` : ""} · {d.phone}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
+                                <DriverSearch drivers={drivers} value={f.referrer_driver_id} onChange={(id) => set("referrer_driver_id", id)} />
                             )}
                         </Field>
                     </div>
@@ -211,6 +206,48 @@ function RewardLine({ amount, target, days }) {
   return days >= target
     ? <div className="text-emerald-600 font-semibold">✅ ₹{amount} · {target} days done</div>
     : <div className="text-mv-dim">⏳ ₹{amount} · {target - days} days left</div>;
+}
+
+function DriverSearch({ drivers, value, onChange }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = drivers.find((d) => d.id === value);
+  const s = q.trim().toLowerCase();
+  const list = drivers
+    .filter((d) => !s || [d.name, d.driver_code, d.phone].some((v) => (v || "").toLowerCase().includes(s)))
+    .slice(0, 50);
+  const label = selected ? `${selected.name}${selected.driver_code ? " · " + selected.driver_code : ""} · ${selected.phone}` : "";
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mv-dim" />
+        <input
+          value={open ? q : label}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => { setOpen(true); setQ(""); }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Search name, ID or phone..."
+          className="w-full h-10 pl-9 pr-3 rounded-xl border border-mv-border bg-mv-surface2 text-sm outline-none focus:ring-2 focus:ring-mv-primary/30" />
+      </div>
+      {open && (
+        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto rounded-xl border border-mv-border bg-mv-surface shadow-lg">
+          {list.length === 0 ? (
+            <div className="p-3 text-sm text-mv-dim">No driver found</div>
+          ) : list.map((d) => (
+            <button type="button" key={d.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onChange(d.id); setOpen(false); setQ(""); }}
+              className={`w-full text-left px-3 py-2 hover:bg-mv-elevated ${d.id === value ? "bg-mv-elevated" : ""}`}>
+              <div className="text-sm font-medium">{d.name}</div>
+              <div className="text-xs text-mv-dim">
+                <span className="font-mono text-mv-primary">{d.driver_code || "—"}</span> · {d.phone}{d.city ? ` · ${d.city}` : ""}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ---------- Sidebar page ---------- */

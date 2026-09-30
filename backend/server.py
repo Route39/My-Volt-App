@@ -2889,7 +2889,7 @@ async def _rental_account(rental):
     # starts so it can gate today's first trip — but it must NEVER count as one of
     # the "unpaid days" on its own, or the driver gets blocked the same moment the
     # charge is added, a full day too early. A day only becomes "overdue" once the
-    # whole day has passed without payment. So: unpaid for 3 full days -> blocked
+    # whole day has passed without payment. So: unpaid for 2 full days -> blocked
     # from the START of the 4th day, exactly as intended.
     past_unpaid_days = {d for d in rent_by_date if d < today_iso}
     if extra_km_due > 0 and not past_unpaid_days:
@@ -2900,8 +2900,8 @@ async def _rental_account(rental):
     
     grace_period_until = existing.get("grace_period_until") if existing else None
 
-    # Block only once 3 FULL days have gone by unpaid — i.e. from the 4th day on.
-    if overdue >= 3 and rate > 0:
+    # Block only once 2 FULL days have gone by unpaid — i.e. from the 3rd day on.
+    if overdue >= 2 and rate > 0:
         status = "blocked"
     elif overdue >= 1 and rate > 0:
         status = "overdue"
@@ -2915,7 +2915,7 @@ async def _rental_account(rental):
     blocked_rent_amount = round(sum(rent_by_date.get(d, 0) for d in blocked_dates), 2)
     blocked_total_amount = round(blocked_rent_amount + float(extra_km_due or 0), 2)
 
-    # ─── AUTO TEMPORARY BLOCK + CATCH-UP REQUIREMENT (3+ full unpaid days) ──
+    # ─── AUTO TEMPORARY BLOCK + CATCH-UP REQUIREMENT (2+ full unpaid days) ──
     # The very first time the account becomes blocked, automatically apply a
     # "temporary" admin block (unless already PERMANENTLY blocked) AND flag
     # pending_catchup, so once an admin/city manager unblocks the driver, they
@@ -3019,6 +3019,12 @@ async def _driver_payload(user):
     did = user["id"]
     rental = await _active_rental(org, did)
     dep = await db.security_deposits.find_one({"organization_id": org, "driver_id": did})
+
+    # Monthly KM resets on the 1st (IST): if the stored month isn't the current
+    # month, the driver has used 0 km this month.
+    cur_month = _today_ist().strftime("%Y-%m")
+    month_kms = user.get("current_month_kms", 0) if user.get("current_month") == cur_month else 0
+
     out = {
         "driver": {"id": did, "name": user.get("name"), "phone": user.get("phone"), "city": user.get("city"),
                    "kyc_status": user.get("kyc_status"),
@@ -3026,8 +3032,8 @@ async def _driver_payload(user):
                    "kyc_snoozed_until": user.get("kyc_snoozed_until"),
                    "last_odometer_date": user.get("last_odometer_date"),
                    "active_trip_id": user.get("active_trip_id"),
-                   "current_month_kms": user.get("current_month_kms", 0),
-                   "current_month": user.get("current_month"),
+                   "current_month_kms": month_kms,
+                   "current_month": cur_month,
                    "today_driven_km": user.get("today_driven_km", 0),
                    "today_overage_km": user.get("today_overage_km", 0),
                    "package_name": user.get("package_name"),
