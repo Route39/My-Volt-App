@@ -803,8 +803,11 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     await log_audit(user, "driver_deleted", "driver", did, f"Driver {drv.get('name')} and all associated data completely deleted")
     return {"ok": True}
 
-    async def _next_driver_code():
-        c = await db.counters.find_one_and_update(
+
+
+
+async def _next_driver_code():
+    c = await db.counters.find_one_and_update(
         {"_id": "driver_code"}, {"$inc": {"seq": 1}},
         upsert=True, return_document=True
     )
