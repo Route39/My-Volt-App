@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Car, Users, KeyRound, Wrench, ClipboardList, MapPin,
   FileText, AlertTriangle, HeartPulse, BarChart3, Settings, Search, LogOut,
-  Zap, MoreHorizontal, ChevronDown, Bike, FileBadge, Banknote, Package
+  Zap, MoreHorizontal, ChevronDown, Bike, FileBadge, Banknote, Package, UserPlus
 } from "lucide-react";
 import { useAuth, roleLabel } from "../../context/AuthContext";
 import { useApp, CITIES } from "../../context/AppContext";
@@ -24,6 +24,7 @@ const NAV = [
   { to: "/daily-collection", label: "Daily Collection", icon: Banknote, mod: "rentals" },
   { to: "/odometer", label: "Odometer Logs", icon: Car, mod: "drivers" },
   { to: "/kyc", label: "KYC Approvals", icon: FileBadge, mod: "drivers" },
+  { to: "/referrals", label: "Referral Drivers", icon: UserPlus, mod: "drivers" },
   { to: "/service-requests", label: "Service Requests", icon: Wrench, mod: "service" },
   { to: "/vehicle-service", label: "Vehicle Service", icon: ClipboardList, mod: "service" },
   { to: "/incidents", label: "Incidents", icon: AlertTriangle, mod: "incidents" },

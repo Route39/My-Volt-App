@@ -14,6 +14,7 @@ import { fmtDate, inr } from "../lib/format";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DriverCode } from "../lib/driverCodes";
 
 const ACCESSORY_KEYS = ["charger", "stepney", "jack", "tool_kit", "documents"];
 
@@ -61,7 +62,7 @@ export default function VehicleProfile() {
         </div>
         <div className="flex items-center gap-4 px-6 py-4 flex-wrap justify-between">
           <div className="flex items-center gap-6 text-sm">
-            <span className="flex items-center gap-2"><User className="w-4 h-4 text-mv-dim" /> {v.current_driver_name || "No driver"}</span>
+            <span className="flex items-center gap-2"><User className="w-4 h-4 text-mv-dim" /> {v.current_driver_name || "No driver"} <DriverCode id={v.current_driver_id} /></span>
             <span className="flex items-center gap-2"><MapPin className="w-4 h-4 text-mv-dim" /> {v.parking || v.city}</span>
             {v.current_rental_code && <span className="flex items-center gap-2 text-mv-primary">{v.current_rental_code}</span>}
           </div>
@@ -108,7 +109,7 @@ export default function VehicleProfile() {
           {v.current_driver_id ? (
             <button onClick={() => nav(`/drivers/${v.current_driver_id}`)} className="mv-card mv-card-hover p-5 flex items-center gap-4 w-full text-left">
               <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center"><User className="w-6 h-6 text-mv-muted" /></div>
-              <div><div className="font-semibold">{v.current_driver_name}</div><div className="text-sm text-mv-dim">View driver profile →</div></div>
+              <div><div className="font-semibold">{v.current_driver_name} <DriverCode id={v.current_driver_id} /></div><div className="text-sm text-mv-dim">View driver profile →</div></div>
             </button>
           ) : <div className="mv-card p-10 text-center text-mv-muted text-sm">No driver assigned.</div>}
         </TabsContent>

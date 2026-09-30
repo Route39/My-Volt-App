@@ -51,7 +51,7 @@ export default function Drivers() {
       <div className="flex flex-col lg:flex-row gap-3 mb-5">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mv-dim" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} data-testid="driver-search" placeholder="Search name, phone, vehicle…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} data-testid="driver-search" placeholder="Search name, ID, phone, vehicle…"
                  className="w-full h-10 pl-9 pr-3 rounded-xl bg-mv-surface border border-mv-border outline-none focus:border-mv-primary transition-colors text-sm" />
         </div>
         <div className="flex items-center gap-2">
@@ -82,6 +82,7 @@ export default function Drivers() {
                 <Avatar className="w-12 h-12"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-sm">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
                 <div className="min-w-0">
                   <div className="font-display font-semibold truncate">{d.name}</div>
+                  {d.driver_code && <div className="text-[11px] font-mono font-semibold text-mv-primary">{d.driver_code}</div>}
                   <div className="flex gap-2 mt-1">
                     <StatusChip status={d.status} />
                     <KycStatusChip status={d.kyc_status || "pending"} />
@@ -124,7 +125,7 @@ export default function Drivers() {
             <thead><tr className="border-b border-mv-border text-left mv-label"><th className="px-4 py-3">Driver</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Package</th><th className="px-4 py-3">City</th><th className="px-4 py-3">KYC</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
             <tbody>{items.map((d) => (
               <tr key={d.id} onClick={() => nav(`/drivers/${d.id}`)} className="border-b border-mv-border/50 hover:bg-mv-elevated cursor-pointer transition-colors">
-                <td className="px-4 py-3 font-medium flex items-center gap-2"><Avatar className="w-7 h-7"><AvatarImage src={d.avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{d.name[0]}</AvatarFallback></Avatar>{d.name}</td>
+                <td className="px-4 py-3 font-medium flex items-center gap-2"><Avatar className="w-7 h-7"><AvatarImage src={d.avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{d.name[0]}</AvatarFallback></Avatar><div>{d.name}{d.driver_code && <div className="text-[11px] font-mono text-mv-primary">{d.driver_code}</div>}</div></td>
                 <td className="px-4 py-3 text-mv-muted">{d.phone}</td>
                 <td className="px-4 py-3">
                   {d.current_vehicle_number ? (

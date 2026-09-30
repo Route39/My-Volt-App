@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { StatusChip, Skeleton, EmptyState } from "../components/common/Primitives";
 import { PageHeader, FilterChip, PrimaryBtn } from "../components/common/Page";
 import { fmtDate, inr, relativeEnd } from "../lib/format";
+import { DriverCode } from "../lib/driverCodes";
 
 const TABS = [
   ["active", "Active"], ["suspended", "Suspended"], ["closed", "Completed"], ["all", "All Rentals"],
@@ -62,7 +63,7 @@ export default function Rentals() {
                 <StatusChip status={r.status === "suspended" ? "suspended" : r.display_status} />
               </div>
               <div className="mt-3 space-y-1.5 text-sm">
-                <div className="flex items-center gap-2 text-mv-muted"><User className="w-4 h-4" /> {r.driver_name}</div>
+                <div className="flex items-center gap-2 text-mv-muted"><User className="w-4 h-4" /> {r.driver_name} <DriverCode id={r.driver_id} /></div>
                 <div className="flex items-center gap-2 text-mv-muted"><Car className="w-4 h-4" /> {r.vehicle_number} · {r.city}</div>
               </div>
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-mv-border">

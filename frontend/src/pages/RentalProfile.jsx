@@ -9,6 +9,7 @@ import { Field, TextInput, TextArea, PrimaryBtn, GhostBtn } from "../components/
 import { fmtDate, inr } from "../lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DriverCode } from "../lib/driverCodes";
 
 export default function RentalProfile() {
   const { id } = useParams();
@@ -40,7 +41,7 @@ export default function RentalProfile() {
           <div>
             <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{r.rental_code}</h1><StatusChip status={r.status === "suspended" ? "suspended" : r.display_status} /></div>
             <div className="flex items-center gap-5 mt-2 text-sm text-mv-muted flex-wrap">
-              <button onClick={() => nav(`/drivers/${r.driver_id}`)} className="flex items-center gap-1.5 hover:text-mv-text"><User className="w-4 h-4" /> {r.driver_name}</button>
+              <button onClick={() => nav(`/drivers/${r.driver_id}`)} className="flex items-center gap-1.5 hover:text-mv-text"><User className="w-4 h-4" /> {r.driver_name} <DriverCode id={r.driver_id} /></button>
               <button onClick={() => nav(`/fleet/${r.vehicle_id}`)} className="flex items-center gap-1.5 hover:text-mv-text"><Car className="w-4 h-4" /> {r.vehicle_number}</button>
               <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4" /> {fmtDate(r.start)} → {(r.end && r.end !== 'Ongoing') ? fmtDate(r.end) : 'Ongoing'}</span>
             </div>

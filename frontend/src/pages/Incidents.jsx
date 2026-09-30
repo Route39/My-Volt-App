@@ -10,6 +10,7 @@ import { PageHeader, PrimaryBtn, Field, TextInput, TextArea } from "../component
 import { fmtDate, inr } from "../lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DriverCode } from "../lib/driverCodes";
 
 const FLOW = ["reported", "investigation", "action", "resolved", "closed"];
 
@@ -91,7 +92,7 @@ function IncidentDetail({ inc, setInc, onChange }) {
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg">
         <DialogHeader><DialogTitle className="font-display flex items-center gap-2">{inc.code} <StatusChip status={inc.status} /></DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          {[["Type", inc.incident_type], ["Vehicle", inc.vehicle_number], ["Driver", inc.driver_name || "—"], ["City", inc.city], ["Location", inc.location], ["Est. Damage", inr(inc.estimated_damage)]].map(([k, v]) => (
+          {[["Type", inc.incident_type], ["Vehicle", inc.vehicle_number], ["Driver", <>{inc.driver_name || "—"} <DriverCode id={inc.driver_id} /></>], ["City", inc.city], ["Location", inc.location], ["Est. Damage", inr(inc.estimated_damage)]].map(([k, v]) => (
             <div key={k}><div className="mv-label">{k}</div><div className="font-medium">{v}</div></div>
           ))}
         </div>

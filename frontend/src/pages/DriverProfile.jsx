@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { ReferralList } from "./Referrals";
 
 export default function DriverProfile() {
   const { id } = useParams();
@@ -38,7 +39,7 @@ export default function DriverProfile() {
       <div className="mv-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 mv-rise">
         <Avatar className="w-20 h-20"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-xl">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
         <div className="flex-1">
-          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1><StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
+          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1>{d.driver_code && <span className="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold bg-blue-50 text-mv-primary border border-blue-100">{d.driver_code}</span>}<StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
           <div className="flex items-center gap-5 mt-2 text-sm text-mv-muted flex-wrap">
             <span className="flex items-center gap-1.5"><Phone className="w-4 h-4" /> {d.phone}</span>
             <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {d.city}</span>
@@ -63,12 +64,12 @@ export default function DriverProfile() {
 
       <Tabs defaultValue="personal" className="mt-6">
         <TabsList className="bg-mv-surface border border-mv-border flex-wrap h-auto">
-          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize">{t}</TabsTrigger>)}
+          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents", "referral"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize">{t}</TabsTrigger>)}
         </TabsList>
 
         <TabsContent value="personal" className="mt-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {[["Name", d.name], ["Phone", d.phone], ["Address", d.address], ["Emergency Contact", d.emergency_contact], ["Licence No.", d.license_number], ["City", d.city]].map(([k, v]) => (
+            {[["Driver ID", d.driver_code], ["Name", d.name], ["Phone", d.phone], ["Address", d.address], ["Emergency Contact", d.emergency_contact], ["Licence No.", d.license_number], ["City", d.city]].map(([k, v]) => (
               <div key={k} className="mv-card p-4"><div className="mv-label">{k}</div><div className="text-sm font-medium mt-1">{v || "—"}</div></div>
             ))}
           </div>
@@ -140,6 +141,9 @@ export default function DriverProfile() {
           {(d.incidents || []).length === 0 ? <div className="mv-card p-10 text-center text-mv-muted text-sm">No incidents ✓</div> : (
             <div className="space-y-2">{d.incidents.map((i) => (<div key={i.id} className="mv-card p-4 flex items-center justify-between"><div><div className="font-medium">{i.code} · {i.incident_type}</div><div className="text-xs text-mv-dim">{fmtDate(i.created_at)}</div></div><StatusChip status={i.status} /></div>))}</div>
           )}
+        </TabsContent>
+        <TabsContent value="referral" className="mt-4">
+          <ReferralList referrerId={d.id} referrerName={d.name} referrerCode={d.driver_code} showReferrer={false} />
         </TabsContent>
       </Tabs>
 

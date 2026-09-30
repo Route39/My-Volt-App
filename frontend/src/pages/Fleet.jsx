@@ -10,6 +10,7 @@ import { PageHeader, FilterChip, PrimaryBtn, GhostBtn, Field, TextInput } from "
 import { relativeEnd } from "../lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DriverCode } from "../lib/driverCodes";
 
 const STATUSES = ["all", "rented", "available", "service", "idle", "inactive", "accident"];
 
@@ -115,7 +116,7 @@ export default function Fleet() {
                 <span className="flex items-center gap-1">
                   <User className="w-3.5 h-3.5 opacity-70" /> 
                   {v.current_driver_name ? (
-                    <span className="font-medium text-mv-text">{v.current_driver_name}</span>
+                    <span className="font-medium text-mv-text">{v.current_driver_name} <DriverCode id={v.current_driver_id} /></span>
                   ) : (
                     <span className="opacity-70">Driver Not Assigned</span>
                   )}
@@ -147,7 +148,7 @@ export default function Fleet() {
                     <td className="px-4 py-3"><StatusChip status={v.status} /></td>
                     <td className="px-4 py-3">
                       {v.current_driver_name ? (
-                        <span className="font-medium">{v.current_driver_name}</span>
+                        <span className="font-medium">{v.current_driver_name} <DriverCode id={v.current_driver_id} /></span>
                       ) : (
                         <span className="text-mv-muted text-xs">Driver Not Assigned</span>
                       )}

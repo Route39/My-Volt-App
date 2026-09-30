@@ -10,6 +10,7 @@ import { PageHeader, PrimaryBtn, GhostBtn, Field, TextInput, TextArea } from "..
 import { timeAgo } from "../lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DriverCode } from "../lib/driverCodes";
 
 const STAGES = [
   ["new", "New"], ["assigned", "Assigned"], ["inspection", "Inspection"],
@@ -79,7 +80,7 @@ export default function ServiceRequests() {
                       <div className="text-sm font-medium mt-1.5 flex items-center gap-1.5"><Wrench className="w-3.5 h-3.5 text-amber-400" /> {s.issue_type}</div>
                       <div className="mt-2 space-y-1 text-[11px] text-mv-muted">
                         <div className="flex items-center gap-1"><Car className="w-3 h-3" /> {s.vehicle_number}</div>
-                        <div className="flex items-center gap-1"><User className="w-3 h-3" /> {s.driver_name || "—"} · {s.city}</div>
+                        <div className="flex items-center gap-1"><User className="w-3 h-3" /> {s.driver_name || "—"} <DriverCode id={s.driver_id} /> · {s.city}</div>
                         <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {timeAgo(s.created_at)}</div>
                       </div>
                       <div className="mt-2"><StatusChip status={s.priority} /></div>
@@ -138,7 +139,7 @@ function SRDetail({ sr, setSr, onEdit, onDelete, onChange }) {
         <DialogHeader><DialogTitle className="font-display flex items-center gap-2">{sr.code} <StatusChip status={sr.priority} /></DialogTitle></DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="grid grid-cols-2 gap-3">
-            {[["Vehicle", sr.vehicle_number], ["Driver", sr.driver_name || "—"], ["Issue", sr.issue_type], ["City", sr.city], ["Source", sr.source], ["Status", sr.status]].map(([k, v]) => (
+            {[["Vehicle", sr.vehicle_number], ["Driver", <>{sr.driver_name || "—"} <DriverCode id={sr.driver_id} /></>], ["Issue", sr.issue_type], ["City", sr.city], ["Source", sr.source], ["Status", sr.status]].map(([k, v]) => (
               <div key={k}><div className="mv-label">{k}</div><div className="font-medium capitalize">{v}</div></div>
             ))}
           </div>

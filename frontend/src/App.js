@@ -29,6 +29,7 @@ import PlatformApp from "@/pages/platform/PlatformApp";
 import DriverApp from "@/pages/driver/DriverApp";
 import DailyCollection from "@/pages/DailyCollection";
 import PrivacyPolicy from "@/pages/PrivacyPolicy";
+import Referrals from "@/pages/Referrals";
 
 const FLEET_PATHS = ["/fleet", "/drivers", "/rentals", "/service-requests", "/vehicle-service", "/locations", "/incidents"];
 
@@ -80,6 +81,7 @@ function Shell() {
       <Route path="/vehicle-service" element={<Protected><VehicleService /></Protected>} />
       <Route path="/incidents" element={<Protected><Incidents /></Protected>} />
       <Route path="/packages" element={<Protected><Packages /></Protected>} />
+      <Route path="/referrals" element={<Protected><Referrals /></Protected>} />
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
