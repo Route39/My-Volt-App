@@ -977,8 +977,9 @@ async def create_referral(request: Request):
         r2 = await db.drivers.insert_one(nd)
         new_drv = {**nd, "_id": r2.inserted_id}
         await log_audit(user, "driver_created", "driver", str(r2.inserted_id), f"Driver {nd['name']} added via referral")
-    doc = {
+        doc = {
         "organization_id": user.get("organization_id"),
+        "city": ref.get("city"),
         "referrer_driver_id": b["referrer_driver_id"],
                 "referrer_name": ref.get("name"),
         "referrer_code": ref.get("driver_code"),
