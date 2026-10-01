@@ -777,6 +777,7 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     
     # 1. Delete driver document
     await db.drivers.delete_one({"_id": oid(did)})
+    await _sync_driver_code_counter()
     
     # 2. Delete driver from users if exists
     await db.users.delete_many({"phone": drv.get("phone"), "role": "driver"})
@@ -802,6 +803,11 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     
     await log_audit(user, "driver_deleted", "driver", did, f"Driver {drv.get('name')} and all associated data completely deleted")
     return {"ok": True}
+
+async def _sync_driver_code_counter():
+    # Reset only when no drivers remain; never reuse a deleted driver's code
+    if await db.drivers.count_documents({"driver_code": {"$regex": "^R39D"}}) == 0:
+        await db.counters.update_one({"_id": "driver_code"}, {"$set": {"seq": 0}}, upsert=True)
 
 
 
@@ -4655,7 +4661,7 @@ async def startup():
         last = await db.drivers.find_one({"driver_code": {"$regex": "^R39D"}}, sort=[("driver_code", -1)])
         start = int(last["driver_code"][4:]) if last else 0
         cur = await db.counters.find_one({"_id": "driver_code"})
-        if not cur or cur.get("seq", 0) < start:
+        if not cur or cur.get("seq", 0) < start or start == 0:
             await db.counters.update_one({"_id": "driver_code"}, {"$set": {"seq": start}}, upsert=True)
         missing = await db.drivers.find({"driver_code": {"$exists": False}}).sort([("created_at", 1), ("_id", 1)]).to_list(None)
         for d in missing:
