@@ -948,7 +948,7 @@ async def list_referrals(request: Request, referrer_id: str = None):
 @api.post("/referrals")
 async def create_referral(request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     b = await request.json()
     if not b.get("referrer_driver_id") or not (b.get("referred_name") or "").strip():
         raise HTTPException(status_code=400, detail="Referrer and referred driver name required")
@@ -998,7 +998,7 @@ async def create_referral(request: Request):
 @api.put("/referrals/{rid}")
 async def update_referral(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     b = await request.json()
     upd = {k: b[k] for k in ("referred_name", "referred_phone", "referred_at", "joined_at") if k in b}
     await db.referrals.update_one(org_filter(user, {"_id": oid(rid)}), {"$set": upd})
@@ -1008,7 +1008,7 @@ async def update_referral(rid: str, request: Request):
 @api.delete("/referrals/{rid}")
 async def delete_referral(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     await db.referrals.delete_one(org_filter(user, {"_id": oid(rid)}))
     return {"ok": True}
 
