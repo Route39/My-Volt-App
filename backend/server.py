@@ -592,6 +592,14 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
     plans = await db.rental_plans.find({}).to_list(100)
     plan_limits = {f"{p.get('city', '')}_{p['name']}".lower(): p.get("monthly_km_limit", 0) for p in plans}
     
+    # Total KM per driver per day (all trips of that day) for the daily-limit display
+    day_totals = {}
+    for _lg in logs:
+        if _lg.get("type") == "catchup_rent":
+            continue
+        _k = (_lg["driver_id"], _lg.get("date"))
+        day_totals[_k] = day_totals.get(_k, 0) + (_lg.get("driven_today", 0) or 0)
+
     out = []
     for log in logs:
         log["_id"] = str(log["_id"])
@@ -657,14 +665,17 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
                 )
         
         driven_today = log.get("driven_today", 0) or 0
+        daily_limit = _effective_daily_limit(daily_limit, log.get("limit_kms", 0))
+        day_total = day_totals.get((log["driver_id"], log.get("date")), driven_today)
         if "extra_km_charge" in log:
             # Trip already ended: show exactly what was billed for it
             extra_km = log.get("extra_km", 0)
             extra_km_charge = log.get("extra_km_charge", 0.0)
         else:
-            extra_km = max(0, driven_today - daily_limit) if daily_limit > 0 else 0
+            extra_km = _daily_overage(day_total - driven_today, driven_today, daily_limit)
             extra_km_charge = round(extra_km * overage_per_km, 2)        
         log["daily_limit_km"] = daily_limit
+        log["day_total_km"] = day_total
         log["daily_rent"] = daily_rent
         log["overage_per_km"] = overage_per_km
         log["extra_km"] = extra_km
@@ -1328,10 +1339,12 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
         # Use that instead of guessing by date. If two trips point at the same payment
         # (stale value after an "outstanding" payment), the earliest trip owns it.
         claim_owner = {}
+        claim_owner_date = {}   # txn -> date of the trip that owns it
         async for cl in db.driver_odometer_logs.find(
             {"driver_id": r["driver_id"], "snapshot_rent_txn_id": {"$nin": [None, ""]}}
         ).sort("created_at", 1):
             claim_owner.setdefault(cl["snapshot_rent_txn_id"], str(cl["_id"]))
+            claim_owner_date.setdefault(cl["snapshot_rent_txn_id"], cl.get("date"))
         claimed_pay = {}
         if claim_owner:
             async for cp in db.rental_payments.find({
@@ -1362,7 +1375,18 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 ]
             }).to_list(100)
                         # Payments already claimed by a started trip are shown on that trip's row only.
-            day_payments = [p for p in day_payments if p.get("transaction_id") not in claim_owner]
+            # EXCEPTION: a multi-day payment (e.g. yesterday + today paid together) is owned
+            # by the trip of ONE of its days. The other covered days must still show their
+            # own share (covers_amounts[day]) and the same transaction id.
+            day_payments = [
+                p for p in day_payments
+                if p.get("transaction_id") not in claim_owner
+                or (
+                    len(p.get("covers_amounts") or {}) > 1
+                    and d_str in (p.get("covers_amounts") or {})
+                    and d_str != claim_owner_date.get(p.get("transaction_id"))
+                )
+            ]
             
             # Security-deposit payments are stored in the same collection but must NOT count
             # towards daily rent / extra-KM settlement (or supply its transaction id).
@@ -2657,13 +2681,45 @@ async def _get_package_snapshot(org, did):
             "organization_id": org
         })
     monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
+    daily_limit_km = _effective_daily_limit(plan.get("daily_limit_km", 0) if plan else 0, monthly_km_limit)
     return {
         "daily_rate": rental.get("daily_rate", 0),
         "package_name": (plan.get("name") if plan else rental.get("package_name", "")) or "",
         "monthly_km_limit": monthly_km_limit,
-        "daily_limit_km": 0,
+        "daily_limit_km": daily_limit_km,
         "overage_per_km": plan.get("overage_per_km", 0.0) if plan else 0.0,
     }
+
+
+def _effective_daily_limit(daily_limit, monthly_limit=0):
+    """Daily KM limit actually enforced. Uses the package's daily limit; packages
+    created before the daily-limit change (daily = 0) fall back to monthly / 30 so
+    they keep being charged. 0 means 'no limit'."""
+    daily_limit = int(daily_limit or 0)
+    if daily_limit > 0:
+        return daily_limit
+    monthly_limit = int(monthly_limit or 0)
+    return round(monthly_limit / 30) if monthly_limit > 0 else 0
+
+
+async def _day_km_before(driver_id, date_str, exclude_log_id=None):
+    """KM already driven by this driver on `date_str` in OTHER completed trips.
+    A driver may do several trips in one day; the daily limit applies to their sum."""
+    q = {"driver_id": driver_id, "date": date_str, "status": "completed",
+         "type": {"$ne": "catchup_rent"}}
+    if exclude_log_id:
+        q["_id"] = {"$ne": ObjectId(str(exclude_log_id))}
+    total = 0
+    async for l in db.driver_odometer_logs.find(q, {"driven_today": 1}):
+        total += l.get("driven_today", 0) or 0
+    return total
+
+
+def _daily_overage(km_before_today, driven, daily_limit):
+    """Extra KM added by this trip = (day total after trip over limit) - (day total before trip over limit)."""
+    if not daily_limit or daily_limit <= 0:
+        return 0
+    return max(0, (km_before_today + driven) - daily_limit) - max(0, km_before_today - daily_limit)
 
 
 async def _catchup_overage(org, did, rental, baseline_reading, reading):
@@ -2674,14 +2730,19 @@ async def _catchup_overage(org, did, rental, baseline_reading, reading):
         raise HTTPException(400, f"Current KM ({reading}) cannot be less than your last recorded reading ({baseline_reading}).")
     diff_km = reading - baseline_reading
     snap = await _get_package_snapshot(org, did)
-    monthly_limit = snap["monthly_km_limit"] if snap else 0
+    daily_limit = snap["daily_limit_km"] if snap else 0
     overage_per_km = snap["overage_per_km"] if snap else 0.0
     drv = await db.drivers.find_one({"_id": ObjectId(did)})
-    current_month_str = _today_ist().strftime("%Y-%m")
-    current_month_kms = (drv or {}).get("current_month_kms", 0) or 0
-    if (drv or {}).get("current_month") != current_month_str:
-        current_month_kms = 0
-    overage_km = max(0, (current_month_kms + diff_km) - monthly_limit) - max(0, current_month_kms - monthly_limit)
+    # The catch-up reading covers every day since the driver's last reading, so the
+    # allowance is daily_limit x number of days in that gap (minimum 1 day).
+    gap_days = 1
+    try:
+        last_d = date.fromisoformat((drv or {}).get("last_odometer_date") or "")
+        gap_days = max(1, (_today_ist() - last_d).days)
+    except ValueError:
+        pass
+    allowed_km = daily_limit * gap_days
+    overage_km = max(0, diff_km - allowed_km) if daily_limit > 0 else 0
     overage_charge = round(overage_km * overage_per_km, 2)
     return diff_km, overage_km, overage_charge
 
@@ -3089,7 +3150,7 @@ async def _driver_payload(user):
         
         if active_log and "snapshot_daily_rent" in active_log:
             monthly_km_limit = active_log.get("snapshot_monthly_limit", 0)
-            daily_limit_km = active_log.get("snapshot_daily_limit", 0)
+            daily_limit_km = _effective_daily_limit(active_log.get("snapshot_daily_limit", 0), monthly_km_limit)
             overage_per_km = active_log.get("snapshot_overage_per_km", 0.0)
         else:
             # Driver still owes money (e.g. rent from the trip that just ended): keep showing
@@ -3103,17 +3164,21 @@ async def _driver_payload(user):
                 last_log = _logs[0] if _logs else None
             if last_log:
                 monthly_km_limit = last_log.get("snapshot_monthly_limit", 0)
-                daily_limit_km = last_log.get("snapshot_daily_limit", 0)
+                daily_limit_km = _effective_daily_limit(last_log.get("snapshot_daily_limit", 0), monthly_km_limit)
                 overage_per_km = last_log.get("snapshot_overage_per_km", 0.0)
             else:
                 monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
                 overage_per_km = plan.get("overage_per_km", 0.0) if plan else 0.0
-                daily_limit_km = 0
+                daily_limit_km = _effective_daily_limit(plan.get("daily_limit_km", 0) if plan else 0, monthly_km_limit)
         
         out["driver"]["package_limit_km"] = monthly_km_limit
         out["driver"]["monthly_km_limit"] = monthly_km_limit
         out["driver"]["daily_limit_km"] = daily_limit_km
         out["driver"]["overage_per_km"] = overage_per_km
+        # KM already driven today (all completed trips today) vs the daily limit
+        today_km_used = await _day_km_before(did, _today_ist().isoformat())
+        out["driver"]["today_km_used"] = today_km_used
+        out["driver"]["today_extra_km"] = _daily_overage(0, today_km_used, daily_limit_km)
         
         if plan:
             if out["deposit"] and out["deposit"].get("status") != "paid":
@@ -3635,9 +3700,11 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             daily_limit_km = 0
             plan_name = (plan.get("name") if plan else (rental.get("package_name", "") if rental else "")) or ""
                 
-        # Admin submit: Overage calculated against MONTHLY limit
-        overage_km = max(0, (current_month_kms + driven) - monthly_limit_km) - max(0, current_month_kms - monthly_limit_km)
-        overage_charge = overage_km * overage_per_km
+        # Extra KM is charged against the DAILY limit (all trips of the same day added together)
+        daily_limit_km = _effective_daily_limit(daily_limit_km, monthly_limit_km)
+        day_km_before = await _day_km_before(driver_id, log.get("date") or today, active_trip_id)
+        overage_km = _daily_overage(day_km_before, driven, daily_limit_km)
+        overage_charge = round(overage_km * overage_per_km, 2)
         
         # Rent is charged once per calendar day, not at trip end (see _rental_account).
         rent_charge = 0.0
@@ -3914,9 +3981,11 @@ async def submit_odometer(
             daily_limit_km = 0
             plan_name = (plan.get("name") if plan else (rental.get("package_name", "") if rental else "")) or ""
                 
-        # Overage calculated against MONTHLY limit across all days
-        overage_km = max(0, (current_month_kms + driven) - monthly_limit_km) - max(0, current_month_kms - monthly_limit_km)
-        overage_charge = overage_km * overage_per_km
+        # Extra KM is charged against the DAILY limit (all trips of the same day added together)
+        daily_limit_km = _effective_daily_limit(daily_limit_km, monthly_limit_km)
+        day_km_before = await _day_km_before(user["id"], log.get("date") or today, active_trip_id)
+        overage_km = _daily_overage(day_km_before, driven, daily_limit_km)
+        overage_charge = round(overage_km * overage_per_km, 2)
         
         # ALL driven KMs (including extra/overage) reduce the monthly total
         # Extra KM also billed separately as overage charge

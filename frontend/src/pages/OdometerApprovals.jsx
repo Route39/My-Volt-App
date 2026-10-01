@@ -134,7 +134,7 @@ export default function OdometerApprovals() {
               <th className="px-3 py-4 whitespace-nowrap">End KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-indigo-600">Today Driven</th>
               <th className="px-3 py-4 whitespace-nowrap text-red-500">Extra KM</th>
-              <th className="px-3 py-4 whitespace-nowrap text-center">Monthly KM</th>
+              <th className="px-3 py-4 whitespace-nowrap text-center">Daily KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Status</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Photos</th>
             </tr>
@@ -146,9 +146,10 @@ export default function OdometerApprovals() {
               <tr><td colSpan="12" className="text-center py-10 text-slate-500">No odometer logs found</td></tr>
             ) : (
               logs.map(log => {
-                const limit = log.limit_kms || 0;
-                const percent = Math.min(100, Math.max(0, limit ? (log.monthly_kms / limit) * 100 : 0));
-                const overLimit = limit > 0 && log.monthly_kms > limit;
+                const limit = log.daily_limit_km || 0;
+                const dayTotal = log.day_total_km || 0;
+                const percent = Math.min(100, Math.max(0, limit ? (dayTotal / limit) * 100 : 0));
+                const overLimit = limit > 0 && dayTotal > limit;
                 const driven = log.driven_today || 0;
                 const extraKm = log.extra_km || 0;
                 const extraCharge = log.extra_km_charge || 0;
@@ -199,7 +200,7 @@ export default function OdometerApprovals() {
                           <div>
                             <div className="font-bold text-red-600">+{extraKm} km</div>
                             <div className="text-xs text-red-400">{inr(extraCharge)} extra</div>
-                            <div className="text-[10px] text-slate-400">Reduces monthly KM + billed extra</div>
+                            <div className="text-[10px] text-slate-400">Above daily limit · billed extra</div>
                           </div>
                         ) : (
                           <div>
@@ -214,9 +215,9 @@ export default function OdometerApprovals() {
                     <td className="px-3 py-4 whitespace-nowrap">
                       <div className="flex flex-col items-center">
                         <span className={`font-bold ${overLimit ? "text-red-600" : "text-slate-900"}`}>
-                          {log.monthly_kms} / {limit} km
+                          {dayTotal} / {limit} km
                         </span>
-                        <div className="text-[10px] text-slate-400 mb-1">All KM incl. extra counted</div>
+                        <div className="text-[10px] text-slate-400 mb-1">All trips of this day</div>
                         <div className="w-28 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                           <div
                             className={`h-full rounded-full ${overLimit ? "bg-red-500" : percent > 80 ? "bg-amber-500" : "bg-emerald-500"}`}

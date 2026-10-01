@@ -475,31 +475,33 @@ export default function DriverHome() {
           <div className="col-span-2 mt-2 pt-4 border-t border-emerald-600/30">
             <div className="grid grid-cols-1 gap-3">
 
-              {/* Right: Monthly KM Limit */}
+              {/* Daily KM Limit */}
               <div className="bg-emerald-800/50 rounded-2xl p-3">
-                <div className="text-[10px] text-emerald-300/70 font-semibold uppercase tracking-wider mb-2">Monthly Limit</div>
+                <div className="text-[10px] text-emerald-300/70 font-semibold uppercase tracking-wider mb-2">Daily Limit</div>
                 <div className="text-2xl font-extrabold leading-none">
-                  {driver.monthly_km_limit || 0}
+                  {driver.daily_limit_km || 0}
                   <span className="text-xs font-normal text-emerald-300/80 ml-1">km</span>
                 </div>
                 <div className="mt-2">
                   <div className="flex justify-between text-[11px] text-emerald-300/80 mb-1">
-                    <span>Used: <span className="font-bold text-white">{driver.current_month_kms || 0} km</span></span>
-                    <span>{Math.max(0, (driver.monthly_km_limit || 0) - (driver.current_month_kms || 0))} left</span>
+                    <span>Today: <span className="font-bold text-white">{driver.today_km_used || 0} km</span></span>
+                    <span>{Math.max(0, (driver.daily_limit_km || 0) - (driver.today_km_used || 0))} left</span>
                   </div>
                   <div className="w-full bg-emerald-900/60 rounded-full h-1.5 overflow-hidden">
                     <div 
                       className="bg-emerald-400 h-1.5 rounded-full transition-all"
-                      style={{ width: `${Math.min(100, ((driver.current_month_kms || 0) / (driver.monthly_km_limit || 1)) * 100)}%` }}
+                      style={{ width: `${Math.min(100, ((driver.today_km_used || 0) / (driver.daily_limit_km || 1)) * 100)}%` }}
                     />
                   </div>
-                  <div className="text-[10px] text-emerald-300/60 mt-1">All KM incl. extra counted here</div>
+                  <div className="text-[10px] text-emerald-300/60 mt-1">
+                    {(driver.today_extra_km || 0) > 0 ? `${driver.today_extra_km} km over today's limit` : "Resets every day at midnight"}
+                  </div>
                 </div>
               </div>
 
             </div>
             <div className="text-[10px] text-emerald-300/60 leading-tight mt-2 text-center">
-              Overage ₹{driver.overage_per_km || 0}/km above monthly limit · Extra km billed separately
+              Overage ₹{driver.overage_per_km || 0}/km above the daily limit · Extra km billed separately
             </div>
           </div>
         </div>

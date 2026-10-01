@@ -111,8 +111,8 @@ export default function Packages() {
                             <span className="font-extrabold text-mv-primary text-xl">{isActive ? inr(pkg.amount) : "—"}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm">
-                            <span className="text-mv-muted">Monthly Limit</span>
-                            <span className="font-semibold text-mv-text">{isActive ? `${pkg.monthly_km_limit} km` : "—"}</span>
+                            <span className="text-mv-muted">Daily Limit</span>
+                            <span className="font-semibold text-mv-text">{isActive ? `${pkg.daily_limit_km || Math.round((pkg.monthly_km_limit || 0) / 30)} km/day` : "—"}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm">
                             <span className="text-mv-muted">Extra KM Fee</span>
@@ -144,7 +144,7 @@ function PackageForm({ editData, onBack, onSaved }) {
     city: city,
     amount: pkg?.amount || "",
     deposit: pkg?.deposit || 5000,
-    monthly_km_limit: pkg?.monthly_km_limit || "",
+    daily_limit_km: pkg?.daily_limit_km || (pkg?.monthly_km_limit ? Math.round(pkg.monthly_km_limit / 30) : ""),
     overage_per_km: pkg?.overage_per_km || "",
     active: pkg?.active ?? true
   });
@@ -152,10 +152,10 @@ function PackageForm({ editData, onBack, onSaved }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleLimitChange = (e) => set("monthly_km_limit", e.target.value);;
+  const handleLimitChange = (e) => set("daily_limit_km", e.target.value);
 
   const save = async () => {
-    if (!form.name || form.amount === "" || form.monthly_km_limit === "" || form.overage_per_km === "" || form.deposit === "") {
+    if (!form.name || form.amount === "" || form.daily_limit_km === "" || form.overage_per_km === "" || form.deposit === "") {
       return toast.error("Please fill all fields accurately");
     }
     setSaving(true);
@@ -166,7 +166,8 @@ function PackageForm({ editData, onBack, onSaved }) {
         city: form.city,
         amount: Number(form.amount),
         deposit: Number(form.deposit),
-        monthly_km_limit: Number(form.monthly_km_limit),
+        daily_limit_km: Number(form.daily_limit_km),
+        monthly_km_limit: Number(form.daily_limit_km) * 30, // legacy field kept in sync
         overage_per_km: Number(form.overage_per_km),
         active: form.active
       };
@@ -273,10 +274,10 @@ function PackageForm({ editData, onBack, onSaved }) {
             </div>
             
             <div className="space-y-1">
-              <label className="block text-sm font-bold text-mv-text mb-1">Monthly KM Limit</label>
+              <label className="block text-sm font-bold text-mv-text mb-1">Daily KM Limit</label>
               <input 
                 type="number" 
-                value={form.monthly_km_limit} 
+                value={form.daily_limit_km} 
                 onChange={handleLimitChange} 
                 className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors"
                 placeholder="5000" 
