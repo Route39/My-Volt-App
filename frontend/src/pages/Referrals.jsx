@@ -16,7 +16,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function ReferralList({ referrerId, referrerName, referrerCode, showReferrer = true }) {
     const nav = useNavigate();
     const { user } = useAuth();
-    const canEdit = ["admin", "company_admin", "city_manager"].includes(user?.role);
+    const canEdit = ["admin", "company_admin", "city_manager", "staff"].includes(user?.role);
     const [items, setItems] = useState(null);
     const [q, setQ] = useState("");
     const [form, setForm] = useState(null); // null = closed, {} = add, {id..} = edit

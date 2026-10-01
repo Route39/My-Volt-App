@@ -777,6 +777,7 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     
     # 1. Delete driver document
     await db.drivers.delete_one({"_id": oid(did)})
+    await _sync_driver_code_counter()
     
     # 2. Delete driver from users if exists
     await db.users.delete_many({"phone": drv.get("phone"), "role": "driver"})
@@ -802,6 +803,11 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     
     await log_audit(user, "driver_deleted", "driver", did, f"Driver {drv.get('name')} and all associated data completely deleted")
     return {"ok": True}
+
+async def _sync_driver_code_counter():
+    # Reset only when no drivers remain; never reuse a deleted driver's code
+    if await db.drivers.count_documents({"driver_code": {"$regex": "^R39D"}}) == 0:
+        await db.counters.update_one({"_id": "driver_code"}, {"$set": {"seq": 0}}, upsert=True)
 
 
 
@@ -942,7 +948,7 @@ async def list_referrals(request: Request, referrer_id: str = None):
 @api.post("/referrals")
 async def create_referral(request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     b = await request.json()
     if not b.get("referrer_driver_id") or not (b.get("referred_name") or "").strip():
         raise HTTPException(status_code=400, detail="Referrer and referred driver name required")
@@ -971,8 +977,9 @@ async def create_referral(request: Request):
         r2 = await db.drivers.insert_one(nd)
         new_drv = {**nd, "_id": r2.inserted_id}
         await log_audit(user, "driver_created", "driver", str(r2.inserted_id), f"Driver {nd['name']} added via referral")
-    doc = {
+        doc = {
         "organization_id": user.get("organization_id"),
+        "city": ref.get("city"),
         "referrer_driver_id": b["referrer_driver_id"],
                 "referrer_name": ref.get("name"),
         "referrer_code": ref.get("driver_code"),
@@ -992,7 +999,7 @@ async def create_referral(request: Request):
 @api.put("/referrals/{rid}")
 async def update_referral(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     b = await request.json()
     upd = {k: b[k] for k in ("referred_name", "referred_phone", "referred_at", "joined_at") if k in b}
     await db.referrals.update_one(org_filter(user, {"_id": oid(rid)}), {"$set": upd})
@@ -1002,7 +1009,7 @@ async def update_referral(rid: str, request: Request):
 @api.delete("/referrals/{rid}")
 async def delete_referral(rid: str, request: Request):
     user = await get_user(request)
-    require_role(user, ["admin", "company_admin", "city_manager"])
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     await db.referrals.delete_one(org_filter(user, {"_id": oid(rid)}))
     return {"ok": True}
 
@@ -4655,7 +4662,7 @@ async def startup():
         last = await db.drivers.find_one({"driver_code": {"$regex": "^R39D"}}, sort=[("driver_code", -1)])
         start = int(last["driver_code"][4:]) if last else 0
         cur = await db.counters.find_one({"_id": "driver_code"})
-        if not cur or cur.get("seq", 0) < start:
+        if not cur or cur.get("seq", 0) < start or start == 0:
             await db.counters.update_one({"_id": "driver_code"}, {"$set": {"seq": start}}, upsert=True)
         missing = await db.drivers.find({"driver_code": {"$exists": False}}).sort([("created_at", 1), ("_id", 1)]).to_list(None)
         for d in missing:
