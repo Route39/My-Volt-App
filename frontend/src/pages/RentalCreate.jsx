@@ -297,7 +297,7 @@ export default function RentalCreate() {
                               <span className="text-mv-primary">{inr(p.amount)}/day</span>
                             </div>
                             <div className="text-xs text-mv-muted mt-1">{p.vehicle_category || "Standard"}</div>
-                            <div className="text-[10px] text-mv-muted mt-0.5">Limit: {p.monthly_km_limit}km</div>
+                            <div className="text-[10px] text-mv-muted mt-0.5">Limit: {p.daily_limit_km || Math.round((p.monthly_km_limit || 0) / 30)} km/day</div>
                           </button>
                         );
                       })}
