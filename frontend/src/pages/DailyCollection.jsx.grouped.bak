@@ -17,9 +17,6 @@ export default function DailyCollection() {
   const [dateFilter, setDateFilter] = useState("today");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  const [pickDate, setPickDate] = useState(todayIST);
-  const [pickMonth, setPickMonth] = useState(todayIST.slice(0, 7));
   const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
@@ -48,17 +45,6 @@ export default function DailyCollection() {
         const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
         p.from_date = ymd(firstDay);
         p.to_date = ymd(lastDay);
-      } else if (dateFilter === "date") {
-        if (pickDate) {
-          p.from_date = pickDate;
-          p.to_date = pickDate;
-        }
-      } else if (dateFilter === "month") {
-        if (pickMonth) {
-          const [yy, mm] = pickMonth.split("-").map(Number);
-          p.from_date = `${pickMonth}-01`;
-          p.to_date = new Date(Date.UTC(yy, mm, 0)).toISOString().split("T")[0];
-        }
       } else if (dateFilter === "custom") {
         if (fromDate) p.from_date = fromDate;
         if (toDate) p.to_date = toDate;
@@ -71,7 +57,7 @@ export default function DailyCollection() {
     } finally {
       setLoading(false);
     }
-  }, [city, dateFilter, fromDate, toDate, pickDate, pickMonth, search]);
+  }, [city, dateFilter, fromDate, toDate, search]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -144,29 +130,9 @@ export default function DailyCollection() {
               <SelectItem value="today">Today</SelectItem>
               <SelectItem value="this_week">This Week</SelectItem>
               <SelectItem value="this_month">This Month</SelectItem>
-              <SelectItem value="date">Specific Date</SelectItem>
-              <SelectItem value="month">Specific Month</SelectItem>
               <SelectItem value="custom">Custom Range</SelectItem>
             </SelectContent>
           </Select>
-
-          {dateFilter === "date" && (
-            <input
-              type="date"
-              value={pickDate}
-              onChange={e => setPickDate(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm focus:border-mv-primary outline-none"
-            />
-          )}
-
-          {dateFilter === "month" && (
-            <input
-              type="month"
-              value={pickMonth}
-              onChange={e => setPickMonth(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm focus:border-mv-primary outline-none"
-            />
-          )}
 
           {dateFilter === "custom" && (
             <div className="flex items-center gap-2">

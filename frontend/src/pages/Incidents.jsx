@@ -43,7 +43,7 @@ export default function Incidents() {
             <button key={i.id} onClick={() => setDetail(i)} className="w-full p-4 flex items-center justify-between hover:bg-mv-elevated transition-colors text-left">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-red-500/15 flex items-center justify-center"><AlertTriangle className="w-4 h-4 text-red-400" /></div>
-                <div><div className="font-medium">{i.code} · {i.incident_type}</div><div className="text-xs text-mv-dim">{i.vehicle_number} · {i.city} · {fmtDate(i.created_at)}</div></div>
+                <div><div className="font-medium">{i.code} · {i.incident_type}</div><div className="text-xs text-mv-dim">{i.registration_number || i.vehicle_number} · {i.city} · {fmtDate(i.created_at)}</div></div>
               </div>
               <div className="flex items-center gap-3">{i.estimated_damage > 0 && <span className="text-xs text-mv-muted">{inr(i.estimated_damage)}</span>}<StatusChip status={i.status} /></div>
             </button>
@@ -65,14 +65,14 @@ function NewIncidentDialog({ open, setOpen, onDone }) {
   const save = async () => {
     const v = vehicles.find((x) => x.id === form.vehicle_id);
     if (!v) { toast.error("Select a vehicle"); return; }
-    try { await api.post("/incidents", { ...form, estimated_damage: Number(form.estimated_damage), vehicle_number: v.vehicle_number, city: v.city, driver_id: v.current_driver_id, driver_name: v.current_driver_name }); toast.success("Incident reported ✓"); onDone(); } catch { toast.error("Failed"); }
+    try { await api.post("/incidents", { ...form, estimated_damage: Number(form.estimated_damage), vehicle_number: v.vehicle_number, registration_number: v.registration_number, city: v.city, driver_id: v.current_driver_id, driver_name: v.current_driver_name }); toast.success("Incident reported ✓"); onDone(); } catch { toast.error("Failed"); }
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
         <DialogHeader><DialogTitle className="font-display">Report Incident</DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-4 pt-1">
-          <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="inc-vehicle"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-56">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="inc-vehicle"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-56">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.registration_number || v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Type"><Select value={form.incident_type} onValueChange={(v) => set("incident_type", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text">{["Accident", "Vehicle Damage", "Driver Incident", "Theft", "Lost Equipment", "Other"].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Location"><TextInput value={form.location} onChange={(e) => set("location", e.target.value)} /></Field>
           <Field label="Est. Damage (₹)"><TextInput type="number" value={form.estimated_damage} onChange={(e) => set("estimated_damage", e.target.value)} /></Field>
@@ -92,7 +92,7 @@ function IncidentDetail({ inc, setInc, onChange }) {
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg">
         <DialogHeader><DialogTitle className="font-display flex items-center gap-2">{inc.code} <StatusChip status={inc.status} /></DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-3 text-sm">
-          {[["Type", inc.incident_type], ["Vehicle", inc.vehicle_number], ["Driver", <>{inc.driver_name || "—"} <DriverCode id={inc.driver_id} /></>], ["City", inc.city], ["Location", inc.location], ["Est. Damage", inr(inc.estimated_damage)]].map(([k, v]) => (
+          {[["Type", inc.incident_type], ["Vehicle", inc.registration_number || inc.vehicle_number], ["Driver", <>{inc.driver_name || "—"} <DriverCode id={inc.driver_id} /></>], ["City", inc.city], ["Location", inc.location], ["Est. Damage", inr(inc.estimated_damage)]].map(([k, v]) => (
             <div key={k}><div className="mv-label">{k}</div><div className="font-medium">{v}</div></div>
           ))}
         </div>

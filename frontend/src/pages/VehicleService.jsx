@@ -55,7 +55,7 @@ export default function VehicleService() {
             <button key={s.id} onClick={() => nav(`/fleet/${s.vehicle_id}`)} className="w-full p-4 flex items-center justify-between hover:bg-mv-elevated transition-colors text-left">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center"><Wrench className="w-4 h-4 text-amber-400" /></div>
-                <div><div className="font-medium">{s.issue} · <span className="text-mv-muted">{s.vehicle_number}</span></div><div className="text-xs text-mv-dim">{fmtDate(s.start_date)} · {s.service_centre} · {s.city}</div></div>
+                <div><div className="font-medium">{s.issue} · <span className="text-mv-muted">{s.registration_number || s.vehicle_number}</span>{s.registration_number && <span className="text-mv-dim text-xs"> ({s.vehicle_number})</span>}</div><div className="text-xs text-mv-dim">{fmtDate(s.start_date)} · {s.service_centre} · {s.city}</div></div>
               </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="font-display font-bold">{inr(s.cost)}</div>
@@ -85,7 +85,7 @@ function NewServiceDialog({ open, setOpen, onDone }) {
   const save = async () => {
     const v = vehicles.find((x) => x.id === form.vehicle_id);
     if (!v) { toast.error("Select a vehicle"); return; }
-    const body = { ...form, vehicle_number: v.vehicle_number, city: v.city, cost: Number(form.cost), labour: Number(form.labour), start_date: new Date(form.start_date).toISOString(), completion_date: new Date(form.completion_date).toISOString(), next_service_date: form.next_service_date ? new Date(form.next_service_date).toISOString() : null, parts: [] };
+    const body = { ...form, vehicle_number: v.vehicle_number, registration_number: v.registration_number, city: v.city, cost: Number(form.cost), labour: Number(form.labour), start_date: new Date(form.start_date).toISOString(), completion_date: new Date(form.completion_date).toISOString(), next_service_date: form.next_service_date ? new Date(form.next_service_date).toISOString() : null, parts: [] };
     if (!body.service_request_id) delete body.service_request_id;
     try { await api.post("/vehicle-services", body); toast.success("Vehicle service completed ✓"); onDone(); } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
@@ -94,7 +94,7 @@ function NewServiceDialog({ open, setOpen, onDone }) {
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-display">Record Vehicle Service</DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-4 pt-1">
-          <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="svc-vehicle"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-56">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
+          <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="svc-vehicle"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-56">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.registration_number || v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Linked Request"><Select value={form.service_request_id} onValueChange={(v) => set("service_request_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Optional" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-56">{requests.map((r) => <SelectItem key={r.id} value={r.id}>{r.code} · {r.issue_type}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Service Centre"><TextInput value={form.service_centre} onChange={(e) => set("service_centre", e.target.value)} /></Field>
           <Field label="Technician"><TextInput value={form.technician} onChange={(e) => set("technician", e.target.value)} /></Field>
@@ -167,7 +167,7 @@ function DeleteServiceDialog({ open, setOpen, service, onDone }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
         <DialogHeader><DialogTitle className="font-display flex items-center gap-2 text-red-500"><AlertTriangle className="w-5 h-5" /> Delete Service Record</DialogTitle></DialogHeader>
-        <p className="text-sm text-mv-muted">Are you sure you want to permanently delete this service record for <strong>{service?.vehicle_number}</strong>?</p>
+        <p className="text-sm text-mv-muted">Are you sure you want to permanently delete this service record for <strong>{service?.registration_number || service?.vehicle_number}</strong>?</p>
         <div className="flex justify-end gap-2 pt-2"><GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn><PrimaryBtn onClick={del} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">Delete</PrimaryBtn></div>
       </DialogContent>
     </Dialog>

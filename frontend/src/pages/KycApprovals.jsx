@@ -124,6 +124,9 @@ export default function KycApprovals() {
               <DocCard title="Driving License (Back)" url={selected.kyc_documents?.dl_back} />
               <DocCard title="Aadhaar Card" url={selected.kyc_documents?.aadhaar} />
               <DocCard title="PAN Card" url={selected.kyc_documents?.pan} />
+              <DocCard title="Driver Photo" url={selected.kyc_documents?.driver_photo} />
+              <DocCard title="Driver + Vehicle" url={selected.kyc_documents?.vehicle_photo} />
+              <DocCard title="Rental Agreement" url={selected.kyc_documents?.agreement} />
               
               <div className="md:col-span-2 rounded-2xl border border-slate-100 p-4 bg-slate-50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
