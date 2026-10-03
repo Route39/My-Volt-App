@@ -197,7 +197,7 @@ export default function OdometerApprovals() {
                             </button>
                           ) : <span className="w-6" />
                         )}
-                        <div className={idx > 0 ? "hidden" : ""}>
+                        <div>
                           {log.driver_name}
                           <div><DriverCode id={log.driver_id} /></div>
                           {idx === 0 && g.items.length > 1 && (
