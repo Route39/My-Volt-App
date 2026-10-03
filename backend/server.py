@@ -725,7 +725,7 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
             {"current_vehicle_number": {"$regex": q, "$options": "i"}},
             {"driver_code": {"$regex": q, "$options": "i"}},
         ]
-    docs = await db.drivers.find(filt).sort("name", 1).to_list(None)
+    docs = await db.drivers.find(filt).sort("created_at", 1).to_list(None)
     for d in docs:
         cv_id = d.get("current_vehicle_id")
         if cv_id:
@@ -823,12 +823,31 @@ async def _sync_driver_code_counter():
 
 
 
-async def _next_driver_code():
+CITY_CODES = {
+    "bangalore": "BAN", "bengaluru": "BAN",
+    "chennai": "CHN",
+    "coimbatore": "CBE",
+    "tiruppur": "TUP", "tirupur": "TUP",
+}
+
+
+def _city_code(city):
+    return CITY_CODES.get((city or "").strip().lower())
+
+
+async def _next_driver_code(city: Optional[str] = None):
+    code = _city_code(city)
+    if not code:
+        c = await db.counters.find_one_and_update(
+            {"_id": "driver_code"}, {"$inc": {"seq": 1}},
+            upsert=True, return_document=True
+        )
+        return f"R39D{c['seq']:05d}"
     c = await db.counters.find_one_and_update(
-        {"_id": "driver_code"}, {"$inc": {"seq": 1}},
+        {"_id": f"driver_code_{code}"}, {"$inc": {"seq": 1}},
         upsert=True, return_document=True
     )
-    return f"R39D{c['seq']:05d}"
+    return f"R39D-{code}{c['seq']:03d}"
 
 
 @api.post("/drivers")
@@ -845,7 +864,7 @@ async def create_driver(body: DriverBody, request: Request):
     if await db.drivers.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="Mobile number already exists")
     doc["phone"] = phone
-    doc["driver_code"] = await _next_driver_code()
+    doc["driver_code"] = await _next_driver_code(doc.get("city"))
     res = await db.drivers.insert_one(doc)
     await log_audit(user, "driver_created", "driver", str(res.inserted_id), f"Driver {body.name} added")
     return ser(await db.drivers.find_one({"_id": res.inserted_id}))
@@ -980,7 +999,7 @@ async def create_referral(request: Request):
             "name": b["referred_name"].strip(), "phone": phone,
             "city": ref.get("city"), "status": "active",
             "organization_id": user.get("organization_id") or ref.get("organization_id"),
-            "driver_code": await _next_driver_code(),
+            "driver_code": await _next_driver_code(ref.get("city")),
             "referred_by_id": b["referrer_driver_id"],
             "referred_by_code": ref.get("driver_code"),
             "created_at": now_iso(),
@@ -1843,7 +1862,19 @@ async def list_srs(request: Request, city: Optional[str] = None, status: Optiona
     if city and city != "all": extra["city"] = city
     if status: extra["status"] = status
     if priority: extra["priority"] = priority
-    return await _find("service_requests", user, extra, sort=("created_at", -1))
+    items = await _find("service_requests", user, extra, sort=("created_at", -1))
+    rows = items if isinstance(items, list) else items.get("items", [])
+    vids = list({r.get("vehicle_id") for r in rows if r.get("vehicle_id") and not r.get("registration_number")})
+    if vids:
+        vdocs = await db.vehicles.find({"_id": {"$in": [oid(v) for v in vids]}}).to_list(len(vids))
+        vmap = {str(v["_id"]): v for v in vdocs}
+        for r in rows:
+            v = vmap.get(r.get("vehicle_id"))
+            if v and not r.get("registration_number"):
+                r["registration_number"] = v.get("registration_number")
+            if v and not r.get("driver_name"):
+                r["driver_name"] = v.get("current_driver_name")
+    return items
 
 
 @api.get("/service-requests/{sid}")
@@ -1903,7 +1934,17 @@ async def list_services(request: Request, vehicle_id: Optional[str] = None, city
     extra = {}
     if vehicle_id: extra["vehicle_id"] = vehicle_id
     if city and city != "all": extra["city"] = city
-    return await _find("vehicle_services", user, extra, sort=("start_date", -1))
+    items = await _find("vehicle_services", user, extra, sort=("start_date", -1))
+    rows = items if isinstance(items, list) else items.get("items", [])
+    vids = list({r.get("vehicle_id") for r in rows if r.get("vehicle_id")})
+    if vids:
+        vdocs = await db.vehicles.find({"_id": {"$in": [oid(v) for v in vids]}}).to_list(len(vids))
+        vmap = {str(v["_id"]): v for v in vdocs}
+        for r in rows:
+            v = vmap.get(r.get("vehicle_id"))
+            if v:
+                r["registration_number"] = v.get("registration_number")
+    return items
 
 
 @api.post("/vehicle-services")
@@ -2001,7 +2042,17 @@ async def list_incidents(request: Request, city: Optional[str] = None, status: O
     extra = {}
     if city and city != "all": extra["city"] = city
     if status: extra["status"] = status
-    return await _find("incidents", user, extra, sort=("created_at", -1))
+    items = await _find("incidents", user, extra, sort=("created_at", -1))
+    rows = items if isinstance(items, list) else items.get("items", [])
+    vids = list({r.get("vehicle_id") for r in rows if r.get("vehicle_id")})
+    if vids:
+        vdocs = await db.vehicles.find({"_id": {"$in": [oid(v) for v in vids]}}).to_list(len(vids))
+        vmap = {str(v["_id"]): v for v in vdocs}
+        for r in rows:
+            v = vmap.get(r.get("vehicle_id"))
+            if v:
+                r["registration_number"] = v.get("registration_number")
+    return items
 
 
 @api.post("/incidents")
@@ -3536,8 +3587,11 @@ async def submit_driver_kyc(
     request: Request,
     dl_front: UploadFile = File(...),
     dl_back: UploadFile = File(...),
-    aadhaar: UploadFile = File(...),
-    pan: UploadFile = File(...),
+    aadhaar: UploadFile = File(None),
+    pan: UploadFile = File(None),
+    driver_photo: UploadFile = File(None),
+    vehicle_photo: UploadFile = File(None),
+    agreement: UploadFile = File(None),
     lat: str = Form(""),
     lng: str = Form(""),
     address: str = Form("")
@@ -3546,7 +3600,10 @@ async def submit_driver_kyc(
     require_driver(user)
     
     docs = {}
-    for name, file in [("dl_front", dl_front), ("dl_back", dl_back), ("aadhaar", aadhaar), ("pan", pan)]:
+    for name, file in [("dl_front", dl_front), ("dl_back", dl_back), ("aadhaar", aadhaar), ("pan", pan),
+                       ("driver_photo", driver_photo), ("vehicle_photo", vehicle_photo), ("agreement", agreement)]:
+        if file is None:
+            continue
         ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
         filename = f"{user['id']}_{name}_{uuid.uuid4().hex[:8]}.{ext}"
         path = f"uploads/{filename}"
@@ -4728,14 +4785,14 @@ async def startup():
             logger.warning(f"Index skipped {coll.name} {keys}: {str(e)[:120]}")
         # Assign driver_code to existing drivers (once, in join order)
     try:
-        last = await db.drivers.find_one({"driver_code": {"$regex": "^R39D"}}, sort=[("driver_code", -1)])
+        last = await db.drivers.find_one({"driver_code": {"$regex": r"^R39D\d"}}, sort=[("driver_code", -1)])
         start = int(last["driver_code"][4:]) if last else 0
         cur = await db.counters.find_one({"_id": "driver_code"})
         if not cur or cur.get("seq", 0) < start or start == 0:
             await db.counters.update_one({"_id": "driver_code"}, {"$set": {"seq": start}}, upsert=True)
         missing = await db.drivers.find({"driver_code": {"$exists": False}}).sort([("created_at", 1), ("_id", 1)]).to_list(None)
         for d in missing:
-            await db.drivers.update_one({"_id": d["_id"]}, {"$set": {"driver_code": await _next_driver_code()}})
+            await db.drivers.update_one({"_id": d["_id"]}, {"$set": {"driver_code": await _next_driver_code(d.get("city"))}})
         if missing:
             logger.info(f"Assigned driver_code to {len(missing)} drivers")
         await db.drivers.create_index("driver_code", unique=True, sparse=True)
