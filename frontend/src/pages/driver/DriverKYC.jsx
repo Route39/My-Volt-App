@@ -9,7 +9,10 @@ export default function DriverKYC() {
   const { data, refresh } = useDriver();
   const nav = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [files, setFiles] = useState({ dl_front: null, dl_back: null, aadhaar: null, pan: null });
+  const [files, setFiles] = useState({
+    dl_front: null, dl_back: null, aadhaar: null, pan: null,
+    driver_photo: null, vehicle_photo: null, agreement: null,
+  });
   const [error, setError] = useState("");
   const [address, setAddress] = useState("");
 
@@ -20,7 +23,8 @@ export default function DriverKYC() {
   const submit = async (e) => {
     e.preventDefault();
     if (!address.trim()) return setError("Permanent address is required");
-    if (!files.dl_front || !files.dl_back || !files.aadhaar || !files.pan) return setError("All documents required");
+    const optional = ["aadhaar", "pan"];
+    if (Object.entries(files).some(([k, f]) => !f && !optional.includes(k))) return setError("All required documents must be uploaded");
     
     setLoading(true);
     
@@ -34,7 +38,7 @@ export default function DriverKYC() {
     }
 
     const fd = new FormData();
-    Object.entries(files).forEach(([k, v]) => fd.append(k, v));
+    Object.entries(files).forEach(([k, v]) => { if (v) fd.append(k, v); });
     fd.append("address", address);
     fd.append("lat", lat);
     fd.append("lng", lng);
@@ -101,8 +105,29 @@ export default function DriverKYC() {
             <span className="text-slate-900">Aadhaar &</span> <span className="text-emerald-500">PAN</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <UploadBtn label="Aadhaar" file={files.aadhaar} onChange={handleFile("aadhaar")} />
-            <UploadBtn label="PAN Card" file={files.pan} onChange={handleFile("pan")} />
+            <UploadBtn label="Aadhaar (optional)" file={files.aadhaar} onChange={handleFile("aadhaar")} />
+            <UploadBtn label="PAN Card (optional)" file={files.pan} onChange={handleFile("pan")} />
+          </div>
+        </div>
+
+        {/* Driver Photos Section */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold">
+            <span className="text-slate-900">Driver &</span> <span className="text-emerald-500">Vehicle</span>
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <UploadBtn label="Driver Photo" file={files.driver_photo} onChange={handleFile("driver_photo")} />
+            <UploadBtn label="Driver + Vehicle" file={files.vehicle_photo} onChange={handleFile("vehicle_photo")} />
+          </div>
+        </div>
+
+        {/* Agreement Section */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold">
+            <span className="text-slate-900">Rental</span> <span className="text-emerald-500">Agreement</span>
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <UploadBtn label="Agreement" file={files.agreement} onChange={handleFile("agreement")} />
           </div>
         </div>
 

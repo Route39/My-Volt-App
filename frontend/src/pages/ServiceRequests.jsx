@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, Wrench, Car, User, Clock, GripVertical, Edit, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
-import { useApp } from "../context/AppContext";
+import { useApp, CITIES } from "../context/AppContext";
 import { useAuth } from "../context/AuthContext";
 import { StatusChip, Skeleton } from "../components/common/Primitives";
 import { PageHeader, PrimaryBtn, GhostBtn, Field, TextInput, TextArea } from "../components/common/Page";
@@ -19,7 +19,9 @@ const STAGES = [
 const PRIO_DOT = { critical: "bg-red-500", high: "bg-amber-500", medium: "bg-blue-500", low: "bg-zinc-500" };
 
 export default function ServiceRequests() {
-  const { city } = useApp();
+  const { city: gCity } = useApp();
+  const [city, setCity] = useState(gCity);
+  useEffect(() => { setCity(gCity); }, [gCity]);
   const { user } = useAuth();
   const [params] = useSearchParams();
   const nav = useNavigate();
@@ -55,6 +57,16 @@ export default function ServiceRequests() {
         {canEdit && <PrimaryBtn onClick={() => setShowNew(true)} data-testid="create-sr-btn"><Plus className="w-4 h-4" /> New Request</PrimaryBtn>}
       </PageHeader>
 
+      <div className="mb-4">
+        <Select value={city} onValueChange={setCity}>
+          <SelectTrigger className="w-40 h-10 bg-mv-surface border-mv-border" data-testid="sr-city-filter"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
+            <SelectItem value="all">All Cities</SelectItem>
+            {CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
       {!items && <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-64 rounded-2xl" />)}</div>}
 
       {items && (
@@ -79,7 +91,7 @@ export default function ServiceRequests() {
                       </div>
                       <div className="text-sm font-medium mt-1.5 flex items-center gap-1.5"><Wrench className="w-3.5 h-3.5 text-amber-400" /> {s.issue_type}</div>
                       <div className="mt-2 space-y-1 text-[11px] text-mv-muted">
-                        <div className="flex items-center gap-1"><Car className="w-3 h-3" /> {s.vehicle_number}</div>
+                        <div className="flex items-center gap-1"><Car className="w-3 h-3" /> {s.registration_number || s.vehicle_number}</div>
                         <div className="flex items-center gap-1"><User className="w-3 h-3" /> {s.driver_name || "—"} <DriverCode id={s.driver_id} /> · {s.city}</div>
                         <div className="flex items-center gap-1"><Clock className="w-3 h-3" /> {timeAgo(s.created_at)}</div>
                       </div>
@@ -110,13 +122,13 @@ function NewSRDialog({ open, setOpen, onDone }) {
   const save = async () => {
     const v = vehicles.find((x) => x.id === form.vehicle_id);
     if (!v) { toast.error("Select a vehicle"); return; }
-    try { await api.post("/service-requests", { ...form, vehicle_number: v.vehicle_number, city: v.city, driver_id: v.current_driver_id, driver_name: v.current_driver_name }); toast.success("Service request created ✓"); onDone(); } catch { toast.error("Failed"); }
+    try { await api.post("/service-requests", { ...form, vehicle_number: v.vehicle_number, registration_number: v.registration_number, city: v.city, driver_id: v.current_driver_id, driver_name: v.current_driver_name }); toast.success("Service request created ✓"); onDone(); } catch { toast.error("Failed"); }
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
         <DialogHeader><DialogTitle className="font-display">New Service Request</DialogTitle></DialogHeader>
-        <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="sr-vehicle-select"><SelectValue placeholder="Select vehicle" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
+        <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="sr-vehicle-select"><SelectValue placeholder="Select vehicle" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.registration_number || v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Issue Type"><Select value={form.issue_type} onValueChange={(v) => set("issue_type", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text">{["Breakdown", "Battery", "Tyre", "Brake", "Electrical", "Charger", "Accident", "General", "Other"].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Priority"><Select value={form.priority} onValueChange={(v) => set("priority", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text">{["critical", "high", "medium", "low"].map((t) => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}</SelectContent></Select></Field>
@@ -139,7 +151,7 @@ function SRDetail({ sr, setSr, onEdit, onDelete, onChange }) {
         <DialogHeader><DialogTitle className="font-display flex items-center gap-2">{sr.code} <StatusChip status={sr.priority} /></DialogTitle></DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="grid grid-cols-2 gap-3">
-            {[["Vehicle", sr.vehicle_number], ["Driver", <>{sr.driver_name || "—"} <DriverCode id={sr.driver_id} /></>], ["Issue", sr.issue_type], ["City", sr.city], ["Source", sr.source], ["Status", sr.status]].map(([k, v]) => (
+            {[["Vehicle", sr.registration_number || sr.vehicle_number], ["Driver", <>{sr.driver_name || "—"} <DriverCode id={sr.driver_id} /></>], ["Issue", sr.issue_type], ["City", sr.city], ["Source", sr.source], ["Status", sr.status]].map(([k, v]) => (
               <div key={k}><div className="mv-label">{k}</div><div className="font-medium capitalize">{v}</div></div>
             ))}
           </div>
