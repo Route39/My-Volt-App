@@ -348,9 +348,7 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
-                      {!depositRowIds.has(it.id) ? (
-                        <span className="text-slate-400 font-medium">—</span>
-                      ) : it.deposit_status !== "paid" && it.deposit > 0 ? (
+                      {it.deposit_status !== "paid" && it.deposit > 0 ? (
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-bold">DEPOSIT PENDING</span>
                           <span className="text-red-500 font-bold">{inr(it.deposit)}</span>
@@ -361,7 +359,7 @@ export default function DailyCollection() {
                             <Check className="w-3 h-3" /> PAID
                           </div>
                           <span className="text-emerald-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
-                          {it.deposit_transaction_id && (
+                          {it.deposit_transaction_id && depositRowIds.has(it.id) && (
                             <div className="text-[9px] font-mono text-slate-400 bg-slate-50 px-1 py-0.5 rounded w-max border border-slate-200 mt-0.5">
                               TXN {it.deposit_transaction_id}
                             </div>

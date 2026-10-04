@@ -4433,9 +4433,10 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
         await _apply_paid(rec, "NIL-0", "system")
         return {"payment_id": pid, "amount": 0, "amount_paise": 0, "kind": kind,
                 "gateway": rec["gateway"], "already_paid": True, "transaction_id": "NIL-0"}
-    resp = {"payment_id": pid, "amount": amount, "amount_paise": amount * 100, "kind": kind, "gateway": rec["gateway"]}
+    amount_paise = int(round(amount * 100))
+    resp = {"payment_id": pid, "amount": amount, "amount_paise": amount_paise, "kind": kind, "gateway": rec["gateway"]}
     if rzp_client:
-        order = rzp_client.order.create({"amount": amount * 100, "currency": "INR", "receipt": pid[:40], "payment_capture": 1})
+        order = rzp_client.order.create({"amount": amount_paise, "currency": "INR", "receipt": pid[:40]})
         await db.rental_payments.update_one({"_id": res.inserted_id}, {"$set": {"gateway_order_id": order["id"]}})
         resp["order_id"] = order["id"]
         resp["key_id"] = RZP_KEY
