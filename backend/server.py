@@ -763,6 +763,10 @@ async def get_driver(did: str, request: Request):
     out["rentals"] = [ser(r) for r in await db.rentals.find({"driver_id": did}).sort("created_at", -1).to_list(100)]
     out["incidents"] = [ser(i) for i in await db.incidents.find({"driver_id": did}).sort("created_at", -1).to_list(100)]
     out["documents"] = [ser(x) for x in await db.documents.find({"owner_type": "driver", "owner_id": did}).to_list(100)]
+    
+    sec_dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": user.get("organization_id") or "route39-org"})
+    out["deposit_status"] = sec_dep.get("status", "pending") if sec_dep else "pending"
+    
     return out
 
 
@@ -901,6 +905,37 @@ async def unblock_driver(did: str, request: Request):
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Rental account not found")
     await log_audit(user, "driver_unblocked", "driver", did, "Driver manually unblocked for 24h grace period")
+    return {"ok": True}
+
+@api.post("/admin/drivers/{did}/deposit-paid")
+async def override_deposit_paid(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    
+    rental = await _active_rental(org, did)
+    if not rental:
+        raise HTTPException(status_code=400, detail="No active rental found for this driver")
+        
+    sec_dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
+    if sec_dep and sec_dep.get("status") == "paid":
+        return {"ok": True, "message": "Already paid"}
+        
+    amount = float(rental.get("deposit", 5000))
+    rec = {
+        "organization_id": org,
+        "driver_id": did,
+        "amount": amount,
+        "kind": "deposit",
+        "payment_status": "pending",
+        "gateway_order_id": f"MANUAL_{uuid.uuid4().hex[:10]}",
+        "gateway": "manual_qr",
+        "created_at": now_iso()
+    }
+    insert_res = await db.rental_payments.insert_one(rec)
+    rec["_id"] = insert_res.inserted_id
+    
+    await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
     return {"ok": True}
 
 # ===== ADMIN BLOCK =====
