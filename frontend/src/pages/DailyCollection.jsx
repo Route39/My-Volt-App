@@ -360,8 +360,8 @@ export default function DailyCollection() {
                           </div>
                           <span className="text-emerald-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
                           {it.deposit_transaction_id && depositRowIds.has(it.id) && (
-                            <div className="text-[9px] font-mono text-slate-400 bg-slate-50 px-1 py-0.5 rounded w-max border border-slate-200 mt-0.5">
-                              TXN {it.deposit_transaction_id}
+                            <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${it.deposit_transaction_id.startsWith('QR_') ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+                              {it.deposit_transaction_id.startsWith('QR_') ? 'Paid by QR' : `TXN ${it.deposit_transaction_id}`}
                             </div>
                           )}
                         </div>
