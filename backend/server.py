@@ -914,14 +914,15 @@ async def override_deposit_paid(did: str, request: Request):
     org = user.get("organization_id")
     
     rental = await _active_rental(org, did)
-    if not rental:
-        raise HTTPException(status_code=400, detail="No active rental found for this driver")
-        
     sec_dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
     if sec_dep and sec_dep.get("status") == "paid":
         return {"ok": True, "message": "Already paid"}
         
-    amount = float(rental.get("deposit", 5000))
+    amount = 5000.0
+    if sec_dep and "amount" in sec_dep:
+        amount = float(sec_dep["amount"])
+    elif rental and "deposit" in rental:
+        amount = float(rental["deposit"])
     rec = {
         "organization_id": org,
         "driver_id": did,
