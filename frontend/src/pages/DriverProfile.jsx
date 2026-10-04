@@ -98,6 +98,9 @@ export default function DriverProfile() {
             <KycDocCard title="Driving License (Back)" url={d.kyc_documents?.dl_back} />
             <KycDocCard title="Aadhaar Card" url={d.kyc_documents?.aadhaar} />
             <KycDocCard title="PAN Card" url={d.kyc_documents?.pan} />
+            <KycDocCard title="Driver Photo" url={d.kyc_documents?.driver_photo} />
+            <KycDocCard title="Driver + Vehicle" url={d.kyc_documents?.vehicle_photo} />
+            <KycDocCard title="Rental Agreement" url={d.kyc_documents?.agreement} />
           </div>
         </TabsContent>
 
