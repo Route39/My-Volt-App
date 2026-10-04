@@ -939,6 +939,29 @@ async def override_deposit_paid(did: str, request: Request):
     await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
     return {"ok": True}
 
+@api.post("/admin/drivers/{did}/deposit-unpaid")
+async def override_deposit_unpaid(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    
+    # 1. Update security deposit back to pending
+    await db.security_deposits.update_one(
+        {"driver_id": did, "organization_id": org},
+        {"$set": {"status": "pending"}, "$unset": {"transaction_id": "", "paid_at": ""}}
+    )
+    
+    # 2. Delete the manual QR payment record (if any)
+    await db.rental_payments.delete_many({
+        "driver_id": did,
+        "organization_id": org,
+        "kind": "deposit",
+        "payment_status": "paid",
+        "payment_method": "manual_qr"
+    })
+    
+    return {"ok": True}
+
 # ===== ADMIN BLOCK =====
 @api.post("/drivers/{did}/admin-block")
 async def admin_block_driver(did: str, request: Request):

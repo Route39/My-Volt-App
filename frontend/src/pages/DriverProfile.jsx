@@ -50,7 +50,7 @@ export default function DriverProfile() {
           <div className="flex gap-2">
             <GhostBtn onClick={() => setAssign(true)} data-testid="assign-vehicle-btn"><ArrowRightLeft className="w-4 h-4" /> Change Vehicle</GhostBtn>
             <GhostBtn onClick={() => setEdit(true)}><Edit className="w-4 h-4" /> Edit</GhostBtn>
-            {d.deposit_status !== "paid" && (
+            {d.deposit_status !== "paid" ? (
               <GhostBtn onClick={async () => {
                 if(window.confirm("Mark deposit as paid manually via QR?")) {
                   try {
@@ -63,6 +63,20 @@ export default function DriverProfile() {
                 }
               }} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
                 <Check className="w-4 h-4" /> Mark Deposit Paid (QR)
+              </GhostBtn>
+            ) : (
+              <GhostBtn onClick={async () => {
+                if(window.confirm("Mark deposit as UNPAID? This will prompt the driver to pay again.")) {
+                  try {
+                    await api.post(`/admin/drivers/${d.id}/deposit-unpaid`);
+                    toast.success("Deposit marked as unpaid");
+                    load();
+                  } catch (e) {
+                    toast.error(e.response?.data?.detail || "Failed to mark deposit as unpaid");
+                  }
+                }
+              }} className="text-orange-600 hover:text-orange-700 hover:bg-orange-50">
+                <AlertTriangle className="w-4 h-4" /> Mark Deposit Unpaid
               </GhostBtn>
             )}
             {d.admin_block ? (
