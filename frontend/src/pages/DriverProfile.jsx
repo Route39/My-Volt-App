@@ -102,6 +102,34 @@ export default function DriverProfile() {
             {[["Driver ID", d.driver_code], ["Name", d.name], ["Phone", d.phone], ["Address", d.address], ["Emergency Contact", d.emergency_contact], ["Licence No.", d.license_number], ["City", d.city]].map(([k, v]) => (
               <div key={k} className="mv-card p-4"><div className="mv-label">{k}</div><div className="text-sm font-medium mt-1">{v || "—"}</div></div>
             ))}
+            
+            <div className="mv-card p-4 flex flex-col justify-between">
+              <div>
+                <div className="mv-label">Paid Leaves (This Month)</div>
+                <div className="text-sm font-medium mt-1 flex items-center gap-2">
+                  {d.leaves_taken_this_month || 0} / {d.leave_quota || 0}
+                  {d.paid_leaves?.length > 0 && <span className="text-[10px] text-mv-muted bg-mv-elevated px-1.5 py-0.5 rounded">({d.paid_leaves.slice(-2).join(', ')})</span>}
+                </div>
+              </div>
+              <button 
+                onClick={async () => {
+                  const date = window.prompt("Enter date to grant Paid Leave (YYYY-MM-DD):", new Date().toLocaleDateString('en-CA'));
+                  if (date) {
+                    try {
+                      await api.post(`/admin/drivers/${d.id}/leave`, { date });
+                      toast.success("Paid leave granted successfully!");
+                      load();
+                    } catch (e) {
+                      toast.error(e.response?.data?.detail || "Failed to grant leave");
+                    }
+                  }
+                }}
+                className="mt-3 w-max text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 font-bold px-2 py-1 rounded"
+              >
+                + Grant Leave
+              </button>
+            </div>
+            
           </div>
         </TabsContent>
 

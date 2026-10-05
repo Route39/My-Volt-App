@@ -767,7 +767,51 @@ async def get_driver(did: str, request: Request):
     sec_dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": user.get("organization_id") or "route39-org"})
     out["deposit_status"] = sec_dep.get("status", "pending") if sec_dep else "pending"
     
+    cur_month = _today_ist().strftime("%Y-%m")
+    joined_date = d.get("created_at") or _today_ist().isoformat()
+    joined_month = joined_date[:7]
+    out["leave_quota"] = 2 if cur_month == joined_month else 3
+    out["paid_leaves"] = d.get("paid_leaves", [])
+    out["leaves_taken_this_month"] = sum(1 for dl in out["paid_leaves"] if dl.startswith(cur_month))
+    
     return out
+
+
+@api.post("/admin/drivers/{did}/leave")
+async def admin_grant_leave(did: str, request: Request, body: dict):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
+    
+    target_date = body.get("date")
+    if not target_date:
+        raise HTTPException(status_code=400, detail="Date required")
+        
+    org = user.get("organization_id") or "route39-org"
+    drv_doc = await db.drivers.find_one({"_id": oid(did), "organization_id": org})
+    if not drv_doc:
+        raise HTTPException(status_code=404, detail="Driver not found")
+        
+    paid_leaves = drv_doc.get("paid_leaves", [])
+    if target_date in paid_leaves:
+        raise HTTPException(status_code=400, detail="Leave already applied for this date")
+        
+    await db.drivers.update_one({"_id": oid(did)}, {"$addToSet": {"paid_leaves": target_date}})
+    
+    # If the date is <= today, attempt to refund/reverse any already-accrued rent
+    today_str = _today_ist().isoformat()
+    if target_date <= today_str:
+        acct = await db.rental_accounts.find_one({"driver_id": did})
+        if acct and acct.get("rent_by_date", {}).get(target_date, 0) > 0:
+            amt = acct["rent_by_date"][target_date]
+            await db.rental_accounts.update_one(
+                {"driver_id": did},
+                {
+                    "$unset": {f"rent_by_date.{target_date}": ""},
+                    "$inc": {"rent_due": -amt, "outstanding_amount": -amt}
+                }
+            )
+            
+    return {"ok": True, "message": "Leave applied"}
 
 
 @api.delete("/drivers/{did}")
