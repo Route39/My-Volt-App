@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search, Ban, Clock, ShieldCheck, Check } from "lucide-react";
+import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search, Ban, Clock, ShieldCheck, CalendarDays, Check } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -11,6 +11,7 @@ import imgUrl from "../lib/imgUrl";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { Calendar } from "../components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { ReferralList } from "./Referrals";
 
@@ -23,6 +24,7 @@ export default function DriverProfile() {
   const [edit, setEdit] = useState(false);
   const [del, setDel] = useState(false);
   const [blockType, setBlockType] = useState(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
 
   const load = useCallback(async () => { const { data } = await api.get(`/drivers/${id}`); setD(data); }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -83,11 +85,12 @@ export default function DriverProfile() {
               <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
             ) : (
               <>
+                <GhostBtn onClick={() => setLeaveOpen(true)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"><CalendarDays className="w-4 h-4" /> Paid Leave</GhostBtn>
                 <GhostBtn onClick={() => setBlockType("temporary")} className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"><Clock className="w-4 h-4" /> Temporary Block</GhostBtn>
                 <GhostBtn onClick={() => setBlockType("permanent")} className="text-red-500 hover:text-red-600 hover:bg-red-50"><Ban className="w-4 h-4" /> Permanent Block</GhostBtn>
               </>
             )}
-            {/* <GhostBtn onClick={() => setDel(true)} data-testid="delete-driver-btn" className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn> */}
+            <GhostBtn onClick={() => setDel(true)} data-testid="delete-driver-btn" className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn>
           </div>
         )}
       </div>
@@ -211,6 +214,7 @@ export default function DriverProfile() {
       <AssignVehicleDialog open={assign} setOpen={setAssign} driver={d} onDone={() => { setAssign(false); load(); }} />
       <EditDriverDialog open={edit} setOpen={setEdit} driver={d} onDone={() => { setEdit(false); load(); }} />
       <BlockDriverDialog type={blockType} setType={setBlockType} driver={d} onDone={() => { setBlockType(null); load(); }} />
+      <PaidLeaveDialog open={leaveOpen} setOpen={setLeaveOpen} driver={d} onDone={() => { setLeaveOpen(false); load(); }} />
       <DeleteDriverDialog open={del} setOpen={setDel} driver={d} onDone={() => { setDel(false); nav("/drivers"); }} />
     </div>
   );
@@ -375,6 +379,86 @@ function KycDocCard({ title, url }) {
     </div>
   );
 }
+function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
+  const [info, setInfo] = useState(null);
+  const [sel, setSel] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const toKey = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  const toDate = (s) => { const [y, m, dd] = s.split("-").map(Number); return new Date(y, m - 1, dd); };
+
+  useEffect(() => {
+    if (!open || !driver?.id) return;
+    setInfo(null);
+    api.get(`/drivers/${driver.id}/paid-leave`)
+      .then(({ data }) => { setInfo(data); setSel(data.dates.filter((x) => x >= data.today).map(toDate)); })
+      .catch((e) => { toast.error(e.response?.data?.detail || "Failed to load paid leave"); setOpen(false); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, driver?.id]);
+
+  const todayStr = info?.today;
+  const pastUsed = info ? info.dates.filter((x) => x < todayStr) : [];
+  const maxPick = info ? Math.max(0, info.max_days - pastUsed.length) : 0;
+  const savedToday = info ? info.dates.includes(todayStr) : false;
+
+  // Only today / future days of the current month; today only if its rent is not paid yet.
+  const isDisabled = (day) => {
+    if (!info || maxPick === 0) return true;
+    const k = toKey(day);
+    if (k < todayStr || k.slice(0, 7) !== todayStr.slice(0, 7)) return true;
+    if (k === todayStr && info.today_rent_paid && !savedToday) return true;
+    return false;
+  };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/drivers/${driver.id}/paid-leave`, { dates: sel.map(toKey).sort() });
+      toast.success(sel.length ? "Paid leave saved" : "Paid leave cleared");
+      onDone();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to save paid leave");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Paid Leave (Rent-free days)</DialogTitle></DialogHeader>
+        {!info ? (
+          <p className="text-sm text-mv-muted">Loading...</p>
+        ) : (
+          <>
+            <p className="text-sm text-mv-muted">
+              Select up to {maxPick} day{maxPick === 1 ? "" : "s"} from today to the end of this month. No daily rent will be asked from {driver?.name} on these days.
+              {info.today_rent_paid ? " Today's rent is already paid, so today cannot be selected." : ""}
+            </p>
+            <div className="flex justify-center">
+              <Calendar
+                mode="multiple"
+                selected={sel}
+                onSelect={(v) => setSel(v || [])}
+                max={maxPick || undefined}
+                disabled={isDisabled}
+                defaultMonth={toDate(todayStr)}
+                fromMonth={toDate(todayStr)}
+                toMonth={toDate(todayStr)}
+                showOutsideDays={false}
+                modifiers={{ used: pastUsed.map(toDate) }}
+                modifiersClassNames={{ used: "bg-emerald-100 text-emerald-700 rounded-md" }}
+              />
+            </div>
+            {pastUsed.length > 0 && <p className="text-xs text-mv-muted">Already used this month: {pastUsed.join(", ")}</p>}
+            <div className="flex justify-end gap-2 mt-2">
+              <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
+              <PrimaryBtn onClick={save} disabled={busy}>{busy ? "Please wait..." : "Save Paid Leave"}</PrimaryBtn>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function BlockDriverDialog({ type, setType, driver, onDone }) {
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState("");

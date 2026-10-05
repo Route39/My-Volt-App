@@ -123,6 +123,9 @@ export default function Fleet() {
                 </span>
                 <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {v.city}</span>
               </div>
+              {v.vin_number && (
+                <div className="mt-2 text-xs text-mv-muted"><span className="text-mv-dim">VIN </span><span className="font-mono font-medium text-mv-text">{v.vin_number}</span></div>
+              )}
               {v.status === "rented" && v.rental_end && (
                 <div className="mt-2 text-xs"><span className="text-mv-dim">Rental ends </span><span className="text-amber-400 font-medium">{relativeEnd(v.rental_end)}</span></div>
               )}
@@ -177,7 +180,7 @@ export default function Fleet() {
 
 function AddVehicleDialog({ open, setOpen, onDone }) {
   const { city: appCity } = useApp();
-  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", city: appCity === "all" ? "Bangalore" : appCity });
+  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", vin_number: "", city: appCity === "all" ? "Bangalore" : appCity });
   const [saving, setSaving] = useState(false);
   const [fetchingId, setFetchingId] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -202,6 +205,8 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
 
   const save = async () => {
     if (!form.vehicle_number || !form.registration_number) { toast.error("Vehicle Code and Registration Number required"); return; }
+    if (!form.vin_number.trim()) { toast.error("VIN Number required"); return; }
+    if (!/^[A-Z0-9]{17}$/.test(form.vin_number.trim())) { toast.error("VIN Number must be exactly 17 characters (letters A-Z and numbers 0-9 only)"); return; }
     setSaving(true);
     try { await api.post("/vehicles", form); toast.success("Vehicle added ✓"); onDone(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed to add"); } finally { setSaving(false); }
@@ -220,6 +225,9 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
           </Field>
           <Field label="Registration Number (e.g. TN39 XX 1234)">
             <TextInput data-testid="veh-reg-number" value={form.registration_number} onChange={(e) => set("registration_number", e.target.value)} className="bg-mv-surface text-mv-text uppercase" />
+          </Field>
+          <Field label="VIN Number">
+            <TextInput data-testid="veh-vin-number" value={form.vin_number} onChange={(e) => set("vin_number", e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 17))} maxLength={17} className="bg-mv-surface text-mv-text uppercase" />
           </Field>
           <Field label="Vehicle Code / ID (Auto Generated)">
             <div className="relative cursor-not-allowed opacity-80">
