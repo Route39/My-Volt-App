@@ -300,7 +300,11 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      {it.rent_status === "paid" ? (
+                      {it.is_paid_leave ? (
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold border border-blue-200 shadow-sm">
+                          ✨ Paid Leave
+                        </div>
+                      ) : it.rent_status === "paid" ? (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
                           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID

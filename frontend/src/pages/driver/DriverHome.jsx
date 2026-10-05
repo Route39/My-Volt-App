@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Bike, Wallet, ArrowRight, ShieldCheck, AlertTriangle, Lock, FileBadge, XCircle, Camera, CheckCircle, Loader2, Ticket } from "lucide-react";
+import { Bike, Wallet, ArrowRight, ShieldCheck, AlertTriangle, Lock, FileBadge, XCircle, Camera, CheckCircle, Loader2, Ticket, Calendar } from "lucide-react";
 import { useDriver } from "../../context/DriverAuthContext";
 import { inr } from "../../lib/format";
 import dapi from "../../lib/driverApi";
@@ -28,6 +28,10 @@ export default function DriverHome() {
   const [hideApproved, setHideApproved] = useState(false);
   const isApprovedHidden = hideApproved || data?.driver?.kyc_approved_seen;
   const [showEndModal, setShowEndModal] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [leaveDate, setLeaveDate] = useState("");
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leaveError, setLeaveError] = useState(null);
   
   // Odometer State
   const [odoReading, setOdoReading] = useState("");
@@ -130,6 +134,22 @@ export default function DriverHome() {
   const handleCloseModal = async () => {
     setShowKycModal(false);
     try { await dapi.post("/driver/kyc/snooze"); } catch (e) {}
+  };
+  
+  const handleApplyLeave = async () => {
+    if (!leaveDate) return setLeaveError("Please select a date");
+    setLeaveLoading(true);
+    setLeaveError(null);
+    try {
+      await dapi.post("/driver/leave", { date: leaveDate });
+      setShowLeaveModal(false);
+      setLeaveDate("");
+      refresh();
+    } catch (e) {
+      setLeaveError(e.response?.data?.detail || "Failed to apply leave");
+    } finally {
+      setLeaveLoading(false);
+    }
   };
   
   const submitOdo = async (e) => {
@@ -503,6 +523,28 @@ export default function DriverHome() {
             <div className="text-[10px] text-emerald-300/60 leading-tight mt-2 text-center">
               Overage ₹{driver.overage_per_km || 0}/km above the daily limit · Extra km billed separately
             </div>
+            
+            {/* Paid Leave Status */}
+            <div className="col-span-2 mt-4 pt-4 border-t border-emerald-600/30">
+              <div className="bg-white/10 rounded-xl p-4 border border-white/5 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] text-emerald-200 font-semibold uppercase tracking-wider mb-1">Paid Leaves</div>
+                  <div className="text-sm font-bold text-white">
+                    {driver?.leaves_taken_this_month || 0} / {driver?.leave_quota || 0} Used
+                  </div>
+                  {driver?.paid_leaves?.includes(new Date().toLocaleDateString('en-CA')) && (
+                    <div className="text-xs text-yellow-300 font-bold mt-1">✨ You are on Paid Leave today!</div>
+                  )}
+                </div>
+                <button 
+                  onClick={() => setShowLeaveModal(true)}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
+                >
+                  Apply Leave
+                </button>
+              </div>
+            </div>
+            
           </div>
         </div>
       </div>
@@ -576,6 +618,55 @@ export default function DriverHome() {
       )}
 
       <PayModals pay={pay} setPay={handleSetPay} data={data} refresh={refresh} />
+      {/* Leave Modal */}
+      {showLeaveModal && (
+        <div className="fixed inset-0 z-[100] flex flex-col justify-end">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowLeaveModal(false)} />
+          <div className="relative bg-white rounded-t-3xl p-6 shadow-2xl animate-in slide-in-from-bottom flex flex-col max-h-[90vh]">
+            <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                <Calendar className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-display text-xl font-bold text-slate-900">Apply Paid Leave</h3>
+                <p className="text-sm text-slate-500">
+                  {driver?.leaves_taken_this_month || 0} / {driver?.leave_quota || 0} leaves used this month
+                </p>
+              </div>
+            </div>
+            
+            <p className="text-xs text-slate-500 mb-6 bg-slate-50 p-3 rounded-lg">
+              When on Paid Leave, you will not be charged daily rent for that day. 
+              However, Extra KM charges will still apply if you exceed your daily limit.
+            </p>
+
+            <label className="text-sm font-bold text-slate-700 mb-2">Select Date</label>
+            <input 
+              type="date" 
+              min={new Date().toLocaleDateString('en-CA')} 
+              value={leaveDate}
+              onChange={(e) => setLeaveDate(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none mb-4"
+            />
+            
+            {leaveError && (
+              <div className="text-xs text-red-600 bg-red-50 p-3 rounded-lg font-semibold mb-4">
+                {leaveError}
+              </div>
+            )}
+
+            <button 
+              onClick={handleApplyLeave}
+              disabled={leaveLoading}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2"
+            >
+              {leaveLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirm Leave"}
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

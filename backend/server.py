@@ -1644,6 +1644,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "paid_on": row_paid_on,
                         "payment_method": row_pay_method,
                         "transaction_id": row_txn_id,
+                        "is_paid_leave": d_str in (drv_doc.get("paid_leaves", []) if drv_doc else []),
                         "rent_status": rent_status,
                         "rent_amount": daily_rate,
                         "rent_transaction_id": rent_txn_id,
@@ -2953,6 +2954,9 @@ async def _rental_account(rental):
                 while d_ <= today and guard < 90:
                     k = d_.isoformat()
                     amt = today_rate if d_ == today else past_rate
+                    paid_leaves = (drv_doc or {}).get("paid_leaves", [])
+                    if k in paid_leaves:
+                        amt = 0.0
                     if amt > 0 and k not in rent_by_date:
                         rent_by_date[k] = amt
                         rbd_changed = True
@@ -2963,9 +2967,11 @@ async def _rental_account(rental):
                     {"$set": {"rent_charged_through": today_iso}}
                 )
             # An unpaid entry for today follows the live plan rate (past days stay frozen).
+            paid_leaves = (drv_doc or {}).get("paid_leaves", []) if need_accrue or rent_by_date else []
             if not mid_trip and today_iso in rent_by_date and live_rate > 0 and abs(rent_by_date[today_iso] - live_rate) > 0.005:
-                rent_by_date[today_iso] = live_rate
-                rbd_changed = True
+                if today_iso not in paid_leaves:
+                    rent_by_date[today_iso] = live_rate
+                    rbd_changed = True
             if not mid_trip and live_rate > 0 and round(live_rate, 2) != round(float(rate or 0), 2):
                 rate = live_rate
                 await db.rentals.update_one({"_id": rental["_id"]}, {"$set": {"daily_rate": live_rate}})
@@ -3202,6 +3208,12 @@ async def _driver_payload(user):
     # month, the driver has used 0 km this month.
     cur_month = _today_ist().strftime("%Y-%m")
     month_kms = user.get("current_month_kms", 0) if user.get("current_month") == cur_month else 0
+    
+    joined_date = user.get("created_at") or _today_ist().isoformat()
+    joined_month = joined_date[:7]
+    leave_quota = 2 if cur_month == joined_month else 3
+    paid_leaves = user.get("paid_leaves", [])
+    leaves_taken_this_month = sum(1 for d in paid_leaves if d.startswith(cur_month))
 
     out = {
         "driver": {"id": did, "name": user.get("name"), "phone": user.get("phone"), "city": user.get("city"),
@@ -3212,6 +3224,9 @@ async def _driver_payload(user):
                    "active_trip_id": user.get("active_trip_id"),
                    "current_month_kms": month_kms,
                    "current_month": cur_month,
+                   "leave_quota": leave_quota,
+                   "leaves_taken_this_month": leaves_taken_this_month,
+                   "paid_leaves": paid_leaves,
                    "today_driven_km": user.get("today_driven_km", 0),
                    "today_overage_km": user.get("today_overage_km", 0),
                    "package_name": user.get("package_name"),
@@ -3634,6 +3649,54 @@ async def snooze_kyc(request: Request):
     snooze_time = (datetime.now() + timedelta(hours=6)).isoformat()
     await db.drivers.update_one({"_id": oid(user["id"])}, {"$set": {"kyc_snoozed_until": snooze_time}})
     return {"ok": True}
+
+@api.post("/driver/leave")
+async def apply_leave(request: Request, body: dict):
+    user = await get_user(request)
+    require_driver(user)
+    did = user["id"]
+    
+    target_date = body.get("date")
+    if not target_date:
+        raise HTTPException(status_code=400, detail="Date required")
+        
+    today_str = _today_ist().isoformat()
+    if target_date < today_str:
+        raise HTTPException(status_code=400, detail="Cannot apply leave for a past date")
+        
+    drv_doc = await db.drivers.find_one({"_id": oid(did)})
+    if not drv_doc:
+        raise HTTPException(status_code=404, detail="Driver not found")
+        
+    joined_date = drv_doc.get("created_at") or today_str
+    joined_month = joined_date[:7]
+    target_month = target_date[:7]
+    
+    quota = 2 if target_month == joined_month else 3
+    paid_leaves = drv_doc.get("paid_leaves", [])
+    
+    if target_date in paid_leaves:
+        raise HTTPException(status_code=400, detail="Leave already applied for this date")
+        
+    leaves_in_month = sum(1 for d in paid_leaves if d.startswith(target_month))
+    if leaves_in_month >= quota:
+        raise HTTPException(status_code=400, detail=f"Monthly limit of {quota} paid leaves reached")
+        
+    await db.drivers.update_one({"_id": oid(did)}, {"$addToSet": {"paid_leaves": target_date}})
+    
+    if target_date == today_str:
+        acct = await db.rental_accounts.find_one({"driver_id": did})
+        if acct and acct.get("rent_by_date", {}).get(target_date, 0) > 0:
+            amt = acct["rent_by_date"][target_date]
+            await db.rental_accounts.update_one(
+                {"driver_id": did},
+                {
+                    "$unset": {f"rent_by_date.{target_date}": ""},
+                    "$inc": {"rent_due": -amt, "outstanding_amount": -amt}
+                }
+            )
+            
+    return {"ok": True, "message": "Leave applied"}
 
 @api.post("/driver/kyc/ack-approved")
 async def ack_kyc_approved(request: Request):
