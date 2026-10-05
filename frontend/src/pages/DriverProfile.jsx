@@ -90,7 +90,7 @@ export default function DriverProfile() {
                 <GhostBtn onClick={() => setBlockType("permanent")} className="text-red-500 hover:text-red-600 hover:bg-red-50"><Ban className="w-4 h-4" /> Permanent Block</GhostBtn>
               </>
             )}
-            <GhostBtn onClick={() => setDel(true)} data-testid="delete-driver-btn" className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn>
+            {/* <GhostBtn onClick={() => setDel(true)} data-testid="delete-driver-btn" className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn> */}
           </div>
         )}
       </div>
