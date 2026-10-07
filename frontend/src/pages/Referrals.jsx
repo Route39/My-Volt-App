@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Pencil, Trash2, UserPlus, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, UserPlus, Search, IndianRupee } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -20,6 +20,8 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
     const [items, setItems] = useState(null);
     const [q, setQ] = useState("");
     const [form, setForm] = useState(null); // null = closed, {} = add, {id..} = edit
+    const [rewardOpen, setRewardOpen] = useState(false);
+    const canSetReward = ["admin", "company_admin", "city_manager"].includes(user?.role);
 
     const load = useCallback(async () => {
         const { data } = await api.get("/referrals", { params: referrerId ? { referrer_id: referrerId } : {} });
@@ -47,9 +49,16 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                         className="w-full h-10 pl-9 pr-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:ring-2 focus:ring-mv-primary/30" />
                 </div>
                 {canEdit && (
-                    <PrimaryBtn onClick={() => setForm({})} data-testid="add-referral-btn">
-                        <Plus className="w-4 h-4" /> Add Referral
-                    </PrimaryBtn>
+                    <div className="flex items-center gap-2">
+                        {canSetReward && (
+                            <GhostBtn onClick={() => setRewardOpen(true)} data-testid="referral-amount-btn">
+                                <IndianRupee className="w-4 h-4" /> Referral Amount
+                            </GhostBtn>
+                        )}
+                        <PrimaryBtn onClick={() => setForm({})} data-testid="add-referral-btn">
+                            <Plus className="w-4 h-4" /> Add Referral
+                        </PrimaryBtn>
+                    </div>
                 )}
             </div>
 
@@ -99,15 +108,16 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                                             : <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">Not joined yet</span>}
                                     </td>
                   <td className="p-4">
-                    <div className="font-semibold">{r.days_driven || 0} <span className="text-mv-dim font-normal">/ 60</span></div>
+                    <div className="font-semibold">{r.days_driven || 0} <span className="text-mv-dim font-normal">/ {r.total_days || 60}</span></div>
                     <div className="w-24 h-1.5 bg-mv-elevated rounded-full mt-1 overflow-hidden">
-                      <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, ((r.days_driven || 0) / 60) * 100)}%` }} />
+                      <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, ((r.days_driven || 0) / (r.total_days || 60)) * 100)}%` }} />
                     </div>
                     <div className="text-[11px] text-mv-dim mt-1">{r.rental_start ? `Since ${fmtDate(r.rental_start)}` : "No rental yet"}</div>
                   </td>
                   <td className="p-4 text-xs space-y-1 whitespace-nowrap">
-                    <RewardLine amount={1000} target={30} days={r.days_driven || 0} />
-                    <RewardLine amount={1500} target={60} days={r.days_driven || 0} />
+                    {(r.batches || [{ target: 30, amount: 1000 }, { target: 60, amount: 1500 }]).map((b, i) => (
+                      <RewardLine key={i} amount={b.amount} target={b.target} days={r.days_driven || 0} />
+                    ))}
                     <div className="font-bold text-emerald-600 pt-1">Earned: ₹{(r.reward_earned || 0).toLocaleString("en-IN")}</div>
                   </td>
                                     {canEdit && (
@@ -125,9 +135,76 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                 </div>
             )}
 
+            <ReferralRewardDialog open={rewardOpen} setOpen={setRewardOpen} onDone={() => { setRewardOpen(false); load(); }} />
             <ReferralDialog value={form} setValue={setForm} fixedReferrerId={referrerId} fixedReferrerName={referrerName} fixedReferrerCode={referrerCode}
                 onDone={() => { setForm(null); load(); }} />
         </div>
+    );
+}
+
+/* ---------- Referral amount (batch days + reward) dialog ---------- */
+function ReferralRewardDialog({ open, setOpen, onDone }) {
+    const [f, setF] = useState(null);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (!open) return;
+        setF(null);
+        api.get("/referral-settings")
+            .then(({ data }) => setF({
+                batch1_days: String(data.batch1_days), batch1_amount: String(data.batch1_amount),
+                batch2_days: String(data.batch2_days), batch2_amount: String(data.batch2_amount),
+            }))
+            .catch((e) => { toast.error(e.response?.data?.detail || "Failed to load referral amounts"); setOpen(false); });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    const save = async () => {
+        const d1 = Number(f.batch1_days), d2 = Number(f.batch2_days);
+        if (!f.batch1_days || !Number.isInteger(d1) || d1 < 1) return toast.error("Enter No. of days for 1st batch");
+        if (f.batch1_amount === "" || Number(f.batch1_amount) < 0) return toast.error("Enter Amount for 1st batch");
+        if (!f.batch2_days || !Number.isInteger(d2) || d2 < 1) return toast.error("Enter No. of days for 2nd batch");
+        if (f.batch2_amount === "" || Number(f.batch2_amount) < 0) return toast.error("Enter Amount for 2nd batch");
+        setSaving(true);
+        try {
+            await api.put("/referral-settings", {
+                batch1_days: d1, batch1_amount: Number(f.batch1_amount),
+                batch2_days: d2, batch2_amount: Number(f.batch2_amount),
+            });
+            toast.success("Referral amounts updated");
+            onDone();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Failed to save");
+        } finally { setSaving(false); }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+            <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
+                <DialogHeader><DialogTitle className="font-display">Referral Amount</DialogTitle></DialogHeader>
+                {!f ? (
+                    <p className="text-sm text-mv-muted py-4">Loading...</p>
+                ) : (
+                    <>
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                            <Field label="No. of days - 1st batch *"><TextInput type="number" min="1" value={f.batch1_days} onChange={(e) => set("batch1_days", e.target.value)} /></Field>
+                            <Field label="Amount - 1st batch (₹) *"><TextInput type="number" min="0" value={f.batch1_amount} onChange={(e) => set("batch1_amount", e.target.value)} /></Field>
+                            <Field label="No. of days - 2nd batch *"><TextInput type="number" min="1" value={f.batch2_days} onChange={(e) => set("batch2_days", e.target.value)} /></Field>
+                            <Field label="Amount - 2nd batch (₹) *"><TextInput type="number" min="0" value={f.batch2_amount} onChange={(e) => set("batch2_amount", e.target.value)} /></Field>
+                        </div>
+                        <p className="text-xs text-mv-dim">
+                            The 2nd batch counts the days driven after the 1st batch. Total: {(Number(f.batch1_days) || 0) + (Number(f.batch2_days) || 0)} days, ₹{((Number(f.batch1_amount) || 0) + (Number(f.batch2_amount) || 0)).toLocaleString("en-IN")}.
+                        </p>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
+                            <PrimaryBtn onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</PrimaryBtn>
+                        </div>
+                    </>
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }
 

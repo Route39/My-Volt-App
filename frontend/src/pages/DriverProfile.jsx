@@ -111,10 +111,10 @@ export default function DriverProfile() {
                 <div className="mv-label">Paid Leaves (This Month)</div>
                 <div className="text-sm font-medium mt-1 flex items-center gap-2">
                   {d.leaves_taken_this_month || 0} / {d.leave_quota || 0}
-                  {d.paid_leaves?.length > 0 && <span className="text-[10px] text-mv-muted bg-mv-elevated px-1.5 py-0.5 rounded">({d.paid_leaves.slice(-2).join(', ')})</span>}
+                  {d.leave_dates_this_month?.length > 0 && <span className="text-[10px] text-mv-muted bg-mv-elevated px-1.5 py-0.5 rounded">({d.leave_dates_this_month.join(', ')})</span>}
                 </div>
               </div>
-              <button 
+                          {/* <button 
                 onClick={async () => {
                   const date = window.prompt("Enter date to grant Paid Leave (YYYY-MM-DD):", new Date().toLocaleDateString('en-CA'));
                   if (date) {
@@ -130,7 +130,7 @@ export default function DriverProfile() {
                 className="mt-3 w-max text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 font-bold px-2 py-1 rounded"
               >
                 + Grant Leave
-              </button>
+              </button> */}
             </div>
             
           </div>

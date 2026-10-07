@@ -525,7 +525,7 @@ export default function DriverHome() {
             </div>
             
             {/* Paid Leave Status */}
-            <div className="col-span-2 mt-4 pt-4 border-t border-emerald-600/30">
+            {/* <div className="col-span-2 mt-4 pt-4 border-t border-emerald-600/30">
               <div className="bg-white/10 rounded-xl p-4 border border-white/5 flex items-center justify-between">
                 <div>
                   <div className="text-[10px] text-emerald-200 font-semibold uppercase tracking-wider mb-1">Paid Leaves</div>
@@ -543,7 +543,7 @@ export default function DriverHome() {
                   Apply Leave
                 </button>
               </div>
-            </div>
+            </div> */}
             
           </div>
         </div>

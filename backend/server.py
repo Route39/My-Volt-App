@@ -780,9 +780,12 @@ async def get_driver(did: str, request: Request):
     cur_month = _today_ist().strftime("%Y-%m")
     joined_date = d.get("created_at") or _today_ist().isoformat()
     joined_month = joined_date[:7]
-    out["leave_quota"] = 2 if cur_month == joined_month else 3
+    out["leave_quota"] = 3  # max 3 paid leave days per month for every driver
     out["paid_leaves"] = d.get("paid_leaves", [])
-    out["leaves_taken_this_month"] = sum(1 for dl in out["paid_leaves"] if dl.startswith(cur_month))
+    # The card counts only the days chosen in the admin "Paid Leave" calendar (paid_leave_dates)
+    _all_leaves = set(d.get("paid_leave_dates") or [])
+    out["leave_dates_this_month"] = sorted(dl for dl in _all_leaves if dl.startswith(cur_month))
+    out["leaves_taken_this_month"] = len(out["leave_dates_this_month"])
     
     return out
 
@@ -1120,12 +1123,60 @@ async def admin_unblock_driver(did: str, request: Request):
 
 
 # ===== REFERRALS =====
-REFERRAL_MILESTONES = [(30, 1000), (60, 1500)]  # (days driven, reward)
+REFERRAL_MILESTONES = [(30, 1000), (60, 1500)]  # default (days driven, reward) used until admin saves "Referral amount"
 
 
-async def _referral_progress(did):
-    total = sum(a for _, a in REFERRAL_MILESTONES)
-    res = {"rental_start": None, "days_driven": 0, "reward_earned": 0, "reward_pending": total}
+async def _referral_config(org):
+    """Batch days/amounts set by admin / city manager (falls back to 30 days/1000 and 30 days/1500)."""
+    d = await db.referral_settings.find_one({"organization_id": org}) or {}
+    b1d = int(d.get("batch1_days") or 30)
+    b1a = float(d.get("batch1_amount", 1000) or 0)
+    b2d = int(d.get("batch2_days") or 30)
+    b2a = float(d.get("batch2_amount", 1500) or 0)
+    return {"batch1_days": b1d, "batch1_amount": b1a, "batch2_days": b2d, "batch2_amount": b2a}
+
+
+def _referral_milestones(cfg):
+    # 2nd batch is the "next N days", so its target is cumulative: batch1 days + batch2 days.
+    return [(cfg["batch1_days"], cfg["batch1_amount"]), (cfg["batch1_days"] + cfg["batch2_days"], cfg["batch2_amount"])]
+
+
+@api.get("/referral-settings")
+async def get_referral_settings(request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    return await _referral_config(user.get("organization_id"))
+
+
+@api.put("/referral-settings")
+async def set_referral_settings(request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    b = await request.json()
+    try:
+        b1d, b2d = int(b.get("batch1_days")), int(b.get("batch2_days"))
+        b1a, b2a = float(b.get("batch1_amount")), float(b.get("batch2_amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Enter valid days and amounts for both batches")
+    if b1d < 1 or b2d < 1:
+        raise HTTPException(status_code=400, detail="Number of days must be at least 1")
+    if b1a < 0 or b2a < 0:
+        raise HTTPException(status_code=400, detail="Amount cannot be negative")
+    org = user.get("organization_id")
+    await db.referral_settings.update_one(
+        {"organization_id": org},
+        {"$set": {"batch1_days": b1d, "batch1_amount": b1a, "batch2_days": b2d, "batch2_amount": b2a, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    await log_audit(user, "referral_settings_updated", "organization", org, f"Referral batches: {b1d} days/{b1a}, {b2d} days/{b2a}")
+    return await _referral_config(org)
+
+
+async def _referral_progress(did, milestones=None):
+    milestones = milestones or REFERRAL_MILESTONES
+    total = sum(a for _, a in milestones)
+    res = {"rental_start": None, "days_driven": 0, "reward_earned": 0, "reward_pending": total,
+           "batches": [{"target": d, "amount": a} for d, a in milestones], "total_days": milestones[-1][0]}
     if not did:
         return res
     first = await db.rentals.find({"driver_id": did}).sort("start", 1).to_list(1)
@@ -1136,7 +1187,7 @@ async def _referral_progress(did):
     # A "driven day" = any day the driver submitted an odometer log (not required to be continuous)
     dates = await db.driver_odometer_logs.distinct("date", {"driver_id": did, "date": {"$gte": start}})
     days = len(dates)
-    earned = sum(a for d, a in REFERRAL_MILESTONES if days >= d)
+    earned = sum(a for d, a in milestones if days >= d)
     res.update(days_driven=days, reward_earned=earned, reward_pending=total - earned)
     return res
 
@@ -1148,9 +1199,10 @@ async def list_referrals(request: Request, referrer_id: str = None):
     q = {"referrer_driver_id": referrer_id} if referrer_id else {}
     items = await db.referrals.find(org_filter(user, q)).sort("referred_at", -1).to_list(None)
     out = []
+    milestones = _referral_milestones(await _referral_config(user.get("organization_id")))
     for i in items:
         r = ser(i)
-        r.update(await _referral_progress(i.get("referred_driver_id")))
+        r.update(await _referral_progress(i.get("referred_driver_id"), milestones))
         out.append(r)
     return out
 
@@ -3355,7 +3407,7 @@ async def _driver_payload(user):
     
     joined_date = user.get("created_at") or _today_ist().isoformat()
     joined_month = joined_date[:7]
-    leave_quota = 2 if cur_month == joined_month else 3
+    leave_quota = 3
     paid_leaves = user.get("paid_leaves", [])
     leaves_taken_this_month = sum(1 for d in paid_leaves if d.startswith(cur_month))
 
@@ -3798,6 +3850,8 @@ async def snooze_kyc(request: Request):
 async def apply_leave(request: Request, body: dict):
     user = await get_user(request)
     require_driver(user)
+    # Paid leave is now granted only by admin / city manager from the admin panel.
+    raise HTTPException(status_code=403, detail="Paid leave can only be granted by admin")
     did = user["id"]
     
     target_date = body.get("date")
@@ -3816,7 +3870,7 @@ async def apply_leave(request: Request, body: dict):
     joined_month = joined_date[:7]
     target_month = target_date[:7]
     
-    quota = 2 if target_month == joined_month else 3
+    quota = 3
     paid_leaves = drv_doc.get("paid_leaves", [])
     
     if target_date in paid_leaves:

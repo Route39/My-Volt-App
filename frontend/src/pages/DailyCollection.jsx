@@ -361,9 +361,15 @@ export default function DailyCollection() {
                         </div>
                       ) : (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
-                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-[10px] font-bold tracking-wide border border-emerald-200 shadow-sm">
-                            <Check className="w-3 h-3" /> PAID
-                          </div>
+                          {it.deposit > 0 && it.deposit_status === "paid" && !depositRowIds.has(it.id) ? (
+                            <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-slate-50 text-slate-500 text-[10px] font-bold tracking-wide border border-slate-200 shadow-sm">
+                              <Check className="w-3 h-3" /> ALREADY PAID
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-[10px] font-bold tracking-wide border border-emerald-200 shadow-sm">
+                              <Check className="w-3 h-3" /> PAID
+                            </div>
+                          )}
                           <span className="text-emerald-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
                           {it.deposit_transaction_id && depositRowIds.has(it.id) && (
                             <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${it.deposit_transaction_id.startsWith('QR_') ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
