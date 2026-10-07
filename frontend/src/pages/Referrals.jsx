@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, UserPlus, Search, IndianRupee } from "lucide-reac
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useApp } from "../context/AppContext";
 import { fmtDate } from "../lib/format";
 import { loadDriverCodes } from "../lib/driverCodes";
 import { Field, PrimaryBtn, GhostBtn, TextInput } from "../components/common/Page";
@@ -22,11 +23,16 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
     const [form, setForm] = useState(null); // null = closed, {} = add, {id..} = edit
     const [rewardOpen, setRewardOpen] = useState(false);
     const canSetReward = ["admin", "company_admin", "city_manager"].includes(user?.role);
+    const { city: gCity, lockedCity, cities } = useApp();
+    const [city, setCity] = useState(lockedCity || gCity);
 
     const load = useCallback(async () => {
-        const { data } = await api.get("/referrals", { params: referrerId ? { referrer_id: referrerId } : {} });
+        const params = {};
+        if (referrerId) params.referrer_id = referrerId;
+        else if (city !== "all") params.city = city;
+        const { data } = await api.get("/referrals", { params });
         setItems(data);
-    }, [referrerId]);
+    }, [referrerId, city]);
     useEffect(() => { load(); }, [load]);
 
     const remove = async (r) => {
@@ -42,6 +48,17 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
 
     return (
         <div>
+            {!referrerId && (
+                <div className="mb-3">
+                    <Select value={city} onValueChange={setCity}>
+                        <SelectTrigger className="w-44 h-10 bg-mv-surface border-mv-border" data-testid="referral-city-filter"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
+                            {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
+                            {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+            )}
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between mb-4">
                 <div className="relative flex-1 max-w-md">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-mv-dim" />

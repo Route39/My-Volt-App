@@ -15,7 +15,7 @@ import { DriverCode } from "../lib/driverCodes";
 const STATUSES = ["all", "rented", "available", "service", "idle", "inactive", "accident"];
 
 export default function Fleet() {
-  const { city: gCity } = useApp();
+  const { city: gCity, lockedCity, cities } = useApp();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
@@ -27,11 +27,11 @@ export default function Fleet() {
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
   const [status, setStatus] = useState(params.get("status") || "all");
-  const [city, setCity] = useState(params.get("city") || gCity);
+  const [city, setCity] = useState(lockedCity || params.get("city") || gCity);
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
 
   useEffect(() => { const t = setTimeout(() => setDq(q), 300); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { setCity(params.get("city") || gCity); }, [gCity]);
+  useEffect(() => { setCity(lockedCity || params.get("city") || gCity); }, [gCity, lockedCity]);
 
   const fetchPage = useCallback(async (pg, replace) => {
     const p = { page_size: 60, page: pg };
@@ -69,8 +69,8 @@ export default function Fleet() {
           <Select value={city} onValueChange={setCity}>
             <SelectTrigger className="w-40 h-10 bg-mv-surface border-mv-border" data-testid="fleet-city-filter"><SelectValue /></SelectTrigger>
             <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-              <SelectItem value="all">All Cities</SelectItem>
-              {CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
+              {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
           <div className="flex rounded-xl border border-mv-border overflow-hidden">
@@ -179,8 +179,8 @@ export default function Fleet() {
 }
 
 function AddVehicleDialog({ open, setOpen, onDone }) {
-  const { city: appCity } = useApp();
-  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", vin_number: "", city: appCity === "all" ? "Bangalore" : appCity });
+  const { city: appCity, lockedCity, cities } = useApp();
+  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", vin_number: "", city: lockedCity || (appCity === "all" ? "Bangalore" : appCity) });
   const [saving, setSaving] = useState(false);
   const [fetchingId, setFetchingId] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -220,7 +220,7 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
           <Field label="City">
             <Select value={form.city} onValueChange={(v) => set("city", v)}>
               <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-mv-surface border-mv-border text-mv-text">{CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+              <SelectContent className="bg-mv-surface border-mv-border text-mv-text">{cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
           <Field label="Registration Number (e.g. TN39 XX 1234)">

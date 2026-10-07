@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import imgUrl from "../lib/imgUrl";
 
 export default function KycApprovals() {
-  const { city: gCity } = useApp();
+  const { city: gCity, lockedCity, cities } = useApp();
   const [city, setCity] = useState(gCity === "all" ? "all" : gCity);
   const [search, setSearch] = useState("");
   const [drivers, setDrivers] = useState([]);
@@ -57,8 +57,8 @@ export default function KycApprovals() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-white rounded-xl border-slate-200 text-slate-900">
-              <SelectItem value="all">All Cities</SelectItem>
-              {CITIES.map((c) => (
+              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
+              {cities.map((c) => (
                 <SelectItem key={c} value={c}>{c}</SelectItem>
               ))}
             </SelectContent>
@@ -98,7 +98,8 @@ export default function KycApprovals() {
               </div>
               <div className="mt-4 flex items-center gap-2 text-sm text-slate-500">
                 <MapPin className="w-4 h-4" /> 
-                {d.location?.lat ? `${parseFloat(d.location.lat).toFixed(4)}, ${parseFloat(d.location.lng).toFixed(4)}` : "No location"}
+                {/* {d.location?.lat ? `${parseFloat(d.location.lat).toFixed(4)}, ${parseFloat(d.location.lng).toFixed(4)}` : "No location"} */}
+                {d.city || "City not set"}
               </div>
               <button className="mt-5 w-full h-10 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-xl transition-colors">
                 Review Documents
@@ -134,9 +135,10 @@ export default function KycApprovals() {
                   <p className="text-sm text-slate-500 mt-1 max-w-xl">
                     {selected.location?.address || "No address provided."}
                   </p>
-                  <p className="text-xs text-slate-400 font-mono mt-1">
+                  {/* <p className="text-xs text-slate-400 font-mono mt-1">
                     GPS: {selected.location?.lat}, {selected.location?.lng}
-                  </p>
+                  </p> */}
+                  <p className="text-xs text-slate-400 mt-1">City: {selected.city || "—"}</p>
                 </div>
                 {selected.location?.lat && (
                   <a href={`https://www.google.com/maps/search/?api=1&query=${selected.location.lat},${selected.location.lng}`} target="_blank" rel="noreferrer" className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:border-emerald-500 text-sm font-medium transition-colors">

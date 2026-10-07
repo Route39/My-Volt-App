@@ -93,11 +93,12 @@ async def get_user(request: Request):
 
 def org_filter(user: dict, extra: dict = None):
     f = {"organization_id": user.get("organization_id") or "route39-org"}
-    # City managers are restricted to their assigned city
-    if user.get("role") == "city_manager" and user.get("city"):
-        f["city"] = user["city"]
     if extra:
         f.update(extra)
+    # City managers are restricted to their assigned city (applied last so a
+    # client-supplied ?city=<other> can never override it)
+    if user.get("role") == "city_manager" and user.get("city"):
+        f["city"] = user["city"]
     return f
 
 
@@ -470,6 +471,8 @@ async def create_vehicle(body: VehicleBody, request: Request):
     if not re.fullmatch(r"[A-Z0-9]{17}", doc["vin_number"]):
         raise HTTPException(status_code=400, detail="VIN Number must be exactly 17 characters (letters A-Z and numbers 0-9 only)")
     doc["organization_id"] = user.get("organization_id")
+    if user.get("role") == "city_manager" and user.get("city"):
+        doc["city"] = user["city"]  # city managers can only add vehicles in their own city
     doc["created_at"] = now_iso()
     res = await db.vehicles.insert_one(doc)
     await log_audit(user, "vehicle_created", "vehicle", str(res.inserted_id), f"Vehicle {body.vehicle_number} added")
@@ -577,6 +580,8 @@ async def get_odometer_logs(request: Request, city: Optional[str] = None, from_d
     drv_filter = {"organization_id": user.get("organization_id")}
     if city and city != "all":
         drv_filter["city"] = city
+    if user.get("role") == "city_manager" and user.get("city"):
+        drv_filter["city"] = user["city"]
     if driver_name:
         drv_filter["name"] = {"$regex": driver_name, "$options": "i"}
         
@@ -917,6 +922,8 @@ async def create_driver(body: DriverBody, request: Request):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
     doc["organization_id"] = user.get("organization_id") or "route39-org"
+    if user.get("role") == "city_manager" and user.get("city"):
+        doc["city"] = user["city"]  # city managers can only add drivers in their own city
     doc["created_at"] = now_iso()
     # Normalize the phone the same way driver login does (strip spaces) and block duplicates
     phone = re.sub(r"\s+", "", body.phone or "")
@@ -1193,10 +1200,12 @@ async def _referral_progress(did, milestones=None):
 
 
 @api.get("/referrals")
-async def list_referrals(request: Request, referrer_id: str = None):
+async def list_referrals(request: Request, referrer_id: str = None, city: str = None):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     q = {"referrer_driver_id": referrer_id} if referrer_id else {}
+    if city and city != "all":
+        q["city"] = city
     items = await db.referrals.find(org_filter(user, q)).sort("referred_at", -1).to_list(None)
     out = []
     milestones = _referral_milestones(await _referral_config(user.get("organization_id")))
@@ -1352,7 +1361,10 @@ class PlanBody(BaseModel):
 @api.get("/rental-plans")
 async def list_plans(request: Request):
     user = await get_user(request)
-    docs = await db.rental_plans.find({"organization_id": user.get("organization_id")}).to_list(200)
+    flt = {"organization_id": user.get("organization_id")}
+    if user.get("role") == "city_manager" and user.get("city"):
+        flt["city"] = user["city"]
+    docs = await db.rental_plans.find(flt).to_list(200)
     return [ser(d) for d in docs]
 
 
@@ -2146,6 +2158,13 @@ async def create_sr(body: dict, request: Request):
                            link="/service-requests", city=body.get("city"))
     return ser(await db.service_requests.find_one({"_id": res.inserted_id}))
 
+async def _restore_vehicle_status(vehicle_id):
+    """Set vehicle to 'rented' if it has an active rental, else 'available'."""
+    active = await db.rentals.find_one({"vehicle_id": vehicle_id, "status": "active"})
+    await db.vehicles.update_one(
+        {"_id": oid(vehicle_id)},
+        {"$set": {"status": "rented" if active else "available"}},
+    )
 
 @api.put("/service-requests/{sid}")
 async def update_sr(sid: str, body: dict, request: Request):
@@ -2161,7 +2180,7 @@ async def update_sr(sid: str, body: dict, request: Request):
         if body["status"] in ("inspection", "repair", "assigned"):
             await db.vehicles.update_one({"_id": oid(sr["vehicle_id"])}, {"$set": {"status": "service"}})
         elif body["status"] == "closed":
-            await db.vehicles.update_one({"_id": oid(sr["vehicle_id"])}, {"$set": {"status": "available"}})
+            await _restore_vehicle_status(sr["vehicle_id"])
         await log_audit(user, "service_request_updated", "service_request", sid, f"{sr['code']} to {body['status']}")
     await db.service_requests.update_one({"_id": oid(sid)}, {"$set": body})
     return ser(await db.service_requests.find_one({"_id": oid(sid)}))
@@ -2199,10 +2218,9 @@ async def create_service(body: dict, request: Request):
     if body.get("service_request_id"):
         await db.service_requests.update_one({"_id": oid(body["service_request_id"])}, {"$set": {"status": "closed"}})
     if body.get("completion_date"):
-        upd = {"status": "available"}
         if body.get("next_service_date"):
-            upd["next_service_date"] = body["next_service_date"]
-        await db.vehicles.update_one({"_id": oid(body["vehicle_id"])}, {"$set": upd})
+            await db.vehicles.update_one({"_id": oid(body["vehicle_id"])}, {"$set": {"next_service_date": body["next_service_date"]}})
+        await _restore_vehicle_status(body["vehicle_id"])
         await add_notification(user.get("organization_id"), "green", "Service completed",
                                f"{body.get('vehicle_number','')} - {body.get('issue','service')}",
                                link=f"/fleet/{body['vehicle_id']}", city=body.get("city"))

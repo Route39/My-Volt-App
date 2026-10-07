@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { DriverCode } from "../lib/driverCodes";
 
 export default function DailyCollection() {
-  const { city: gCity } = useApp();
+  const { city: gCity, lockedCity, cities } = useApp();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [city, setCity] = useState(gCity === "all" ? "all" : gCity);
@@ -129,8 +129,8 @@ export default function DailyCollection() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-mv-surface rounded-xl border-mv-border text-mv-text">
-              <SelectItem value="all">All Cities</SelectItem>
-              {CITIES.map((c) => (
+              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
+              {cities.map((c) => (
                 <SelectItem key={c} value={c}>{c}</SelectItem>
               ))}
             </SelectContent>

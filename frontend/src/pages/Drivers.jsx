@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 export default function Drivers() {
-  const { city: gCity } = useApp();
+  const { city: gCity, lockedCity, cities } = useApp();
   const { user } = useAuth();
   const [params] = useSearchParams();
   const nav = useNavigate();
@@ -57,7 +57,7 @@ export default function Drivers() {
         <div className="flex items-center gap-2">
           <Select value={city} onValueChange={setCity}>
             <SelectTrigger className="w-40 h-10 bg-mv-surface border-mv-border"><SelectValue /></SelectTrigger>
-            <SelectContent className="bg-mv-surface border-mv-border text-mv-text"><SelectItem value="all">All Cities</SelectItem>{CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            <SelectContent className="bg-mv-surface border-mv-border text-mv-text">{!lockedCity && <SelectItem value="all">All Cities</SelectItem>}{cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
           </Select>
           <div className="flex rounded-xl border border-mv-border overflow-hidden">
             <button onClick={() => setView("cards")} className={`w-10 h-10 flex items-center justify-center ${view === "cards" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><LayoutGrid className="w-4 h-4" /></button>
@@ -86,6 +86,7 @@ export default function Drivers() {
                   <div className="flex gap-2 mt-1">
                     <StatusChip status={d.status} />
                     <KycStatusChip status={d.kyc_status || "pending"} />
+                    
                   </div>
                 </div>
               </div>
@@ -102,6 +103,13 @@ export default function Drivers() {
                 <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5" /> {d.city}</div>
                 {d.package_name && <div className="flex items-center gap-2 text-mv-primary"><KeyRound className="w-3.5 h-3.5" /> {d.package_name} Plan</div>}
               </div>
+              {d.admin_block && (
+                <div className="mt-3">
+                  <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold ${d.admin_block === "permanent" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-700"}`}>
+                    {d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}
+                  </span>
+                </div>
+              )}
               {d.rental_status === "active" && d.rental_block_status !== "blocked" && <div className="mt-3"><StatusChip status="active" label="Rental Active" /></div>}
               {d.rental_block_status === "blocked" && (
                 <div className="mt-3 flex items-center justify-between">
@@ -176,9 +184,10 @@ export default function Drivers() {
 }
 
 function AddDriverDialog({ open, setOpen, onDone }) {
+  const { lockedCity, cities } = useApp(); // city managers: own city only; admins: all
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ 
-    name: "", phone: "", city: "Chennai", address: "", 
+    name: "", phone: "", city: lockedCity || "Chennai", address: "", 
     emergency_contact: "", license_number: "", status: "active",
     package_name: "", package_rate: 0
   });
@@ -190,7 +199,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
     if (!open) { 
       setStep(1); 
       setForm({
-        name: "", phone: "", city: "Chennai", address: "", 
+        name: "", phone: "", city: lockedCity || "Chennai", address: "", 
         emergency_contact: "", license_number: "", status: "active",
         package_name: "", package_rate: 0
       }); 
@@ -230,7 +239,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
             <Select value={form.city} onValueChange={(v) => set("city", v)}>
               <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-                {CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>

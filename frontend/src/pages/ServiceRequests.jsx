@@ -19,8 +19,8 @@ const STAGES = [
 const PRIO_DOT = { critical: "bg-red-500", high: "bg-amber-500", medium: "bg-blue-500", low: "bg-zinc-500" };
 
 export default function ServiceRequests() {
-  const { city: gCity } = useApp();
-  const [city, setCity] = useState(gCity);
+  const { city: gCity, lockedCity, cities } = useApp();
+  const [city, setCity] = useState(lockedCity || gCity);
   useEffect(() => { setCity(gCity); }, [gCity]);
   const { user } = useAuth();
   const [params] = useSearchParams();
@@ -61,8 +61,8 @@ export default function ServiceRequests() {
         <Select value={city} onValueChange={setCity}>
           <SelectTrigger className="w-40 h-10 bg-mv-surface border-mv-border" data-testid="sr-city-filter"><SelectValue /></SelectTrigger>
           <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-            <SelectItem value="all">All Cities</SelectItem>
-            {CITIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
+            {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>

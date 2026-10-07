@@ -8,7 +8,7 @@ import { useApp, CITIES } from "../context/AppContext";
 import { DriverCode } from "../lib/driverCodes";
 
 export default function OdometerApprovals() {
-  const { city: gCity } = useApp();
+  const { city: gCity, lockedCity, cities } = useApp();
   const [city, setCity] = useState(gCity === "all" ? "all" : gCity);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -93,8 +93,8 @@ export default function OdometerApprovals() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-white rounded-xl border-slate-200 text-slate-900">
-              <SelectItem value="all">All Cities</SelectItem>
-              {CITIES.map((c) => (
+              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
+              {cities.map((c) => (
                 <SelectItem key={c} value={c}>{c}</SelectItem>
               ))}
             </SelectContent>

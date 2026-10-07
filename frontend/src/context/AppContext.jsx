@@ -6,13 +6,18 @@ const AppCtx = createContext(null);
 
 export function AppProvider({ children }) {
   const { user } = useAuth();
-  const [city, setCity] = useState("all");
+  // City managers are locked to their own city; admins can see every city.
+  const lockedCity = user?.role === "city_manager" && user?.city ? user.city : null;
+  const cities = lockedCity ? [lockedCity] : CITIES;
+  const [city, setCity] = useState(lockedCity || "all");
 
   useEffect(() => {
-    if (user?.city) setCity(user.city);
-  }, [user]);
+    if (lockedCity) setCity(lockedCity);
+    else if (user?.city) setCity(user.city);
+  }, [user, lockedCity]);
 
   const setCityPersist = async (c) => {
+    if (lockedCity) c = lockedCity;
     setCity(c);
     if (user) {
       try { await api.post("/admin/preferences/city", { city: c }); } catch (e) {}
@@ -20,7 +25,7 @@ export function AppProvider({ children }) {
   };
 
   return (
-    <AppCtx.Provider value={{ city, setCity: setCityPersist }}>{children}</AppCtx.Provider>
+    <AppCtx.Provider value={{ city: lockedCity || city, setCity: setCityPersist, lockedCity, cities }}>{children}</AppCtx.Provider>
   );
 }
 

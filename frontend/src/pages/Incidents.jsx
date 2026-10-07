@@ -58,8 +58,10 @@ export default function Incidents() {
 }
 
 function NewIncidentDialog({ open, setOpen, onDone }) {
+  const { lockedCity, cities } = useApp();
+  const locationOptions = lockedCity ? [lockedCity] : ["All Cities", ...cities];
   const [vehicles, setVehicles] = useState([]);
-  const [form, setForm] = useState({ vehicle_id: "", incident_type: "Accident", location: "", description: "", estimated_damage: 0 });
+  const [form, setForm] = useState({ vehicle_id: "", incident_type: "Accident", location: lockedCity || "", description: "", estimated_damage: 0 });
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   useEffect(() => { if (open) api.get("/vehicles", { params: { page_size: 300 } }).then((r) => setVehicles(r.data.items)); }, [open]);
   const save = async () => {
@@ -74,7 +76,7 @@ function NewIncidentDialog({ open, setOpen, onDone }) {
         <div className="grid grid-cols-2 gap-4 pt-1">
           <Field label="Vehicle"><Select value={form.vehicle_id} onValueChange={(v) => set("vehicle_id", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="inc-vehicle"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-56">{vehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.registration_number || v.vehicle_number} · {v.city}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Type"><Select value={form.incident_type} onValueChange={(v) => set("incident_type", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text">{["Accident", "Vehicle Damage", "Driver Incident", "Theft", "Lost Equipment", "Other"].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></Field>
-          <Field label="Location"><TextInput value={form.location} onChange={(e) => set("location", e.target.value)} /></Field>
+          <Field label="Location"><Select value={form.location} onValueChange={(v) => set("location", v)}><SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="inc-location"><SelectValue placeholder="Select location" /></SelectTrigger><SelectContent className="bg-mv-surface border-mv-border text-mv-text">{locationOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></Field>
           <Field label="Est. Damage (₹)"><TextInput type="number" value={form.estimated_damage} onChange={(e) => set("estimated_damage", e.target.value)} /></Field>
         </div>
         <Field label="Description"><TextArea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} /></Field>

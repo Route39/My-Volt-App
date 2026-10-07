@@ -4,12 +4,13 @@ import api from "../lib/api";
 import { inr } from "../lib/format";
 import { toast } from "sonner";
 import { PrimaryBtn, GhostBtn } from "../components/common/Page";
-import { CITIES } from "../context/AppContext";
+import { useApp } from "../context/AppContext";
 import PackageLock from "../components/common/PackageLock";
 
 const PACKAGE_TYPES = ["Silver", "Gold", "Platinum"];
 
 export default function Packages() {
+  const { cities } = useApp(); // city managers get only their own city; admins get all
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("list"); // "list" | "form"
@@ -69,7 +70,7 @@ export default function Packages() {
         </div>
       ) : (
         <div className="space-y-12">
-          {CITIES.map(city => {
+          {cities.map(city => {
             return (
               <div key={city}>
                 <h2 className="text-2xl font-bold text-mv-text mb-6 flex items-center gap-2"><MapPin className="w-6 h-6 text-mv-primary" /> {city}</h2>

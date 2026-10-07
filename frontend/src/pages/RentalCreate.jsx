@@ -21,6 +21,8 @@ const CITIES = ["Tiruppur", "Coimbatore", "Chennai", "Bangalore"];
 
 export default function RentalCreate() {
   const nav = useNavigate();
+  // City managers get only their own city; admins get all cities
+  const { lockedCity, cities } = useApp();
   
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -31,7 +33,7 @@ export default function RentalCreate() {
   const [allPackages, setAllPackages] = useState([]);
 
   // Wizard State
-  const [selCity, setSelCity] = useState("Bangalore");
+  const [selCity, setSelCity] = useState(lockedCity || "Bangalore");
   const [selDrivers, setSelDrivers] = useState([]); 
   const [drvVehicles, setDrvVehicles] = useState({}); 
   const [drvPackages, setDrvPackages] = useState({}); 
@@ -193,7 +195,7 @@ export default function RentalCreate() {
           <div className="animate-in fade-in zoom-in-95 duration-200">
             <h3 className="font-display font-semibold mb-6">Select City Location</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {CITIES.map(c => (
+              {cities.map(c => (
                 <button key={c} onClick={() => { setSelCity(c); setSelDrivers([]); }}
                   className={`p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-3 ${selCity === c ? 'border-mv-primary bg-mv-primary/10 scale-[1.02]' : 'border-mv-border bg-mv-surface hover:bg-mv-surface2'}`}
                 >
