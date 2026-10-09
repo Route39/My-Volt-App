@@ -18,7 +18,7 @@ function loadRazorpay() {
 }
 
 // Reusable payment sheet. kind: deposit | daily | outstanding
-export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone }) {
+export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {} }) {
   const [phase, setPhase] = useState("confirm"); // confirm | processing | success
   const [result, setResult] = useState(null);
 
@@ -29,7 +29,7 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
   const pay = async () => {
     setPhase("processing");
     try {
-      const { data: order } = await dapi.post("/driver/payments/create-order", { kind });
+      const { data: order } = await dapi.post("/driver/payments/create-order", { kind, ...extraParams });
       let verifyRes;
       if (order.gateway === "razorpay") {
         if (Capacitor.isNativePlatform()) {

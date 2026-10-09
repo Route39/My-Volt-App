@@ -3,7 +3,7 @@ import { Receipt } from "lucide-react";
 import dapi from "../../lib/driverApi";
 import { inr, fmtDate } from "../../lib/format";
 
-const KIND_LABEL = { deposit: "Security Deposit", daily: "Daily Rent", outstanding: "Outstanding" };
+const KIND_LABEL = { deposit: "Security Deposit", daily: "Daily Rent", extra_km: "Extra KM Charges", outstanding: "Outstanding" };
 const STATUS_UI = {
   paid: "bg-emerald-100 text-emerald-700",
   pending: "bg-amber-100 text-amber-700",
@@ -32,10 +32,15 @@ export default function DriverPayments() {
                 <div>
                   <div className="font-semibold text-slate-900">{KIND_LABEL[p.kind] || p.kind}</div>
                   <div className="text-xs text-slate-400 mt-0.5">{fmtDate(p.paid_at || p.created_at, true)}</div>
+                  {(p.kind === "daily" || p.kind === "outstanding") && (p.covers_dates || []).length > 0 && (
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                      Rent for: {p.covers_dates.slice().sort().join(", ")}
+                    </div>
+                  )}
                 </div>
                 <div className="text-right">
                   <div className="font-extrabold text-slate-900">{inr(p.amount)}</div>
-                  {p.extra_charge > 0 && (
+                  {p.kind === "outstanding" && p.extra_charge > 0 && (
                     <div className="text-[10px] text-red-500 font-semibold mb-1">
                       Rent {inr(p.base_rent)} + Extra KM {inr(p.extra_charge)}
                     </div>

@@ -5,6 +5,7 @@ import { inr } from "../lib/format";
 import imgUrl from "../lib/imgUrl";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { useApp, CITIES } from "../context/AppContext";
+import { DriverCode } from "../lib/driverCodes";
 
 export default function OdometerApprovals() {
   const { city: gCity } = useApp();
@@ -25,21 +26,21 @@ export default function OdometerApprovals() {
       if (search) p.driver_name = search;
       
       if (dateFilter === "today") {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
         p.from_date = today;
         p.to_date = today;
       } else if (dateFilter === "this_week") {
-        const today = new Date();
-        const firstDay = new Date(today.setDate(today.getDate() - today.getDay()));
-        const lastDay = new Date(today.setDate(today.getDate() - today.getDay() + 6));
-        p.from_date = firstDay.toISOString().split('T')[0];
-        p.to_date = lastDay.toISOString().split('T')[0];
+        // Week = Sunday to Saturday, based on today's date in IST
+        const [y, m, d] = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).split("-").map(Number);
+        const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        const firstDay = new Date(Date.UTC(y, m - 1, d - dow));
+        const lastDay = new Date(Date.UTC(y, m - 1, d - dow + 6));
+        p.from_date = firstDay.toISOString().split("T")[0];
+        p.to_date = lastDay.toISOString().split("T")[0];
       } else if (dateFilter === "this_month") {
-        const today = new Date();
-        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-        p.from_date = firstDay.toISOString().split('T')[0];
-        p.to_date = lastDay.toISOString().split('T')[0];
+        const [y, m] = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).split("-").map(Number);
+        p.from_date = new Date(Date.UTC(y, m - 1, 1)).toISOString().split("T")[0];
+        p.to_date = new Date(Date.UTC(y, m, 0)).toISOString().split("T")[0];
       } else if (dateFilter === "custom") {
         if (fromDate) p.from_date = fromDate;
         if (toDate) p.to_date = toDate;
@@ -152,11 +153,12 @@ export default function OdometerApprovals() {
                 const extraKm = log.extra_km || 0;
                 const extraCharge = log.extra_km_charge || 0;
                 const overDaily = extraKm > 0;
+                const dailyLimit = log.daily_limit_km || 0;
 
                 return (
                   <tr key={log._id} className="hover:bg-slate-50 transition-colors">
                     {/* Driver */}
-                    <td className="px-3 py-4 font-bold text-slate-900 whitespace-nowrap">{log.driver_name}</td>
+                    <td className="px-3 py-4 font-bold text-slate-900 whitespace-nowrap">{log.driver_name}<div><DriverCode id={log.driver_id} /></div></td>
                     
                     {/* Date */}
                     <td className="px-3 py-4 text-slate-500 whitespace-nowrap">{log.date}</td>

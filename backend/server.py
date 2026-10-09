@@ -712,8 +712,9 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
             {"name": {"$regex": q, "$options": "i"}},
             {"phone": {"$regex": q, "$options": "i"}},
             {"current_vehicle_number": {"$regex": q, "$options": "i"}},
+            {"driver_code": {"$regex": q, "$options": "i"}},
         ]
-    docs = await db.drivers.find(filt).sort("name", 1).to_list(1000)
+    docs = await db.drivers.find(filt).sort("name", 1).to_list(None)
     for d in docs:
         cv_id = d.get("current_vehicle_id")
         if cv_id:
@@ -802,6 +803,13 @@ async def delete_driver(did: str, request: Request, force: bool = False):
     await log_audit(user, "driver_deleted", "driver", did, f"Driver {drv.get('name')} and all associated data completely deleted")
     return {"ok": True}
 
+    async def _next_driver_code():
+        c = await db.counters.find_one_and_update(
+        {"_id": "driver_code"}, {"$inc": {"seq": 1}},
+        upsert=True, return_document=True
+    )
+    return f"R39D{c['seq']:05d}"
+
 
 @api.post("/drivers")
 async def create_driver(body: DriverBody, request: Request):
@@ -817,6 +825,7 @@ async def create_driver(body: DriverBody, request: Request):
     if await db.drivers.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="Mobile number already exists")
     doc["phone"] = phone
+    doc["driver_code"] = await _next_driver_code()
     res = await db.drivers.insert_one(doc)
     await log_audit(user, "driver_created", "driver", str(res.inserted_id), f"Driver {body.name} added")
     return ser(await db.drivers.find_one({"_id": res.inserted_id}))
@@ -853,6 +862,179 @@ async def unblock_driver(did: str, request: Request):
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Rental account not found")
     await log_audit(user, "driver_unblocked", "driver", did, "Driver manually unblocked for 24h grace period")
+    return {"ok": True}
+
+# ===== ADMIN BLOCK =====
+@api.post("/drivers/{did}/admin-block")
+async def admin_block_driver(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    body = await request.json()
+    btype = body.get("type")
+    reason = (body.get("reason") or "").strip()
+    if btype not in ("temporary", "permanent"):
+        raise HTTPException(status_code=400, detail="Invalid block type")
+    if not reason:
+        raise HTTPException(status_code=400, detail="Reason is required")
+    res = await db.drivers.update_one(
+        org_filter(user, {"_id": oid(did)}),
+        {"$set": {"admin_block": btype, "admin_block_reason": reason, "admin_blocked_at": datetime.now().isoformat()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    await log_audit(user, "driver_admin_blocked", "driver", did, f"Driver {btype} blocked: {reason}")
+    return {"ok": True}
+
+
+@api.post("/drivers/{did}/admin-unblock")
+async def admin_unblock_driver(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    res = await db.drivers.update_one(
+        org_filter(user, {"_id": oid(did)}),
+        {"$unset": {"admin_block": "", "admin_block_reason": "", "admin_blocked_at": ""}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    await log_audit(user, "driver_admin_unblocked", "driver", did, "Driver unblocked by admin")
+    return {"ok": True}
+
+
+# ===== REFERRALS =====
+REFERRAL_MILESTONES = [(30, 1000), (60, 1500)]  # (days driven, reward)
+
+
+async def _referral_progress(did):
+    total = sum(a for _, a in REFERRAL_MILESTONES)
+    res = {"rental_start": None, "days_driven": 0, "reward_earned": 0, "reward_pending": total}
+    if not did:
+        return res
+    first = await db.rentals.find({"driver_id": did}).sort("start", 1).to_list(1)
+    if not first:
+        return res
+    start = str(first[0].get("start") or first[0].get("start_date") or "")[:10]
+    res["rental_start"] = start
+    # A "driven day" = any day the driver submitted an odometer log (not required to be continuous)
+    dates = await db.driver_odometer_logs.distinct("date", {"driver_id": did, "date": {"$gte": start}})
+    days = len(dates)
+    earned = sum(a for d, a in REFERRAL_MILESTONES if days >= d)
+    res.update(days_driven=days, reward_earned=earned, reward_pending=total - earned)
+    return res
+
+
+@api.get("/referrals")
+async def list_referrals(request: Request, referrer_id: str = None):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
+    q = {"referrer_driver_id": referrer_id} if referrer_id else {}
+    items = await db.referrals.find(org_filter(user, q)).sort("referred_at", -1).to_list(None)
+    out = []
+    for i in items:
+        r = ser(i)
+        r.update(await _referral_progress(i.get("referred_driver_id")))
+        out.append(r)
+    return out
+
+
+@api.post("/referrals")
+async def create_referral(request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    b = await request.json()
+    if not b.get("referrer_driver_id") or not (b.get("referred_name") or "").strip():
+        raise HTTPException(status_code=400, detail="Referrer and referred driver name required")
+    ref = await db.drivers.find_one({"_id": oid(b["referrer_driver_id"])})
+    if not ref:
+        raise HTTPException(status_code=404, detail="Referrer driver not found")
+    phone = re.sub(r"\s+", "", b.get("referred_phone") or "")
+    if not phone:
+        raise HTTPException(status_code=400, detail="Referred driver phone is required")
+    if phone == ref.get("phone"):
+        raise HTTPException(status_code=400, detail="Driver cannot refer themselves")
+    existing_ref = await db.referrals.find_one({"referred_phone": phone})
+    if existing_ref:
+        raise HTTPException(status_code=400, detail=f"Already referred by {existing_ref.get('referrer_name')} ({existing_ref.get('referrer_code') or '-'}) on {existing_ref.get('referred_at')}")
+    new_drv = await db.drivers.find_one({"phone": phone})
+    if not new_drv:
+        nd = {
+            "name": b["referred_name"].strip(), "phone": phone,
+            "city": ref.get("city"), "status": "active",
+            "organization_id": user.get("organization_id") or ref.get("organization_id"),
+            "driver_code": await _next_driver_code(),
+            "referred_by_id": b["referrer_driver_id"],
+            "referred_by_code": ref.get("driver_code"),
+            "created_at": now_iso(),
+        }
+        r2 = await db.drivers.insert_one(nd)
+        new_drv = {**nd, "_id": r2.inserted_id}
+        await log_audit(user, "driver_created", "driver", str(r2.inserted_id), f"Driver {nd['name']} added via referral")
+    doc = {
+        "organization_id": user.get("organization_id"),
+        "referrer_driver_id": b["referrer_driver_id"],
+                "referrer_name": ref.get("name"),
+        "referrer_code": ref.get("driver_code"),
+        "referred_name": b["referred_name"].strip(),
+        "referred_phone": phone,
+        "referred_driver_id": str(new_drv["_id"]),
+        "referred_code": new_drv.get("driver_code"),
+        "referred_at": b.get("referred_at") or _today_ist().isoformat(),
+        "joined_at": b.get("joined_at") or None,
+        "created_at": datetime.now().isoformat(),
+    }
+    res = await db.referrals.insert_one(doc)
+    await log_audit(user, "referral_added", "driver", b["referrer_driver_id"], f"Referred {doc['referred_name']}")
+    return ser(await db.referrals.find_one({"_id": res.inserted_id}))
+
+
+@api.put("/referrals/{rid}")
+async def update_referral(rid: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    b = await request.json()
+    upd = {k: b[k] for k in ("referred_name", "referred_phone", "referred_at", "joined_at") if k in b}
+    await db.referrals.update_one(org_filter(user, {"_id": oid(rid)}), {"$set": upd})
+    return ser(await db.referrals.find_one({"_id": oid(rid)}))
+
+
+@api.delete("/referrals/{rid}")
+async def delete_referral(rid: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    await db.referrals.delete_one(org_filter(user, {"_id": oid(rid)}))
+    return {"ok": True}
+
+@api.post("/drivers/{did}/admin-block")
+async def admin_block_driver(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    body = await request.json()
+    btype = body.get("type")
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Reason is required")
+    if btype not in ("temporary", "permanent"):
+        raise HTTPException(status_code=400, detail="Invalid block type")
+    res = await db.drivers.update_one(
+        org_filter(user, {"_id": oid(did)}),
+        {"$set": {"admin_block": btype, "admin_block_reason": reason, "admin_blocked_at": datetime.now().isoformat()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    await log_audit(user, "driver_admin_blocked", "driver", did, f"Driver {btype} blocked by admin")
+    return {"ok": True}
+
+
+@api.post("/drivers/{did}/admin-unblock")
+async def admin_unblock_driver(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    res = await db.drivers.update_one(
+        org_filter(user, {"_id": oid(did)}),
+        {"$unset": {"admin_block": "", "admin_block_reason": "", "admin_blocked_at": ""}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    await log_audit(user, "driver_admin_unblocked", "driver", did, "Driver unblocked by admin")
     return {"ok": True}
 
 
@@ -921,12 +1103,17 @@ async def update_plan(pid: str, body: dict, request: Request):
     old_plan = await db.rental_plans.find_one(org_filter(user, {"_id": oid(pid)}))
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
     
-    # Sync new amount only to drivers NOT currently on an active trip AND who do NOT have unpaid dues
+# Sync new amount to every driver NOT currently on an active trip. Owing rent for
+    # a trip that hasn't started yet does NOT protect a driver from a rate change —
+    # only a trip actually in progress does (its snapshot must stay frozen). See the
+    # rent_due reprice loop below for how a pending, unpaid "next trip" rent charge
+    # gets updated to the new rate.
     plan = await db.rental_plans.find_one({"_id": oid(pid)})
     if plan and "amount" in body:
         new_rate = float(body["amount"])
         
-        # 1. Find drivers currently mid-trip (active_trip_id set)
+        # Find drivers currently mid-trip (active_trip_id set) — these are the ONLY
+        # drivers excluded from the sync.
         locked_user_ids = set()
         async for u in db.users.find({"organization_id": user.get("organization_id"), "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
             locked_user_ids.add(str(u["_id"]))
@@ -934,8 +1121,8 @@ async def update_plan(pid: str, body: dict, request: Request):
             locked_user_ids.add(str(d["_id"]))
             
         # 2. Find drivers with unpaid dues (outstanding_amount > 0)
-        async for acct in db.rental_accounts.find({"organization_id": user.get("organization_id"), "outstanding_amount": {"$gt": 0}}):
-            locked_user_ids.add(str(acct["driver_id"]))
+        # async for acct in db.rental_accounts.find({"organization_id": user.get("organization_id"), "outstanding_amount": {"$gt": 0}}):
+        #     locked_user_ids.add(str(acct["driver_id"]))
         
         # Rentals still carry the OLD package name/city until they are synced, so match on those
         old_name = (old_plan or {}).get("name") or plan["name"]
@@ -971,6 +1158,34 @@ async def update_plan(pid: str, body: dict, request: Request):
         if drivers_to_update:
             # Update rental_accounts
             acct_filter = {"organization_id": user.get("organization_id"), "driver_id": {"$in": drivers_to_update}}
+                        # Unpaid rent is kept per day. Before the new rate applies: (1) close out
+            # every unpaid day up to YESTERDAY at the OLD rate so it is frozen, and
+            # (2) move only TODAY's charge to the new rate. Extra-km is never touched.
+            today_ist = _today_ist()
+            today_iso = today_ist.isoformat()
+            yday = today_ist - timedelta(days=1)
+            async for a in db.rental_accounts.find(acct_filter):
+                rent_due = float(a.get("rent_due", 0) or 0)
+                if rent_due <= 0:
+                    continue
+                old_rate = float(a.get("daily_rate", 0) or 0)
+                rbd = {k: float(v) for k, v in (a.get("rent_by_date") or {}).items()}
+                if not rbd:  # legacy account
+                    rbd = {(max(a["unpaid_dates"]) if a.get("unpaid_dates") else today_iso): rent_due}
+                d_ = date.fromisoformat(max(rbd)) + timedelta(days=1)
+                while d_ <= yday and old_rate > 0:
+                    rbd.setdefault(d_.isoformat(), old_rate)
+                    d_ += timedelta(days=1)
+                if today_iso in rbd:
+                    rbd[today_iso] = new_rate
+                new_total = round(sum(rbd.values()), 2)
+                delta = round(new_total - rent_due, 2)
+                await db.rental_accounts.update_one(
+                    {"_id": a["_id"]},
+                    {"$set": {"rent_by_date": rbd, "rent_due": new_total},
+                     "$inc": {"outstanding_amount": delta},
+                     "$addToSet": {"unpaid_dates": {"$each": list(rbd.keys())}}}
+                )
             await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
             # Update users (for package_rate in driver app)
             for d_id in drivers_to_update:
@@ -1063,14 +1278,14 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             for i in range(min(delta.days + 1, 31)): # Cap at 31 days to prevent massive payloads
                 dates_to_check.append(start_dt + timedelta(days=i))
         except:
-            dates_to_check.append(datetime.now(timezone.utc).date())
+            dates_to_check.append(_today_ist())
     elif from_date:
         try:
             dates_to_check.append(datetime.strptime(from_date, "%Y-%m-%d").date())
         except:
-            dates_to_check.append(datetime.now(timezone.utc).date())
+            dates_to_check.append(_today_ist())
     else:
-        dates_to_check.append(datetime.now(timezone.utc).date())
+        dates_to_check.append(_today_ist())
     
     out = []
     for r in rentals:
@@ -1082,17 +1297,39 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             deposit_paid = deposit if sec_dep.get("status") == "paid" else 0
             deposit_status = sec_dep.get("status", "pending")
             deposit_txn_id = sec_dep.get("transaction_id", "")
+            # paid_at is stored as a UTC ISO string; the first 10 chars are the same
+            # UTC date format the rows use for `date`
+            deposit_paid_date = (sec_dep.get("paid_at") or "")[:10] if sec_dep.get("status") == "paid" else ""
         else:
             deposit = r.get("deposit", 5000)
             deposit_paid = 0
             deposit_status = "pending"
             deposit_txn_id = ""
+            deposit_paid_date = ""
         
         drv_doc = await db.drivers.find_one({"_id": ObjectId(r["driver_id"])}) if r.get("driver_id") else None
         driver_avatar = drv_doc.get("avatar") if drv_doc else None
         
-        acct = await db.rental_accounts.find_one({"driver_id": r["driver_id"]})
+        acct = await _rental_account(r)
         outstanding_amount = float(acct["outstanding_amount"]) if acct else 0
+        rbd_map = (acct or {}).get("rent_by_date") or {}
+
+        # Each started trip remembers the payment that paid for it (snapshot_rent_txn_id).
+        # Use that instead of guessing by date. If two trips point at the same payment
+        # (stale value after an "outstanding" payment), the earliest trip owns it.
+        claim_owner = {}
+        async for cl in db.driver_odometer_logs.find(
+            {"driver_id": r["driver_id"], "snapshot_rent_txn_id": {"$nin": [None, ""]}}
+        ).sort("created_at", 1):
+            claim_owner.setdefault(cl["snapshot_rent_txn_id"], str(cl["_id"]))
+        claimed_pay = {}
+        if claim_owner:
+            async for cp in db.rental_payments.find({
+                "driver_id": r["driver_id"], "payment_status": "paid",
+                "transaction_id": {"$in": list(claim_owner.keys())}
+            }):
+                claimed_pay[cp["transaction_id"]] = cp
+        
         
         vehicle_reg_number = None
         if r.get("vehicle_id"):
@@ -1114,6 +1351,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     {"covers_dates": {"$size": 0}, "created_at": {"$gte": d_start.isoformat(), "$lte": d_end.isoformat()}}
                 ]
             }).to_list(100)
+                        # Payments already claimed by a started trip are shown on that trip's row only.
+            day_payments = [p for p in day_payments if p.get("transaction_id") not in claim_owner]
             
             # Security-deposit payments are stored in the same collection but must NOT count
             # towards daily rent / extra-KM settlement (or supply its transaction id).
@@ -1125,21 +1364,90 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             ]
             
             today_paid = sum(p.get("amount", 0) for p in valid_payments)
+                        # Rent and extra-KM are billed and paid as two separate charges, so also
+            # split the day's payments by kind for the "Daily Rent" / "Extra KM Charges"
+            # columns: "daily" pays rent only, "extra_km" pays extra-km only. A legacy
+            # "outstanding" payment (from before the two were split) covered both at
+            # once, so for display purposes it's counted toward rent first.
+            rent_payments = [
+                p for p in day_payments
+                if p.get("payment_status") == "paid" and p.get("type") != "refund"
+                and p.get("kind") in ("daily", "outstanding", "catchup")
+            ]
+            extra_km_payments = [
+                p for p in day_payments
+                if p.get("payment_status") == "paid" and p.get("type") != "refund"
+                and p.get("kind") in ("extra_km", "catchup")
+            ]
             
             odo_logs = await db.driver_odometer_logs.find({
                 "driver_id": r["driver_id"],
                 "date": d_str
             }).to_list(100)
-            
+
+            is_today = (d == _today_ist())
+            # Key the pending-rent injection off the date the charge actually belongs
+            # to (the day the previous trip ended, which is what a later payment's
+            # covers_dates will also be) — NOT off "today". Using "today" here meant
+            # a driver who delayed paying by even a day would have the pending row
+            # keep drifting onto a fresh date each day, so a payment finally made
+            # (with covers_dates fixed to the original charge date) would never
+            # match it and the row would show "NOT PAID" forever, even after payment.
+            pending_rent_here = d_str in rbd_map and (acct or {}).get("rent_due", 0) > 0
+            # Rent that has ALREADY been paid for the next trip (but that trip hasn't
+            # started yet) is removed from unpaid_dates the instant it's paid, so
+            # pending_rent_here alone goes blind to it the moment payment clears.
+            # pending_rent_covers_dates remembers exactly which date that payment
+            # was for — set when the payment clears, unset only once the trip it
+            # paid for actually starts — so the row keeps showing PAID on the
+            # correct date instead of disappearing right after payment.
+            pending_rent_paid_here = (
+                (acct or {}).get("pending_rent_paid")
+                and d_str in (acct or {}).get("pending_rent_covers_dates", [])
+            )
             if not odo_logs:
                 odo_logs = [None]
+            elif pending_rent_here or pending_rent_paid_here:
+                # A trip already happened on this date AND rent is now due (or has
+                # just been paid) for the NEXT trip (charged the moment that trip
+                # ended). Give it its own row instead of folding it into the
+                # already-completed trip's row — every trip (started, paid-but-not-
+                # yet-started, or still unpaid) gets its own row.
+                odo_logs = list(odo_logs) + [None]
                 
             for idx, odo_log in enumerate(odo_logs):
+                                # This trip's own rent payment (independent of covers_dates).
+                if odo_log:
+                    _txn = odo_log.get("snapshot_rent_txn_id")
+                    _own = claimed_pay.get(_txn) if _txn else None
+                    if _own and claim_owner.get(_txn) == str(odo_log["_id"]):
+                        valid_payments.insert(0, _own)
+                        rent_payments.insert(0, _own)
+                        today_paid += float(_own.get("amount", 0) or 0)
                 base_daily_rate = float(r.get("daily_rate", 0))
                 if odo_log and "snapshot_daily_rent" in odo_log:
+                    # Trip already started: the rate frozen onto it at START is
+                    # authoritative for its rent, forever — an admin rate change
+                    # afterward must never alter it.
                     base_daily_rate = float(odo_log["snapshot_daily_rent"])
+                elif not odo_log and rent_payments:
+                    # Rent already PAID for this day: use this day's own amount
+                    # (a multi-day payment stores the split in covers_amounts).
+                    _p0 = rent_payments[0]
+                    base_daily_rate = float((_p0.get("covers_amounts") or {}).get(d_str, _p0.get("amount", 0)) or 0)
+                elif not odo_log and pending_rent_here:
+                    # Rent charged for THIS day but not yet paid — frozen at the
+                    # rate that applied on this day.
+                    base_daily_rate = float(rbd_map.get(d_str, 0))
+                else:
+                    # Nothing charged yet — show today's live rate for reference only.
+                    base_daily_rate = float(r.get("daily_rate", 0))
                 
                 daily_rate = base_daily_rate
+                # Rent is paid once per day: 2nd+ trips on the same date carry no rent of their own.
+                second_trip_same_day = bool(odo_log) and idx > 0
+                if second_trip_same_day:
+                    daily_rate = 0.0
                 
                 # Extract extra KM data from the odometer log snapshot
                 extra_km = odo_log.get("extra_km", 0) if odo_log else 0
@@ -1152,23 +1460,59 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 today_paid = max(0, today_paid - row_paid)
                 daily_status = "paid" if row_paid >= total_charge else ("partial" if row_paid > 0 else "pending")
                 
-                # Assign exact transaction ID for this row
+                # Assign exact transaction ID(s) for this row. A day can now be
+                # settled by two separate payments (daily rent + extra KM), so
+                # consume as many payments as needed to cover this row's charge
+                # and combine their transaction ids.
                 row_txn_id = None
                 row_pay_method = None
                 row_paid_on = None
-                if row_paid > 0 and valid_payments:
+                consumed_txns = []
+                remaining_for_row = row_paid
+                while remaining_for_row > 0.005 and valid_payments:
                     p = valid_payments.pop(0)
-                    row_txn_id = p.get("transaction_id")
-                    row_pay_method = p.get("payment_method")
+                    consumed_txns.append(p.get("transaction_id"))
+                    row_pay_method = row_pay_method or p.get("payment_method")
                     created = p.get("created_at")
-                    if created:
+                    if created and not row_paid_on:
                         row_paid_on = created.split("T")[0]
+                    remaining_for_row -= p.get("amount", 0)
+                if consumed_txns:
+                    row_txn_id = ", ".join([t for t in consumed_txns if t])
+                
+                # Consume rent payments for this row until the daily rate is covered.
+                rent_paid_amt = 0.0
+                rent_txn_id = None
+                remaining_rent = daily_rate
+                consumed_rent_txns = []
+                while remaining_rent > 0.005 and rent_payments:
+                    p = rent_payments.pop(0)
+                    consumed_rent_txns.append(p.get("transaction_id"))
+                    rent_paid_amt += p.get("amount", 0)
+                    remaining_rent -= p.get("amount", 0)
+                if consumed_rent_txns:
+                    rent_txn_id = ", ".join([t for t in consumed_rent_txns if t])
+                rent_status = "paid" if daily_rate > 0 and rent_paid_amt >= daily_rate - 0.01 else ("paid" if second_trip_same_day else "not_paid")
+                
+                # Consume extra-KM payments for this row until the extra-km charge is covered.
+                extra_km_paid_amt = 0.0
+                extra_km_txn_id = None
+                remaining_extra = extra_km_charge
+                consumed_extra_txns = []
+                while remaining_extra > 0.005 and extra_km_payments:
+                    p = extra_km_payments.pop(0)
+                    consumed_extra_txns.append(p.get("transaction_id"))
+                    extra_km_paid_amt += p.get("amount", 0)
+                    remaining_extra -= p.get("amount", 0)
+                if consumed_extra_txns:
+                    extra_km_txn_id = ", ".join([t for t in consumed_extra_txns if t])
+                extra_km_status = "paid" if extra_km_charge > 0 and extra_km_paid_amt >= extra_km_charge - 0.01 else "not_paid"
                 
                 start_meter = odo_log.get("start_reading", 0) if odo_log else 0
                 end_meter = odo_log.get("end_reading", 0) if odo_log else 0
                 total_km = odo_log.get("driven_today", 0) if odo_log else 0
                 
-                if d == datetime.now(timezone.utc).date() or odo_log or row_paid > 0 or d_str in (acct or {}).get("unpaid_dates", []):
+                if d == _today_ist() or odo_log or row_paid > 0 or pending_rent_here or d_str in (acct or {}).get("unpaid_dates", []):
                     out.append({
                         "id": f"{rid}_{d_str}_{idx}",
                         "driver_name": r.get("driver_name", "Unknown"),
@@ -1183,15 +1527,23 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "overage_per_km": overage_per_km,
                         "total_charge": total_charge,
                         "today_paid": row_paid,
-                        "outstanding_amount": outstanding_amount if (d == datetime.now(timezone.utc).date() and idx == 0) else max(0, total_charge - row_paid),
+                        "outstanding_amount": outstanding_amount if (d == _today_ist() and idx == 0) else max(0, total_charge - row_paid),
                         "daily_status": daily_status,
                         "paid_on": row_paid_on,
                         "payment_method": row_pay_method,
                         "transaction_id": row_txn_id,
+                        "rent_status": rent_status,
+                        "rent_amount": daily_rate,
+                        "rent_transaction_id": rent_txn_id,
+                        "extra_km_status": extra_km_status,
+                        "extra_km_amount": extra_km_charge,
+                        "extra_km_transaction_id": extra_km_txn_id,
                         "deposit": deposit,
                         "deposit_paid": deposit_paid,
                         "deposit_status": deposit_status,
                         "deposit_transaction_id": deposit_txn_id,
+                        "deposit_paid_date": deposit_paid_date,
+                        "driver_id": r.get("driver_id"),
                         "start_meter": start_meter if start_meter else None,
                         "end_meter": end_meter if end_meter else None,
                         "total_km": total_km if total_km else None,
@@ -1292,10 +1644,25 @@ async def add_payment(rid: str, body: dict, request: Request):
     await db.rentals.update_one({"_id": oid(rid)}, {"$set": update})
     
     if payment["type"] != "refund":
+        acct_doc = await db.rental_accounts.find_one({"organization_id": user.get("organization_id"), "driver_id": r["driver_id"]})
+        # Manual/cash payments don't specify whether they're for rent or extra-km,
+        # so settle extra-km first (it must clear before rent in the pay-before-trip
+        # flow), then whatever's left goes toward rent — keeping both balances
+        # consistent with the split payment flow in the driver app.
+        remaining = amount
+        extra_km_due = float((acct_doc or {}).get("extra_km_due", 0) or 0)
+        rent_due = float((acct_doc or {}).get("rent_due", 0) or 0)
+        extra_km_reduction = min(remaining, extra_km_due)
+        remaining -= extra_km_reduction
+        rent_reduction = min(remaining, rent_due)
         await db.rental_accounts.update_one(
             {"organization_id": user.get("organization_id"), "driver_id": r["driver_id"]},
             {
-                "$inc": {"outstanding_amount": -amount},
+                "$inc": {
+                    "outstanding_amount": -amount,
+                    "extra_km_due": -extra_km_reduction,
+                    "rent_due": -rent_reduction,
+                },
                 "$pullAll": {"unpaid_dates": body.get("covers_dates", [])}
             }
         )
@@ -2053,7 +2420,7 @@ async def order_dashboard(request: Request):
     for st in ORDER_STAGES:
         kpis[st] = sum(1 for o in orders if o.get("status") == st)
     kpis["overdue"] = sum(1 for o in orders if order_due_status(o) == "overdue")
-    today = datetime.now(timezone.utc).date()
+    today = _today_ist()
     todays = []
     due_soon = []
     recent_completed = []
@@ -2224,6 +2591,20 @@ rzp_client = razorpay.Client(auth=(RZP_KEY, RZP_SECRET)) if (RZP_KEY and RZP_SEC
 
 def _today_ist():
     return datetime.now(IST).date()
+def _trim_rent_by_date(rbd, target):
+    """Drop rent from the OLDEST days until the per-day total equals `target`.
+    Used when rent_due is lowered by a manual/partial payment."""
+    rbd = {k: float(v) for k, v in (rbd or {}).items()}
+    excess = round(sum(rbd.values()) - float(target), 2)
+    for d in sorted(rbd):
+        if excess <= 0.005:
+            break
+        cut = min(rbd[d], excess)
+        rbd[d] = round(rbd[d] - cut, 2)
+        excess = round(excess - cut, 2)
+        if rbd[d] <= 0.005:
+            del rbd[d]
+    return rbd
 
 
 
@@ -2275,6 +2656,26 @@ async def _get_package_snapshot(org, did):
     }
 
 
+async def _catchup_overage(org, did, rental, baseline_reading, reading):
+    """Extra-KM overage for a catch-up reading vs. the last known reading. There's
+    no active trip to freeze a snapshot from, so this uses the driver's CURRENT
+    live package — same as starting a fresh trip would."""
+    if reading < baseline_reading:
+        raise HTTPException(400, f"Current KM ({reading}) cannot be less than your last recorded reading ({baseline_reading}).")
+    diff_km = reading - baseline_reading
+    snap = await _get_package_snapshot(org, did)
+    monthly_limit = snap["monthly_km_limit"] if snap else 0
+    overage_per_km = snap["overage_per_km"] if snap else 0.0
+    drv = await db.drivers.find_one({"_id": ObjectId(did)})
+    current_month_str = _today_ist().strftime("%Y-%m")
+    current_month_kms = (drv or {}).get("current_month_kms", 0) or 0
+    if (drv or {}).get("current_month") != current_month_str:
+        current_month_kms = 0
+    overage_km = max(0, (current_month_kms + diff_km) - monthly_limit) - max(0, current_month_kms - monthly_limit)
+    overage_charge = round(overage_km * overage_per_km, 2)
+    return diff_km, overage_km, overage_charge
+
+
 async def _rental_account(rental):
     """Fetch a driver's rental account server-side. Single source of truth for post-paid odometer billing."""
     org = rental["organization_id"]
@@ -2287,17 +2688,262 @@ async def _rental_account(rental):
     outstanding = existing.get("outstanding_amount", 0) if existing else 0
     unpaid = existing.get("unpaid_dates", []) if existing else []
     
-    overdue = len(unpaid)
+    rent_due = existing.get("rent_due", 0) if existing else 0
+    extra_km_due = existing.get("extra_km_due", 0) if existing else 0
+    # Legacy fallback: accounts that accrued dues before rent/extra-km were tracked
+    # separately only have the combined outstanding_amount. Treat the whole balance
+    # as rent due in that case so the pay-before-trip gate still works correctly.
+    if rent_due <= 0 and extra_km_due <= 0 and outstanding > 0:
+        rent_due = outstanding
+    
+    # ─── PER-DAY RENT LEDGER (rent_by_date) ─────────────────────────────────
+    # Every unpaid day of rent is stored with the amount that applied ON THAT DAY,
+    # so a later package edit can never change a past day. rent_due == sum of it.
+    today_iso = today.isoformat()
+    rent_by_date = {k: float(v) for k, v in ((existing or {}).get("rent_by_date") or {}).items()}
+    rbd_changed = False
+
+    # Self-heal: rent can never exist for a day that hasn't started. Drop any
+    # future-dated rent and take the same amount off rent_due / outstanding.
+    # Covers leftovers from clock changes or timezone slips.
+    _future = [k for k in rent_by_date if k > today_iso]
+    _future_unpaid = [k for k in unpaid if k > today_iso]
+    if _future or _future_unpaid:
+        _removed = round(sum(rent_by_date.pop(k) for k in _future), 2)
+        rent_due = max(0.0, round(float(rent_due) - _removed, 2))
+        outstanding = max(0.0, round(float(outstanding) - _removed, 2))
+        unpaid = [k for k in unpaid if k <= today_iso]
+        _upd = {"$pull": {"unpaid_dates": {"$in": list(set(_future + _future_unpaid))}}}
+        if _future:
+            _upd["$unset"] = {f"rent_by_date.{k}": "" for k in _future}
+            _upd["$inc"] = {"outstanding_amount": -_removed, "rent_due": -_removed}
+        await db.rental_accounts.update_one({"organization_id": org, "driver_id": did}, _upd)
+    # If the "rent charged through" marker is ahead of today (clock moved back), pull it back.
+    if existing and (existing.get("rent_charged_through") or "") > today_iso:
+        await db.rental_accounts.update_one(
+            {"organization_id": org, "driver_id": did},
+            {"$set": {"rent_charged_through": today_iso}}
+        )
+
+    # Legacy accounts: rent is owed but was never broken down per day.
+    if rent_due > 0 and not rent_by_date:
+        rent_by_date = {(max(unpaid) if unpaid else today_iso): round(float(rent_due), 2)}
+        rbd_changed = True
+
+    # Manual/partial payments lower rent_due: remove the same amount from the OLDEST days.
+    if rent_by_date and round(sum(rent_by_date.values()), 2) > round(float(rent_due), 2) + 0.01:
+        rent_by_date = _trim_rent_by_date(rent_by_date, float(rent_due))
+        rbd_changed = True
+
+    # Driver owes rent and is NOT mid-trip: (a) today's charge follows the live plan
+    # rate, (b) every day since the last recorded one is added at the rate that was
+    # in force, so unpaid days pile up until the driver pays them all.
+    # ─── DAILY RENT ACCRUAL ─────────────────────────────────────────────────
+    # One rent per calendar day (IST). `rent_charged_through` = last day already
+    # charged. Each new day adds that day's rent (today at the live plan rate,
+    # skipped days at the rate in force). Nothing is ever charged for a future day.
+    if existing:
+        marker = existing.get("rent_charged_through")
+        if not marker:
+            dep_doc = await db.security_deposits.find_one({"organization_id": org, "driver_id": did})
+            deposit_ok = (not dep_doc) or dep_doc.get("status") == "paid" or (dep_doc.get("amount", 0) or 0) <= 0
+            if deposit_ok:
+                marker = (today - timedelta(days=1)).isoformat()
+            if rent_by_date:
+                marker = max([marker or ""] + list(rent_by_date.keys())) or None
+        need_accrue = bool(marker) and marker < today_iso
+        if need_accrue or rent_by_date:
+            drv_doc = await db.drivers.find_one({"_id": ObjectId(did)})
+            mid_trip = bool(drv_doc and drv_doc.get("active_trip_id"))
+            live_plan = None
+            if rental.get("plan_id"):
+                live_plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+            elif rental.get("package_name"):
+                live_plan = await db.rental_plans.find_one({
+                    "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                    "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                    "organization_id": org
+                })
+            live_rate = float(live_plan["amount"]) if live_plan and live_plan.get("amount") else float(rate or 0)
+            past_rate = float(rate or 0) or live_rate
+            today_rate = past_rate if mid_trip else live_rate   # mid-trip: rate stays frozen
+            if need_accrue:
+                d_, guard = date.fromisoformat(marker) + timedelta(days=1), 0
+                while d_ <= today and guard < 90:
+                    k = d_.isoformat()
+                    amt = today_rate if d_ == today else past_rate
+                    if amt > 0 and k not in rent_by_date:
+                        rent_by_date[k] = amt
+                        rbd_changed = True
+                    d_ += timedelta(days=1)
+                    guard += 1
+                await db.rental_accounts.update_one(
+                    {"organization_id": org, "driver_id": did},
+                    {"$set": {"rent_charged_through": today_iso}}
+                )
+            # An unpaid entry for today follows the live plan rate (past days stay frozen).
+            if not mid_trip and today_iso in rent_by_date and live_rate > 0 and abs(rent_by_date[today_iso] - live_rate) > 0.005:
+                rent_by_date[today_iso] = live_rate
+                rbd_changed = True
+            if not mid_trip and live_rate > 0 and round(live_rate, 2) != round(float(rate or 0), 2):
+                rate = live_rate
+                await db.rentals.update_one({"_id": rental["_id"]}, {"$set": {"daily_rate": live_rate}})
+
+    if False:  # disabled: replaced by the daily accrual above (safe to delete this block)
+        driver_doc = await db.drivers.find_one({"_id": ObjectId(did)})
+        if driver_doc and not driver_doc.get("active_trip_id"):
+            live_plan = None
+            if rental.get("plan_id"):
+                live_plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+            elif rental.get("package_name"):
+                live_plan = await db.rental_plans.find_one({
+                    "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                    "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                    "organization_id": org
+                })
+            live_rate = float(live_plan["amount"]) if live_plan and live_plan.get("amount") else float(rate or 0)
+            gap_rate = float(rate or 0) or live_rate   # cached rate = rate in force for skipped days
+
+            if today_iso in rent_by_date and live_rate > 0 and abs(rent_by_date[today_iso] - live_rate) > 0.005:
+                rent_by_date[today_iso] = live_rate
+                rbd_changed = True
+
+            d_ = date.fromisoformat(max(rent_by_date)) + timedelta(days=1)
+            guard = 0
+            while d_ <= today and guard < 90:
+                amt = live_rate if d_ == today else gap_rate
+                if amt > 0:
+                    rent_by_date[d_.isoformat()] = amt
+                    rbd_changed = True
+                d_ += timedelta(days=1)
+                guard += 1
+
+            if live_rate > 0 and round(live_rate, 2) != round(float(rate or 0), 2):
+                rate = live_rate
+                await db.rentals.update_one({"_id": rental["_id"]}, {"$set": {"daily_rate": live_rate}})
+
+    if existing and (rbd_changed or any(d not in unpaid for d in rent_by_date)):
+        new_total = round(sum(rent_by_date.values()), 2)
+        delta = round(new_total - float(rent_due), 2)
+        upd = {"$set": {"rent_by_date": rent_by_date, "rent_due": new_total}}
+        if delta:
+            upd["$inc"] = {"outstanding_amount": delta}
+        if rent_by_date:
+            upd["$addToSet"] = {"unpaid_dates": {"$each": list(rent_by_date.keys())}}
+        await db.rental_accounts.update_one({"organization_id": org, "driver_id": did}, upd)
+        outstanding = max(0.0, round(outstanding + delta, 2))
+        rent_due = new_total
+        unpaid = sorted(set(unpaid) | set(rent_by_date))
+    
+    # ─── PAID-BUT-IDLE DAYS ─────────────────────────────────────────────────
+    # Rent was already paid for the next trip, but no trip has started. Every new
+    # calendar day needs its own rent before a trip can start. A payment dated D
+    # covers D+1, so charging starts from D+2 (skipped days at the cached rate,
+    # today at the live plan rate).
+    if False:  # disabled: no more prepaid / next-trip rent (safe to delete this block)
+        cov = existing.get("pending_rent_covers_dates") or []
+        if cov:
+            first_needed = date.fromisoformat(max(cov)) + timedelta(days=2)
+            if first_needed <= today:
+                drv2 = await db.drivers.find_one({"_id": ObjectId(did)})
+                if drv2 and not drv2.get("active_trip_id"):
+                    plan2 = None
+                    if rental.get("plan_id"):
+                        plan2 = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+                    elif rental.get("package_name"):
+                        plan2 = await db.rental_plans.find_one({
+                            "name": {"$regex": f"^{rental['package_name']}$", "$options": "i"},
+                            "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
+                            "organization_id": org
+                        })
+                    live2 = float(plan2["amount"]) if plan2 and plan2.get("amount") else float(rate or 0)
+                    gap2 = float(rate or 0) or live2
+                    added, d_, guard = {}, first_needed, 0
+                    while d_ <= today and guard < 90:
+                        amt = live2 if d_ == today else gap2
+                        if amt > 0:
+                            added[d_.isoformat()] = amt
+                        d_ += timedelta(days=1)
+                        guard += 1
+                    if added:
+                        add_total = round(sum(added.values()), 2)
+                        await db.rental_accounts.update_one(
+                            {"organization_id": org, "driver_id": did},
+                            {"$set": {"rent_by_date": added, "rent_due": add_total},
+                             "$inc": {"outstanding_amount": add_total},
+                             "$addToSet": {"unpaid_dates": {"$each": list(added.keys())}}}
+                        )
+                        rent_by_date = added
+                        rent_due = add_total
+                        outstanding = round(outstanding + add_total, 2)
+                        unpaid = sorted(set(unpaid) | set(added))
+                        if live2 > 0 and round(live2, 2) != round(float(rate or 0), 2):
+                            rate = live2
+                            await db.rentals.update_one({"_id": rental["_id"]}, {"$set": {"daily_rate": live2}})
+
+    # Days that count toward the BLOCK threshold = fully elapsed unpaid days only
+    # (strictly before today, IST). Today's rent is charged the instant the day
+    # starts so it can gate today's first trip — but it must NEVER count as one of
+    # the "unpaid days" on its own, or the driver gets blocked the same moment the
+    # charge is added, a full day too early. A day only becomes "overdue" once the
+    # whole day has passed without payment. So: unpaid for 3 full days -> blocked
+    # from the START of the 4th day, exactly as intended.
+    past_unpaid_days = {d for d in rent_by_date if d < today_iso}
+    if extra_km_due > 0 and not past_unpaid_days:
+        past_days_from_unpaid = {d for d in unpaid if d < today_iso}
+        if past_days_from_unpaid:
+            past_unpaid_days.add(max(past_days_from_unpaid))
+    overdue = len(past_unpaid_days)
     
     grace_period_until = existing.get("grace_period_until") if existing else None
 
-    # Block based on NUMBER OF UNPAID DAYS, not outstanding amount.
-    if overdue >= 2 and rate > 0:
+    # Block only once 3 FULL days have gone by unpaid — i.e. from the 4th day on.
+    if overdue >= 3 and rate > 0:
         status = "blocked"
     elif overdue >= 1 and rate > 0:
         status = "overdue"
     else:
         status = "active"
+    
+    # Fields for the Blocked screen: ONLY the fully-elapsed unpaid days (never
+    # today's or a future day's rent), plus any extra-KM due, so the breakdown the
+    # driver sees never lists today's/tomorrow's date.
+    blocked_dates = sorted(past_unpaid_days)
+    blocked_rent_amount = round(sum(rent_by_date.get(d, 0) for d in blocked_dates), 2)
+    blocked_total_amount = round(blocked_rent_amount + float(extra_km_due or 0), 2)
+
+    # ─── AUTO TEMPORARY BLOCK + CATCH-UP REQUIREMENT (3+ full unpaid days) ──
+    # The very first time the account becomes blocked, automatically apply a
+    # "temporary" admin block (unless already PERMANENTLY blocked) AND flag
+    # pending_catchup, so once an admin/city manager unblocks the driver, they
+    # must go through odometer reconciliation + payment before resuming trips —
+    # not just pay and go. This fires once per block episode: pending_catchup,
+    # once set, is left untouched here on every later call (it's cleared only
+    # once the driver completes the catch-up photo step), so refreshing never
+    # re-arms or re-triggers it.
+    pending_catchup = bool((existing or {}).get("pending_catchup"))
+    catchup_baseline_reading = (existing or {}).get("catchup_baseline_reading")
+    catchup_paid = bool((existing or {}).get("catchup_paid"))
+    if status == "blocked" and not pending_catchup:
+        drv_for_block = await db.drivers.find_one({"_id": ObjectId(did)})
+        if drv_for_block and drv_for_block.get("admin_block") != "permanent":
+            if not drv_for_block.get("admin_block"):
+                await db.drivers.update_one(
+                    {"_id": ObjectId(did)},
+                    {"$set": {
+                        "admin_block": "temporary",
+                        "admin_block_reason": f"Auto-blocked: {overdue} consecutive day(s) of unpaid rent.",
+                        "admin_blocked_at": datetime.now().isoformat(),
+                        "admin_block_auto": True,
+                    }}
+                )
+            baseline_reading = drv_for_block.get("last_odometer_reading", 0) or 0
+            await db.rental_accounts.update_one(
+                {"organization_id": org, "driver_id": did},
+                {"$set": {"pending_catchup": True, "catchup_baseline_reading": baseline_reading}}
+            )
+            pending_catchup = True
+            catchup_baseline_reading = baseline_reading
 
     # Admin manual unblock logic
     if status == "blocked" and grace_period_until and grace_period_until >= today.isoformat():
@@ -2322,6 +2968,20 @@ async def _rental_account(rental):
         "outstanding_amount": outstanding, "overdue_days": overdue, "status": status,
         "unpaid_dates": unpaid, "today_date": today.isoformat(), "today_paid": today_paid,
         "daily_rate": rate, "reactivated_at": reactivated_at, "updated_at": now_iso(),
+        "rent_due": round(float(rent_due), 2), "extra_km_due": round(float(extra_km_due), 2),
+        "rent_by_date": rent_by_date,
+        # Blocked screen should show ONLY fully-elapsed unpaid days (+ extra KM) —
+        # never today's or a future day's rent. Use these, not rent_by_date/unpaid_dates,
+        # for the "3 days unpaid" breakdown and total on that screen.
+        "blocked_dates": blocked_dates,
+        "blocked_rent_amount": blocked_rent_amount,
+        "blocked_total_amount": blocked_total_amount,
+        # Catch-up (odometer/KM reconciliation) required after an admin unblocks
+        # a driver who was auto-blocked. See CatchupScreen.jsx on the frontend.
+        "pending_catchup": pending_catchup,
+        "catchup_baseline_reading": catchup_baseline_reading,
+        "catchup_paid": catchup_paid,
+        "catchup_reading": (existing or {}).get("catchup_reading"),
     }
     # IMPORTANT: Never overwrite outstanding_amount via $set — it is managed only by $inc
     # Only update metadata fields, not the balance
@@ -2342,6 +3002,8 @@ async def _rental_account(rental):
                 "created_at": now_iso(),
                 "outstanding_amount": 0,
                 "unpaid_dates": [],
+                "rent_due": 0,
+                "extra_km_due": 0,
             }
         }, 
         upsert=True
@@ -2476,22 +3138,120 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
     org = rec["organization_id"]
     did = rec["driver_id"]
     if rec["kind"] == "deposit":
-        await db.security_deposits.update_one({"organization_id": org, "driver_id": did},
-            {"$set": {"status": "paid", "transaction_id": txn, "paid_at": now_iso()}})
-    elif rec["kind"] in ["daily", "outstanding"]:
+        # Not every driver has a security_deposits document up front (only drivers onboarded
+        # via rental-admin/drivers get one pre-created). Without upsert=True, update_one() on a
+        # missing doc matches nothing and silently does NOTHING — the payment succeeds in
+        # rental_payments but is never recorded as paid here, so the deposit keeps showing as
+        # "pending" forever: the popup re-appears on every login (Bug 1) and Daily Collection
+        # keeps showing "NOT PAID" with the wrong fallback amount (Bug 2).
+        await db.security_deposits.update_one(
+            {"organization_id": org, "driver_id": did},
+            {
+                "$set": {"status": "paid", "transaction_id": txn, "paid_at": now_iso(), "amount": rec["amount"]},
+                "$setOnInsert": {"organization_id": org, "driver_id": did, "created_at": now_iso()},
+            },
+            upsert=True,
+        )
+        # Rent is owed PER TRIP, not per calendar day. Every later trip's rent is charged
+        # when the PREVIOUS trip ends (see submit_odometer / admin_submit_odometer, END TRIP
+        # branch). The driver's very FIRST trip has no previous trip to charge it, so charge
+        # it here, once, the moment the deposit clears — guarded by "nothing owed yet" so it
+        # can never double-charge, no matter how many times a deposit payment is retried.
+        rental = await _active_rental(org, did)
+        if rental:
+            daily_rate = float(rental.get("daily_rate", 0) or 0)
+            acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+            nothing_owed_yet = (
+                float((acct or {}).get("rent_due", 0) or 0) <= 0
+                and float((acct or {}).get("extra_km_due", 0) or 0) <= 0
+                and float((acct or {}).get("outstanding_amount", 0) or 0) <= 0
+            )
+            if daily_rate > 0 and nothing_owed_yet:
+                await db.rental_accounts.update_one(
+                    {"organization_id": org, "driver_id": did},
+                    {"$inc": {"outstanding_amount": daily_rate, "rent_due": daily_rate},
+                     "$set": {f"rent_by_date.{_today_ist().isoformat()}": daily_rate,
+                              "rent_charged_through": _today_ist().isoformat()}},
+                    upsert=True,
+                )
+    elif rec["kind"] in ["daily", "outstanding", "extra_km", "catchup"]:
         existing_acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
         if existing_acct:
-            new_outstanding = max(0.0, round(float(existing_acct.get("outstanding_amount", 0)) - float(rec["amount"]), 2))
+            amount_paid = float(rec["amount"])
+            new_outstanding = max(0.0, round(float(existing_acct.get("outstanding_amount", 0)) - amount_paid, 2))
+            if rec["kind"] == "outstanding":
+                # Full combined balance cleared in one go (admin unblock / manual
+                # clear-everything payment).
+                new_rent_due = 0.0
+                new_extra_km_due = 0.0
+            elif rec["kind"] == "catchup":
+                # A catch-up settles the past BLOCKED days' rent + all extra-km due
+                # (including any new overage found during reconciliation) — but NOT
+                # today's rent. covers_amounts holds only the blocked (past) days,
+                # so subtract exactly that from rent_due; today's entry, if any,
+                # is left untouched and stays owed for the normal daily-rent flow.
+                blocked_paid = round(sum((rec.get("covers_amounts") or {}).values()), 2)
+                new_rent_due = max(0.0, round(float(existing_acct.get("rent_due", 0) or 0) - blocked_paid, 2))
+                new_extra_km_due = 0.0
+            elif rec["kind"] == "extra_km":
+                new_rent_due = float(existing_acct.get("rent_due", 0) or 0)
+                new_extra_km_due = max(0.0, round(float(existing_acct.get("extra_km_due", 0) or 0) - amount_paid, 2))
+            else:  # daily
+                new_rent_due = max(0.0, round(float(existing_acct.get("rent_due", 0) or 0) - amount_paid, 2))
+                new_extra_km_due = float(existing_acct.get("extra_km_due", 0) or 0)
             remaining_dates = [d for d in existing_acct.get("unpaid_dates", []) if d not in rec.get("covers_dates", [])]
             today_ist = _today_ist().isoformat()
+            set_fields = {
+                "outstanding_amount": new_outstanding,
+                "rent_due": new_rent_due,
+                "extra_km_due": new_extra_km_due,
+                "unpaid_dates": remaining_dates if new_outstanding > 0 else [],
+                "today_paid": True,
+                "today_date": today_ist,
+            }
+            # Per-day rent ledger: remove the days this payment settled.
+            rbd = dict(existing_acct.get("rent_by_date") or {})
+            paid_amounts = rec.get("covers_amounts") or {}
+            if rec["kind"] in ("daily", "outstanding", "catchup"):
+                if paid_amounts:
+                    for d_ in paid_amounts:
+                        rbd.pop(d_, None)
+                elif new_rent_due <= 0:
+                    rbd = {}
+            set_fields["rent_by_date"] = rbd
+            # A trip bills exactly ONE day of rent, so the next trip is priced at the
+            # latest paid day — not the multi-day total.
+            one_day_rent = float(paid_amounts[max(paid_amounts)]) if paid_amounts else amount_paid
+            if rec["kind"] == "daily":
+                # Freeze exactly what was paid for the UPCOMING trip's rent. The
+                # trip that's about to start reads THIS (not the live package
+                # rate) so an admin rate change between "rent paid" and "trip
+                # started" can never make an already-paid trip show up wrong or
+                # unpaid in Daily Collection.
+                set_fields["last_rent_paid_amount"] = one_day_rent
+                set_fields["last_rent_paid_txn"] = txn
+                set_fields["last_rent_paid_at"] = now_iso()
+                # Marks this payment as "paid but not yet attached to a started
+                # trip" — Daily Collection uses this to still give it its own
+                # visible row even after rent_due has already dropped to 0.
+                # Cleared the moment the trip it paid for actually starts (see
+                # submit_odometer / admin_submit_odometer, START TRIP branch).
+                set_fields["pending_rent_paid"] = True
+                # Paying removes this date from unpaid_dates immediately (a few
+                # lines above), so Daily Collection would lose track of which day
+                # this payment belongs to. Remember it explicitly here.
+                set_fields["pending_rent_covers_dates"] = rec.get("covers_dates", [])
+            if rec["kind"] == "catchup":
+                # Payment settled — the driver still needs to submit the odometer
+                # photo (see /driver/catchup/photo) before pending_catchup clears.
+                # catchup_settled_dates remembers exactly which past days (and at
+                # what frozen rate) this payment cleared, so the photo step can
+                # create one permanent, rate-immune Daily Collection row per day.
+                set_fields["catchup_paid"] = True
+                set_fields["catchup_settled_dates"] = paid_amounts
             await db.rental_accounts.update_one(
                 {"organization_id": org, "driver_id": did},
-                {"$set": {
-                    "outstanding_amount": new_outstanding,
-                    "unpaid_dates": remaining_dates if new_outstanding > 0 else [],
-                    "today_paid": True,
-                    "today_date": today_ist,
-                }}
+                {"$set": set_fields}
             )
             
             # ─── POST-PAYMENT RATE SYNC ─────────────────────────────────────────
@@ -2662,7 +3422,14 @@ async def driver_logout(response: Response):
 async def driver_me(request: Request):
     user = await get_user(request)
     require_driver(user)
-    return await _driver_payload(user)
+    payload = await _driver_payload(user)
+    blocked = await db.drivers.find_one(
+        {"phone": user.get("phone"), "admin_block": {"$in": ["temporary", "permanent"]}},
+        {"admin_block": 1, "admin_block_reason": 1}
+    )
+    payload["admin_block"] = (blocked or {}).get("admin_block")
+    payload["admin_block_reason"] = (blocked or {}).get("admin_block_reason")
+    return payload
 
 import shutil
 import uuid
@@ -2733,8 +3500,8 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         raise HTTPException(404, "Driver not found")
         
     reading = body.reading
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    today = _today_ist().strftime("%Y-%m-%d")
+    current_month_str = _today_ist().strftime("%Y-%m")
     url = ""  # No image for admin override
     
     active_trip_id = driver.get("active_trip_id")
@@ -2747,6 +3514,17 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         # to the package after this point must not affect this trip — only a fresh
         # trip started after the edit should see the new rate/limit/overage.
         snap = await _get_package_snapshot(driver.get("organization_id"), driver_id)
+        # Rent for THIS trip is priced at whatever was actually PAID for it (see
+        # last_rent_paid_amount, set in _apply_paid) — never today's live package
+        # rate. Otherwise an admin rate change between "rent paid" and "trip
+        # started" silently reprices an already-paid trip. Falls back to the live
+        # rate only when no rent payment has ever been recorded for this driver.
+        trip_daily_rent = (
+            float(acct["last_rent_paid_amount"])
+            if acct and acct.get("last_rent_paid_amount") is not None
+            else (snap["daily_rate"] if snap else 0)
+        )
+        rent_txn_for_trip = acct.get("last_rent_paid_txn") if acct and acct.get("last_rent_paid_amount") is not None else None
         
         # (Removed daily rent addition at start; it will be added at end trip)
         res = await db.driver_odometer_logs.insert_one({
@@ -2757,7 +3535,8 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             "start_image_url": url,
             "status": "active",
             "created_at": now_iso(),
-            "snapshot_daily_rent": snap["daily_rate"] if snap else 0,
+            "snapshot_daily_rent": trip_daily_rent,
+            "snapshot_rent_txn_id": rent_txn_for_trip,
             "snapshot_package_name": snap["package_name"] if snap else "",
             "snapshot_daily_limit": snap["daily_limit_km"] if snap else 0,
             "snapshot_overage_per_km": snap["overage_per_km"] if snap else 0.0,
@@ -2770,6 +3549,13 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
                 "active_trip_id": str(res.inserted_id),
                 "last_odometer_date": today
             }}
+        )
+        # The rent payment that priced this trip is now attached to it — clear the
+        # "paid but not yet used by a trip" flag so Daily Collection stops showing
+        # a separate placeholder row for it (it now shows as this trip's own row).
+        await db.rental_accounts.update_one(
+            {"organization_id": driver.get("organization_id"), "driver_id": driver_id},
+            {"$unset": {"pending_rent_paid": "", "pending_rent_covers_dates": ""}}
         )
         return {"ok": True, "message": "Trip started successfully by admin"}
     else:
@@ -2837,17 +3623,45 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         overage_km = max(0, (current_month_kms + driven) - monthly_limit_km) - max(0, current_month_kms - monthly_limit_km)
         overage_charge = overage_km * overage_per_km
         
-        total_charge = overage_charge
+        # Rent is charged once per calendar day, not at trip end (see _rental_account).
+        rent_charge = 0.0
+        total_charge = rent_charge + overage_charge
         
         if total_charge > 0:
             await db.rental_accounts.update_one(
                 {"driver_id": driver_id},
                 {
-                    "$inc": {"outstanding_amount": total_charge},
-                    "$addToSet": {"unpaid_dates": today}
+                    "$inc": {
+                        "outstanding_amount": total_charge,
+                        "rent_due": round(float(rent_charge), 2),
+                        "extra_km_due": round(float(overage_charge), 2),
+                    },
+                    "$addToSet": {"unpaid_dates": today},
+                    **({"$set": {f"rent_by_date.{_today_ist().isoformat()}": round(float(rent_charge), 2)}}
+                       if rent_charge > 0 else {}),
                 },
                 upsert=True
             )
+        
+        # Rent for TODAY was already paid BEFORE this trip started — trip-end must
+        # never leave (or let something later recreate) a due amount for today,
+        # which is what makes the "Pay Daily Rent" popup reappear right after
+        # ending a trip. Finalize it explicitly here.
+        _today_str_fin = _today_ist().isoformat()
+        _acct_fin = await db.rental_accounts.find_one({"driver_id": driver_id})
+        _leftover = float((_acct_fin or {}).get("rent_by_date", {}).get(_today_str_fin, 0) or 0)
+        if _leftover > 0:
+            await db.rental_accounts.update_one(
+                {"driver_id": driver_id},
+                {"$unset": {f"rent_by_date.{_today_str_fin}": ""},
+                 "$inc": {"rent_due": -_leftover, "outstanding_amount": -_leftover},
+                 "$pull": {"unpaid_dates": _today_str_fin}}
+            )
+        await db.rental_accounts.update_one(
+            {"driver_id": driver_id},
+            {"$set": {"rent_charged_through": _today_str_fin}},
+            upsert=True
+        )
             
         await db.drivers.update_one(
             {"_id": ObjectId(driver_id)},
@@ -2935,8 +3749,8 @@ async def submit_odometer(
     user = await get_user(request)
     require_driver(user)
     
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    today = _today_ist().strftime("%Y-%m-%d")
+    current_month_str = _today_ist().strftime("%Y-%m")
 
     ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
     filename = f"{user['id']}_odo_{uuid.uuid4().hex[:8]}.{ext}"
@@ -2953,14 +3767,40 @@ async def submit_odometer(
         if deposit and deposit.get("status") != "paid" and deposit.get("amount", 0) > 0:
             raise HTTPException(400, "You must pay your Security Deposit before starting a trip.")
             
+            
+        _r_now = await _active_rental(user.get("organization_id"), user["id"])
+        if _r_now:
+            await _rental_account(_r_now)  # roll forward today's rent before checking dues
         acct = await db.rental_accounts.find_one({"driver_id": user["id"]})
-        if acct and acct.get("outstanding_amount", 0) > 0:
-            raise HTTPException(400, f"You must pay your outstanding rent (₹{acct['outstanding_amount']}) before starting today's trip.")
+        if acct:
+            rent_due = float(acct.get("rent_due", 0) or 0)
+            extra_km_due = float(acct.get("extra_km_due", 0) or 0)
+            outstanding = float(acct.get("outstanding_amount", 0) or 0)
+            # Legacy fallback for accounts predating the rent/extra-km split.
+            if rent_due <= 0 and extra_km_due <= 0 and outstanding > 0:
+                rent_due = outstanding
+            if extra_km_due > 0:
+                raise HTTPException(400, f"You must pay your Extra KM charges (₹{extra_km_due}) before starting a trip.")
+            if rent_due > 0:
+                raise HTTPException(400, f"You must pay your Daily Rent (₹{rent_due}) before starting today's trip.")
+           
             
         # Freeze whatever package is active RIGHT NOW onto this trip. Any admin edit
         # to the package after this point must not affect this trip — only a fresh
         # trip started after the edit should see the new rate/limit/overage.
         snap = await _get_package_snapshot(user.get("organization_id"), user["id"])
+        # Rent for THIS trip is priced at whatever was actually PAID for it (see
+        # last_rent_paid_amount, set in _apply_paid) — never today's live package
+        # rate. Otherwise an admin rate change between "rent paid" and "trip
+        # started" silently reprices an already-paid trip. Falls back to the live
+        # rate only when no rent payment has ever been recorded for this driver.
+        trip_daily_rent = (
+            float(acct["last_rent_paid_amount"])
+            if acct and acct.get("last_rent_paid_amount") is not None
+            else (snap["daily_rate"] if snap else 0)
+        )
+        rent_txn_for_trip = acct.get("last_rent_paid_txn") if acct and acct.get("last_rent_paid_amount") is not None else None
+        
         
         # (Removed daily rent addition at start; it will be added at end trip)
         res = await db.driver_odometer_logs.insert_one({
@@ -2971,7 +3811,8 @@ async def submit_odometer(
             "start_image_url": url,
             "status": "active",
             "created_at": now_iso(),
-            "snapshot_daily_rent": snap["daily_rate"] if snap else 0,
+            "snapshot_daily_rent": trip_daily_rent,
+            "snapshot_rent_txn_id": rent_txn_for_trip,
             "snapshot_package_name": snap["package_name"] if snap else "",
             "snapshot_daily_limit": snap["daily_limit_km"] if snap else 0,
             "snapshot_overage_per_km": snap["overage_per_km"] if snap else 0.0,
@@ -2984,6 +3825,13 @@ async def submit_odometer(
                 "active_trip_id": str(res.inserted_id),
                 "last_odometer_date": today
             }}
+        )
+        # The rent payment that priced this trip is now attached to it — clear the
+        # "paid but not yet used by a trip" flag so Daily Collection stops showing
+        # a separate placeholder row for it (it now shows as this trip's own row).
+        await db.rental_accounts.update_one(
+            {"organization_id": user.get("organization_id"), "driver_id": user["id"]},
+            {"$unset": {"pending_rent_paid": "", "pending_rent_covers_dates": ""}}
         )
         return {"ok": True, "message": "Trip started successfully"}
     else:
@@ -3058,18 +3906,47 @@ async def submit_odometer(
         # Extra KM also billed separately as overage charge
         current_month_kms += driven
         
-        # Daily rent is billed at the end of EVERY trip, plus any extra-km overage.
-        rent_charge = float(daily_rate or 0)
+                # Rent is now charged once per calendar day (see daily accrual in
+        # _rental_account), NOT at trip end. Trip end bills extra-km only.
+        rent_charge = 0.0
         total_charge = rent_charge + overage_charge        
         if total_charge > 0:
             total_charge = round(float(total_charge), 2)
             await db.rental_accounts.update_one(
                 {"driver_id": user["id"], "organization_id": user.get("organization_id")},                {
-                    "$inc": {"outstanding_amount": total_charge},
-                    "$addToSet": {"unpaid_dates": today}
+                    "$inc": {
+                        "outstanding_amount": total_charge,
+                        "rent_due": round(float(rent_charge), 2),
+                        "extra_km_due": round(float(overage_charge), 2),
+                    },
+                    "$addToSet": {"unpaid_dates": today},
+                    **({"$set": {f"rent_by_date.{_today_ist().isoformat()}": round(float(rent_charge), 2)}}
+                       if rent_charge > 0 else {}),
                 },
                 upsert=True
             )
+        
+        # Rent for TODAY was already paid BEFORE this trip started — the driver can
+        # only ever start a trip once today's rent is settled. So trip-end must
+        # never leave (or let something later recreate) a due amount for today,
+        # which is what makes the "Pay Daily Rent" popup reappear right after
+        # ending a trip. Finalize it explicitly here rather than relying on the
+        # accrual logic elsewhere to simply not touch it.
+        _today_str_fin = _today_ist().isoformat()
+        _acct_fin = await db.rental_accounts.find_one({"driver_id": user["id"], "organization_id": user.get("organization_id")})
+        _leftover = float((_acct_fin or {}).get("rent_by_date", {}).get(_today_str_fin, 0) or 0)
+        if _leftover > 0:
+            await db.rental_accounts.update_one(
+                {"driver_id": user["id"], "organization_id": user.get("organization_id")},
+                {"$unset": {f"rent_by_date.{_today_str_fin}": ""},
+                 "$inc": {"rent_due": -_leftover, "outstanding_amount": -_leftover},
+                 "$pull": {"unpaid_dates": _today_str_fin}}
+            )
+        await db.rental_accounts.update_one(
+            {"driver_id": user["id"], "organization_id": user.get("organization_id")},
+            {"$set": {"rent_charged_through": _today_str_fin}},
+            upsert=True
+        )
             
         # Update driver record - store today's driven km + monthly total (clamped)
         await db.drivers.update_one(
@@ -3155,6 +4032,123 @@ async def submit_odometer(
         return {"ok": True, "message": msg}
 
 
+@api.get("/driver/catchup/quote")
+async def driver_catchup_quote(reading: int, request: Request):
+    user = await get_user(request)
+    require_driver(user)
+    org = user.get("organization_id")
+    did = user["id"]
+    rental = await _active_rental(org, did)
+    if not rental:
+        raise HTTPException(400, "No active rental")
+    acct = await _rental_account(rental)
+    if not acct.get("pending_catchup"):
+        raise HTTPException(400, "No catch-up required.")
+    baseline = acct.get("catchup_baseline_reading") or 0
+    diff_km, overage_km, overage_charge = await _catchup_overage(org, did, rental, baseline, reading)
+    # Only the past BLOCKED days' rent is due here — never today's, which stays
+    # owed and gets paid separately afterward via the normal daily-rent popup.
+    rent_amount = acct.get("blocked_rent_amount", 0)
+    extra_km_existing = acct.get("extra_km_due", 0)
+    total = round(rent_amount + extra_km_existing + overage_charge, 2)
+    return {
+        "baseline_reading": baseline, "reading": reading, "diff_km": diff_km,
+        "rent_amount": rent_amount, "extra_km_existing": extra_km_existing,
+        "overage_km": overage_km, "overage_charge": overage_charge, "total": total,
+    }
+
+
+@api.post("/driver/catchup/photo")
+async def driver_catchup_photo(request: Request, image: UploadFile = File(...)):
+    user = await get_user(request)
+    require_driver(user)
+    org = user.get("organization_id")
+    did = user["id"]
+    acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+    if not acct or not acct.get("pending_catchup"):
+        raise HTTPException(400, "No catch-up required.")
+    if not acct.get("catchup_paid"):
+        raise HTTPException(400, "Please complete the catch-up payment first.")
+    reading = acct.get("catchup_reading")
+    if reading is None:
+        raise HTTPException(400, "Missing catch-up reading. Please contact support.")
+    baseline = acct.get("catchup_baseline_reading") or 0
+
+    ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
+    filename = f"{did}_catchup_{uuid.uuid4().hex[:8]}.{ext}"
+    path = f"uploads/{filename}"
+    with open(path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+    url = f"/uploads/{filename}"
+
+    diff_km = max(0, reading - baseline)
+    today = _today_ist().strftime("%Y-%m-%d")
+    current_month_str = _today_ist().strftime("%Y-%m")
+    driver = await db.drivers.find_one({"_id": ObjectId(did)})
+    current_month_kms = (driver or {}).get("current_month_kms", 0) or 0
+    if (driver or {}).get("current_month") != current_month_str:
+        current_month_kms = 0
+    current_month_kms += diff_km
+
+    # One permanent Daily Collection row per settled blocked day, each frozen at
+    # the RATE THAT APPLIED that day (never today's live package rate) — this is
+    # what stops a later admin rate change from leaking into these rows. The
+    # odometer confirmation (start/end KM, photo, any idle-period overage) is
+    # attached only to the LAST (most recent) blocked day, since that's the day
+    # the vehicle's position was actually confirmed.
+    settled = acct.get("catchup_settled_dates") or {}
+    sorted_dates = sorted(settled.keys())
+    overage_km = acct.get("catchup_overage_km") or 0
+    overage_charge = acct.get("catchup_overage_charge") or 0
+    if sorted_dates:
+        for i, dstr in enumerate(sorted_dates):
+            log_doc = {
+                "driver_id": did, "organization_id": org, "date": dstr,
+                "snapshot_daily_rent": float(settled[dstr]),
+                "status": "completed", "type": "catchup_rent",
+                "created_at": now_iso(), "completed_at": now_iso(),
+            }
+            if i == len(sorted_dates) - 1:
+                log_doc.update({
+                    "start_reading": baseline, "end_reading": reading,
+                    "driven_today": diff_km, "end_image_url": url,
+                })
+                if overage_charge > 0:
+                    log_doc["extra_km"] = overage_km
+                    log_doc["extra_km_charge"] = overage_charge
+            await db.driver_odometer_logs.insert_one(log_doc)
+    else:
+        # No rent days were owed (e.g. block was extra-km-only) — still record
+        # the odometer confirmation itself so it isn't lost.
+        await db.driver_odometer_logs.insert_one({
+            "driver_id": did, "organization_id": org, "date": today,
+            "start_reading": baseline, "end_reading": reading, "driven_today": diff_km,
+            "end_image_url": url, "status": "completed", "type": "catchup_rent",
+            "extra_km": overage_km, "extra_km_charge": overage_charge,
+            "created_at": now_iso(), "completed_at": now_iso(),
+        })
+
+    await db.drivers.update_one(
+        {"_id": ObjectId(did)},
+        {"$set": {
+            "last_odometer_reading": reading,
+            "current_month_kms": current_month_kms,
+            "current_month": current_month_str,
+            "last_odometer_date": today,
+        }}
+    )
+    await db.rental_accounts.update_one(
+        {"organization_id": org, "driver_id": did},
+        {"$set": {"pending_catchup": False, "catchup_paid": False},
+         "$unset": {
+             "catchup_baseline_reading": "", "catchup_reading": "",
+             "catchup_overage_applied_reading": "", "catchup_overage_km": "",
+             "catchup_overage_charge": "", "catchup_settled_dates": "",
+         }}
+    )
+    return {"ok": True, "message": "Catch-up completed. You can now start your trip once today's rent is paid."}
+
+
 @api.get("/driver/packages")
 async def driver_packages(request: Request):
     user = await get_user(request)
@@ -3179,7 +4173,17 @@ async def driver_payment_history(request: Request):
     results = []
     for r in recs:
         out = ser(r)
-        if out.get("kind") in ["daily", "outstanding"] and out.get("covers_dates"):
+        if out.get("kind") == "extra_km":
+            # Extra-KM payments are billed on their own now — no rent portion.
+            out["base_rent"] = 0
+            out["extra_charge"] = out["amount"]
+            out["daily_rate"] = daily_rate
+        elif out.get("kind") == "daily":
+            # Daily-rent payments now cover rent only (extra KM is a separate payment).
+            out["base_rent"] = out["amount"]
+            out["extra_charge"] = 0
+            out["daily_rate"] = daily_rate
+        elif out.get("kind") == "outstanding" and out.get("covers_dates"):
             days = len(out["covers_dates"])
             base_rent = daily_rate * days
             extra_charge = max(0, out["amount"] - base_rent)
@@ -3192,7 +4196,8 @@ async def driver_payment_history(request: Request):
 
 
 class CreateOrderBody(BaseModel):
-    kind: str  # deposit | daily | outstanding
+    kind: str  # deposit | daily | extra_km | outstanding | catchup
+    reading: Optional[int] = None
 
 
 @api.post("/driver/payments/create-order")
@@ -3206,6 +4211,7 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
     if kind != "deposit" and not rental:
         raise HTTPException(status_code=400, detail="No active rental")
     covers = []
+    covers_amounts = {}
     if kind == "deposit":
         dep = await db.security_deposits.find_one({"organization_id": org, "driver_id": did})
         if dep and dep.get("status") == "paid":
@@ -3222,9 +4228,18 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
         acct = await _rental_account(rental)
         if acct["status"] == "blocked":
             raise HTTPException(status_code=400, detail="Account blocked. Clear outstanding first.")
-        if acct["outstanding_amount"] <= 0:
-            raise HTTPException(status_code=400, detail="No outstanding balance. Complete a trip first.")
-        amount = acct["outstanding_amount"]
+        if acct.get("rent_due", 0) <= 0:
+            raise HTTPException(status_code=400, detail="No daily rent due right now.")
+        amount = acct["rent_due"]
+        covers = acct.get("unpaid_dates", [])
+        covers_amounts = dict(acct.get("rent_by_date") or {})
+    elif kind == "extra_km":
+        acct = await _rental_account(rental)
+        if acct["status"] == "blocked":
+            raise HTTPException(status_code=400, detail="Account blocked. Clear outstanding first.")
+        if acct.get("extra_km_due", 0) <= 0:
+            raise HTTPException(status_code=400, detail="No extra KM charges due.")
+        amount = acct["extra_km_due"]
         covers = acct.get("unpaid_dates", [])
     elif kind == "outstanding":
         acct = await _rental_account(rental)
@@ -3232,15 +4247,50 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
             raise HTTPException(status_code=400, detail="No outstanding amount")
         amount = acct["outstanding_amount"]
         covers = acct.get("unpaid_dates", [])
+        covers_amounts = dict(acct.get("rent_by_date") or {})
+    elif kind == "catchup":
+        acct = await _rental_account(rental)
+        if not acct.get("pending_catchup"):
+            raise HTTPException(status_code=400, detail="No catch-up required.")
+        if body.reading is None:
+            raise HTTPException(status_code=400, detail="Current odometer reading is required.")
+        baseline = acct.get("catchup_baseline_reading") or 0
+        diff_km, overage_km, overage_charge = await _catchup_overage(org, did, rental, baseline, body.reading)
+        # Lock the overage onto the account exactly once per reading (idempotent) —
+        # reopening the pay sheet with the same reading must not re-add the charge.
+        acct_doc = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+        already_applied = (acct_doc or {}).get("catchup_overage_applied_reading") == body.reading
+        upd = {"$set": {
+            "catchup_overage_applied_reading": body.reading, "catchup_reading": body.reading,
+            "catchup_overage_km": overage_km, "catchup_overage_charge": overage_charge,
+        }}
+        if overage_charge > 0 and not already_applied:
+            upd["$inc"] = {"outstanding_amount": overage_charge, "extra_km_due": overage_charge}
+        await db.rental_accounts.update_one({"organization_id": org, "driver_id": did}, upd)
+        # Re-derive via _rental_account (not a raw find_one) so blocked_dates /
+        # blocked_rent_amount are freshly computed. A catch-up settles ONLY the
+        # past blocked days' rent + all extra-km due — never today's rent, which
+        # stays owed and gets its own normal daily-rent payment afterward.
+        fresh_acct = await _rental_account(rental)
+        covers = fresh_acct.get("blocked_dates", [])
+        covers_amounts = {d: fresh_acct["rent_by_date"][d] for d in covers if d in fresh_acct.get("rent_by_date", {})}
+        amount = round(float(fresh_acct.get("blocked_rent_amount", 0) or 0) + float(fresh_acct.get("extra_km_due", 0) or 0), 2)
     else:
         raise HTTPException(status_code=400, detail="Invalid payment kind")
     rec = {"organization_id": org, "driver_id": did, "rental_id": str(rental["_id"]) if rental else None,
-           "kind": kind, "amount": amount, "covers_dates": covers,
+           "kind": kind, "amount": amount, "covers_dates": covers, "covers_amounts": covers_amounts,
            "payment_status": "pending", "payment_method": None, "transaction_id": None,
            "gateway_order_id": None, "gateway_ref": None, "paid_at": None,
            "gateway": "razorpay" if rzp_client else "sandbox", "created_at": now_iso()}
     res = await db.rental_payments.insert_one(rec)
     pid = str(res.inserted_id)
+    if amount <= 0:
+        # Nothing to charge (e.g. a catch-up with no rent/extra-km/overage due) —
+        # skip the payment gateway entirely and mark it paid immediately.
+        rec["_id"] = res.inserted_id
+        await _apply_paid(rec, "NIL-0", "system")
+        return {"payment_id": pid, "amount": 0, "amount_paise": 0, "kind": kind,
+                "gateway": rec["gateway"], "already_paid": True, "transaction_id": "NIL-0"}
     resp = {"payment_id": pid, "amount": amount, "amount_paise": amount * 100, "kind": kind, "gateway": rec["gateway"]}
     if rzp_client:
         order = rzp_client.order.create({"amount": amount * 100, "currency": "INR", "receipt": pid[:40], "payment_capture": 1})
@@ -3434,6 +4484,20 @@ async def rental_admin_update_package(pid: str, body: dict, request: Request):
             drivers_to_update.append(r["driver_id"])
         if drivers_to_update:
             acct_filter = {"organization_id": user.get("organization_id"), "driver_id": {"$in": drivers_to_update}}
+            # Reprice any already-charged-but-unpaid rent for these drivers' UPCOMING
+            # trip to the new live rate BEFORE overwriting daily_rate (need each
+            # driver's OLD rate to scale correctly). Extra-km dues are left untouched.
+            async for a in db.rental_accounts.find(acct_filter):
+                old_rate_for_driver = float(a.get("daily_rate", 0) or 0)
+                rent_due = float(a.get("rent_due", 0) or 0)
+                if rent_due > 0 and old_rate_for_driver > 0:
+                    new_rent_due = round((rent_due / old_rate_for_driver) * new_rate, 2)
+                    delta = round(new_rent_due - rent_due, 2)
+                    if delta != 0:
+                        await db.rental_accounts.update_one(
+                            {"_id": a["_id"]},
+                            {"$inc": {"outstanding_amount": delta, "rent_due": delta}}
+                        )
             await db.rental_accounts.update_many(acct_filter, {"$set": {"daily_rate": new_rate}})
     return ser(pkg)
 
@@ -3552,25 +4616,46 @@ app.include_router(api)
 
 @app.on_event("startup")
 async def startup():
+    indexes = [
+        (db.users, "email", {"unique": True}),
+        (db.vehicles, [("organization_id", 1), ("status", 1), ("city", 1)], {}),
+        (db.vehicles, "registration_number", {}),
+        (db.drivers, [("organization_id", 1), ("city", 1)], {}),
+        (db.drivers, "phone", {}),
+        (db.rentals, [("organization_id", 1), ("status", 1)], {}),
+        (db.service_requests, [("organization_id", 1), ("status", 1)], {}),
+        (db.audit_logs, [("organization_id", 1), ("created_at", -1)], {}),
+        (db.orders, [("organization_id", 1), ("status", 1)], {}),
+        (db.customers, [("organization_id", 1)], {}),
+        (db.users, "phone", {}),
+        (db.rental_packages, [("organization_id", 1)], {}),
+        (db.driver_rentals, [("organization_id", 1), ("driver_id", 1)], {}),
+        (db.rental_payments, [("organization_id", 1), ("driver_id", 1)], {}),
+        (db.security_deposits, [("organization_id", 1), ("driver_id", 1)], {}),
+        (db.rental_accounts, [("organization_id", 1), ("driver_id", 1)], {}),
+        (db.referrals, "referred_phone", {}),
+        (db.referrals, [("organization_id", 1), ("referrer_driver_id", 1)], {}),
+    ]
+    for coll, keys, opts in indexes:
+        try:
+            await coll.create_index(keys, **opts)
+        except Exception as e:
+            logger.warning(f"Index skipped {coll.name} {keys}: {str(e)[:120]}")
+        # Assign driver_code to existing drivers (once, in join order)
     try:
-        await db.users.create_index("email", unique=True, sparse=True)
-        await db.vehicles.create_index([("organization_id", 1), ("status", 1), ("city", 1)])
-        await db.vehicles.create_index("registration_number")
-        await db.drivers.create_index([("organization_id", 1), ("city", 1)])
-        await db.drivers.create_index("phone")
-        await db.rentals.create_index([("organization_id", 1), ("status", 1)])
-        await db.service_requests.create_index([("organization_id", 1), ("status", 1)])
-        await db.audit_logs.create_index([("organization_id", 1), ("created_at", -1)])
-        await db.orders.create_index([("organization_id", 1), ("status", 1)])
-        await db.customers.create_index([("organization_id", 1)])
-        await db.users.create_index("phone")
-        await db.rental_packages.create_index([("organization_id", 1)])
-        await db.driver_rentals.create_index([("organization_id", 1), ("driver_id", 1)])
-        await db.rental_payments.create_index([("organization_id", 1), ("driver_id", 1)])
-        await db.security_deposits.create_index([("organization_id", 1), ("driver_id", 1)])
-        await db.rental_accounts.create_index([("organization_id", 1), ("driver_id", 1)])
+        last = await db.drivers.find_one({"driver_code": {"$regex": "^R39D"}}, sort=[("driver_code", -1)])
+        start = int(last["driver_code"][4:]) if last else 0
+        cur = await db.counters.find_one({"_id": "driver_code"})
+        if not cur or cur.get("seq", 0) < start:
+            await db.counters.update_one({"_id": "driver_code"}, {"$set": {"seq": start}}, upsert=True)
+        missing = await db.drivers.find({"driver_code": {"$exists": False}}).sort([("created_at", 1), ("_id", 1)]).to_list(None)
+        for d in missing:
+            await db.drivers.update_one({"_id": d["_id"]}, {"$set": {"driver_code": await _next_driver_code()}})
+        if missing:
+            logger.info(f"Assigned driver_code to {len(missing)} drivers")
+        await db.drivers.create_index("driver_code", unique=True, sparse=True)
     except Exception as e:
-        logger.warning(f"Failed to create indexes: {e}")
+        logger.warning(f"driver_code backfill failed: {e}")
     # await seedlib.seed(db, authlib)  # disabled - do not reseed
 
 

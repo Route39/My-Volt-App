@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Bike, Wallet, ArrowRight, ShieldCheck, AlertTriangle, Lock, FileBadge, XCircle, Camera, CheckCircle, Loader2, Ticket } from "lucide-react";
 import { useDriver } from "../../context/DriverAuthContext";
 import { inr } from "../../lib/format";
 import dapi from "../../lib/driverApi";
 import PayModal from "./PayModal";
 import BlockedScreen from "./BlockedScreen";
+import CatchupScreen from "./CatchupScreen";
 import { useNavigate } from "react-router-dom";
 import { useNativeCamera } from "../../hooks/useNativeCamera";
 
@@ -33,18 +34,67 @@ export default function DriverHome() {
   const [odoImage, setOdoImage] = useState(null);
   const [odoLoading, setOdoLoading] = useState(false);
   const [odoError, setOdoError] = useState("");
-  const [promptPayAfterTrip, setPromptPayAfterTrip] = useState(false);
+  // const [promptPayAfterTrip, setPromptPayAfterTrip] = useState(false);
 
-  // After a trip ends, auto-open the "pay daily rent" popup if rent is due
-  useEffect(() => {
-    if (promptPayAfterTrip && data && !data.driver?.active_trip_id) {
-      if ((data.account?.outstanding_amount || 0) > 0) setPay("daily");
-      setPromptPayAfterTrip(false);
-    }
-  }, [promptPayAfterTrip, data]);  
+  // // After a trip ends, auto-open the "pay daily rent" popup if rent is due
+  // useEffect(() => {
+  //   if (promptPayAfterTrip && data && !data.driver?.active_trip_id) {
+  //     if ((data.account?.outstanding_amount || 0) > 0) setPay("daily");
+  //     setPromptPayAfterTrip(false);
+  //   }
+  // }, [promptPayAfterTrip, data]);  
   // Safe extraction for initial hook state
   const kycStatus = data?.driver?.kyc_status;
   const [showKycModal, setShowKycModal] = useState(false);
+  // After a trip ends (or whenever the driver is between trips with dues pending),
+  // auto-open the payment popup. Extra KM charges from the completed trip must be
+  // cleared first; only once those are settled does the daily rent popup for the
+  // upcoming trip appear. Only after both are paid can the next trip be started.
+  //
+  // dismissedRef remembers which exact charge (kind + amounts) the driver has
+  // already closed with "X", so this effect won't immediately reopen the same
+  // popup. It only re-opens automatically again if the charge itself changes
+  // (e.g. a new due amount, or a different kind becomes due).
+  const dismissedRef = useRef({ kind: null, rentDue: null, extraKmDue: null });
+  useEffect(() => {
+    if (!data) return;
+    if (data.driver?.active_trip_id) return;
+    if (data.deposit && data.deposit.amount > 0 && data.deposit.status !== "paid") return;
+    if (showKycModal) return;
+    const extraKmDue = data.account?.extra_km_due || 0;
+    const rentDue = data.account?.rent_due || 0;
+    const kind = extraKmDue > 0 ? "extra_km" : rentDue > 0 ? "daily" : null;
+    if (!kind) { dismissedRef.current = { kind: null, rentDue: null, extraKmDue: null }; return; }
+    if (pay) return;
+    const d = dismissedRef.current;
+    const alreadyDismissedThisExactCharge = d.kind === kind && d.rentDue === rentDue && d.extraKmDue === extraKmDue;
+    if (!alreadyDismissedThisExactCharge) setPay(kind);
+  }, [data, pay, showKycModal]);
+
+  // Wraps setPay so that closing a popup ("X") is remembered as a dismissal of
+  // that exact charge, so the effect above won't instantly reopen it.
+  const handleSetPay = (value) => {
+    if (value === null && pay) {
+      dismissedRef.current = {
+        kind: pay,
+        rentDue: data?.account?.rent_due || 0,
+        extraKmDue: data?.account?.extra_km_due || 0,
+      };
+    }
+    setPay(value);
+  };
+
+  // New day starts at midnight: re-read the account so today's rent popup appears
+  // even if the app was left open overnight.
+  useEffect(() => {
+    // ms until the next IST midnight (IST = UTC+5:30, no DST)
+    const IST_MS = 5.5 * 3600 * 1000;
+    const DAY_MS = 24 * 3600 * 1000;
+    const nowMs = Date.now();
+    const msToMidnight = DAY_MS - ((nowMs + IST_MS) % DAY_MS) + 5000;
+    const t = setTimeout(() => refresh(), msToMidnight);
+    return () => clearTimeout(t);
+  }, [data?.account?.today_date]);
 
   // Update modal visibility when data loads
   useEffect(() => {
@@ -85,12 +135,15 @@ export default function DriverHome() {
   const submitOdo = async (e) => {
     e.preventDefault();
     if (!data?.deposit || data.deposit.status !== "paid") return setOdoError("You must pay the Security Deposit before starting a trip.");
-    if (!data?.driver?.active_trip_id && data?.account && data.account.outstanding_amount > 0) return setOdoError("You must pay your outstanding rent before starting a trip.");
+    if (!data?.driver?.active_trip_id && data?.account) {
+      if ((data.account.extra_km_due || 0) > 0) return setOdoError("You must pay your Extra KM charges before starting a trip.");
+      if ((data.account.rent_due || 0) > 0) return setOdoError("You must pay your Daily Rent before starting a trip.");
+    }
     if (!odoReading) return setOdoError("Reading is required");
     if (!odoImage) return setOdoError("Image is required");
     setOdoLoading(true);
     setOdoError("");
-    const wasEndingTrip = !!data?.driver?.active_trip_id;
+    //const wasEndingTrip = !!data?.driver?.active_trip_id;
     try {
       const fd = new FormData();
       fd.append("reading", odoReading);
@@ -102,7 +155,7 @@ export default function DriverHome() {
       // Small delay to ensure DB write propagates before re-reading
       await new Promise(r => setTimeout(r, 400));
       await refresh();
-      if (wasEndingTrip) setPromptPayAfterTrip(true);
+      // if (wasEndingTrip) setPromptPayAfterTrip(true);
     } catch (err) {
       setOdoError(err.response?.data?.detail || "Failed to upload");
     } finally {
@@ -113,6 +166,7 @@ export default function DriverHome() {
   if (!data) return null;
   const { driver, rental, account, deposit } = data;
 
+  if (account?.pending_catchup) return <CatchupScreen />;
   if (account?.status === "blocked") return <BlockedScreen />;
   
   const pkgName = (driver?.package_name || rental?.package_name || "").toLowerCase();
@@ -124,7 +178,8 @@ export default function DriverHome() {
   const depositPaid = !deposit || deposit.amount === 0 || deposit.status === "paid";
   const kyc = driver.kyc_status;
   
-  const today = new Date().toISOString().split("T")[0];
+  // Must match the backend, which stores last_odometer_date in IST
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
   
   const isFullyAssigned = !!pkgName && !!driver?.vehicle_id;
   
@@ -203,37 +258,64 @@ export default function DriverHome() {
             {odoError && (
               <div className="p-3 bg-red-50 border border-red-100 rounded-xl mb-4 text-center">
                 <div className="text-red-600 text-sm font-semibold mb-2">{odoError}</div>
-                {odoError.includes("outstanding") && (
+                {odoError.includes("Extra KM") && (
+                  <button 
+                    onClick={() => { setShowEndModal(false); setPay("extra_km"); }}
+                    className="px-4 py-1.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors shadow-sm"
+                  >
+                    Pay Extra KM Now
+                  </button>
+                )}
+                {odoError.includes("Daily Rent") && (
                   <button 
                     onClick={() => { setShowEndModal(false); setPay("daily"); }}
                     className="px-4 py-1.5 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 transition-colors shadow-sm"
                   >
-                    Pay Outstanding Now
+                    Pay Daily Rent Now
                   </button>
                 )}
               </div>
             )}
             
-            {(!activeTripId && account?.outstanding_amount > 0) ? (
+            {(!activeTripId && ((account?.extra_km_due || 0) > 0 || (account?.rent_due || 0) > 0)) ? (
               <div className="flex flex-col items-center text-center mt-2">
                 <div className="w-16 h-16 rounded-full bg-red-100 text-red-500 flex items-center justify-center mb-4">
                   <AlertTriangle className="w-8 h-8" />
                 </div>
-                <h2 className="text-xl font-extrabold text-slate-900 mb-2">Payment Required</h2>
-                <p className="text-slate-500 text-sm mb-6">
-                  You have an outstanding balance of {inr(account.outstanding_amount)}. Please pay it to start today's trip.
-                  <br /><br />
-                  <span className="block text-xs font-medium text-slate-400">Note: Daily rental amount must be paid whether you operate the vehicle or keep it idle.</span>
-                  {account?.unpaid_dates?.length > 0 && (
-                    <span className="block mt-2 text-xs font-bold text-red-500">Unpaid Dates: {account.unpaid_dates.join(", ")}</span>
-                  )}
-                </p>
-                <button 
-                  onClick={() => { setShowEndModal(false); setPay("daily"); }}
-                  className="w-full h-12 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold transition-colors"
-                >
-                  Pay Outstanding Now
-                </button>
+                {(account?.extra_km_due || 0) > 0 ? (
+                  <>
+                    <h2 className="text-xl font-extrabold text-slate-900 mb-2">Extra KM Charges Due</h2>
+                    <p className="text-slate-500 text-sm mb-6">
+                      You have extra KM charges of {inr(account.extra_km_due)} from your last trip. Please pay this first before your daily rent.
+                    </p>
+                    <button 
+                      onClick={() => { setShowEndModal(false); setPay("extra_km"); }}
+                      className="w-full h-12 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold transition-colors"
+                    >
+                      Pay Extra KM Charges Now
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-xl font-extrabold text-slate-900 mb-2">Daily Rent Due</h2>
+                    <p className="text-slate-500 text-sm mb-6">
+                      Please pay today's daily rent of {inr(account.rent_due)} to start your trip.
+                      <br /><br />
+                      <span className="block text-xs font-medium text-slate-400">Note: Daily rental amount must be paid whether you operate the vehicle or keep it idle.</span>
+                      {Object.keys(account?.rent_by_date || {}).length > 0 && (
+                        <span className="block mt-2 text-xs font-bold text-red-500">
+                          Unpaid Dates: {Object.keys(account.rent_by_date).sort().join(", ")}
+                        </span>
+                      )}
+                    </p>
+                    <button 
+                      onClick={() => { setShowEndModal(false); setPay("daily"); }}
+                      className="w-full h-12 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold transition-colors"
+                    >
+                      Pay Daily Rent Now
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <form onSubmit={submitOdo} className="space-y-4">
@@ -427,7 +509,7 @@ export default function DriverHome() {
       <div className="grid grid-cols-2 gap-3 mt-5">
         <div className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid="home-outstanding">
           <div className="flex items-center gap-1.5 text-slate-500 text-xs"><AlertTriangle className="w-3.5 h-3.5" /> Outstanding</div>
-          <div className={`text-xl font-extrabold mt-1 ${account?.outstanding_amount ? "text-amber-600" : "text-slate-900"}`}>{inr(account?.outstanding_amount || 0)}</div>
+          <div className={`text-xl font-extrabold mt-1 ${account?.outstanding_amount ? "text-amber-600" : "text-slate-900"}`}>{inr((account?.extra_km_due || 0) > 0 ? account.extra_km_due : (account?.outstanding_amount || 0))}</div>
           {account?.overdue_days > 0 && <div className="text-[11px] text-amber-600 mt-0.5">{account.overdue_days} day{account.overdue_days > 1 ? "s" : ""} unpaid</div>}
         </div>
         {!depositPaid && deposit?.amount > 0 && (
@@ -458,23 +540,32 @@ export default function DriverHome() {
       {/* Spacer to prevent content from hiding behind sticky bar */}
       <div className="h-24"></div>
 
-      {/* Sticky Bottom Payment Bar - shown ONLY when there is actual outstanding amount to pay */}
-      {isFullyAssigned && (account?.outstanding_amount || 0) > 0 && (
+      {/* Sticky Bottom Payment Bar - shown ONLY when there is rent or extra-km due */}
+      {isFullyAssigned && ((account?.extra_km_due || 0) > 0 || (account?.rent_due || 0) > 0) && (
         <div className="fixed bottom-16 left-1/2 -translate-x-1/2 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.05)] p-4 flex items-center justify-between z-40 max-w-md w-full">
           <div>
-            {/* Show exact rent + overage breakdown */}
-            <div className="text-2xl font-bold text-amber-600 leading-none mb-1">
-              {inr(account.outstanding_amount)}
-            </div>
-            <div className="text-xs text-slate-500">
-              <span className="text-slate-700 font-medium">Rent {inr(rental?.daily_rate || 0)}</span>
-              {(account.outstanding_amount - (rental?.daily_rate || 0)) > 0 && (
-                <span className="text-red-500 font-semibold"> + Extra KM {inr(account.outstanding_amount - (rental?.daily_rate || 0))}</span>
-              )}
-            </div>
+            {/* Charges are paid one at a time: Extra KM first, then Rent.
+                So show ONLY the charge that "Proceed to Payment" will actually pay. */}
+            {(account?.extra_km_due || 0) > 0 ? (
+              <>
+                <div className="text-2xl font-bold text-red-500 leading-none mb-1">
+                  {inr(account.extra_km_due)}
+                </div>
+                <div className="text-xs text-red-500 font-semibold">Extra KM charges</div>
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold text-amber-600 leading-none mb-1">
+                  {inr(account?.rent_due || 0)}
+                </div>
+                <div className="text-xs text-slate-700 font-medium">
+  Daily Rent{Object.keys(account?.rent_by_date || {}).length > 1 ? ` · ${Object.keys(account.rent_by_date).length} days` : ""}
+</div>
+              </>
+            )}
           </div>
           <button 
-            onClick={() => setPay("daily")}
+            onClick={() => setPay((account?.extra_km_due || 0) > 0 ? "extra_km" : "daily")}
             className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 h-12 rounded-xl font-semibold transition-colors"
           >
             Proceed to Payment
@@ -482,7 +573,7 @@ export default function DriverHome() {
         </div>
       )}
 
-      <PayModals pay={pay} setPay={setPay} data={data} refresh={refresh} />
+      <PayModals pay={pay} setPay={handleSetPay} data={data} refresh={refresh} />
     </div>
   );
 }
@@ -493,13 +584,17 @@ export function PayModals({ pay, setPay, data, refresh }) {
   const common = { driverName: driver?.name, driverPhone: driver?.phone, onClose: () => setPay(null), onDone: () => refresh() };
   return (
     <>
-      <PayModal open={pay === "daily"} kind="daily" title="Pay Outstanding Balance" amount={account?.outstanding_amount || 0}
+      <PayModal open={pay === "daily"} kind="daily" title="Pay Daily Rent" amount={account?.rent_due || 0}
         lines={[
-          { label: `Daily Rent · ${rental?.package_name}`, value: inr(rental?.daily_rate || 0) },
-          ...((account?.outstanding_amount || 0) > (rental?.daily_rate || 0) ? [
-            { label: `Extra KM Overage`, value: inr((account?.outstanding_amount || 0) - (rental?.daily_rate || 0)) }
-          ] : []),
-          { label: "Total Payable", value: inr(account?.outstanding_amount || 0), strong: true },
+          ...(Object.keys(account?.rent_by_date || {}).length > 1
+            ? Object.entries(account.rent_by_date).sort(([a], [b]) => a.localeCompare(b)).map(([d, amt]) => ({ label: `Rent · ${d}`, value: inr(amt) }))
+            : [{ label: `Daily Rent · ${rental?.package_name}`, value: inr(account?.rent_due || 0) }]),
+          { label: "Total Payable", value: inr(account?.rent_due || 0), strong: true },
+        ]} {...common} />
+      <PayModal open={pay === "extra_km"} kind="extra_km" title="Pay Extra KM Charges" amount={account?.extra_km_due || 0}
+        lines={[
+          { label: "Extra KM Overage", value: inr(account?.extra_km_due || 0) },
+          { label: "Total Payable", value: inr(account?.extra_km_due || 0), strong: true },
         ]} {...common} />
       <PayModal open={pay === "deposit"} kind="deposit" title="Security Deposit" amount={deposit?.amount ?? 0}
         lines={[

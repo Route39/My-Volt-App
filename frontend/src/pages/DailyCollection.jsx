@@ -6,6 +6,7 @@ import { Loader2, ArrowUpRight, ArrowDownRight, AlertCircle, Check, Search } fro
 import { PageHeader } from "../components/common/Page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { DriverCode } from "../lib/driverCodes";
 
 export default function DailyCollection() {
   const { city: gCity } = useApp();
@@ -26,15 +27,17 @@ export default function DailyCollection() {
       if (search) p.driver_name = search;
       
       if (dateFilter === "today") {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
         p.from_date = today;
         p.to_date = today;
       } else if (dateFilter === "this_week") {
-        const today = new Date();
-        const firstDay = new Date(today.setDate(today.getDate() - today.getDay()));
-        const lastDay = new Date(today.setDate(today.getDate() - today.getDay() + 6));
-        p.from_date = firstDay.toISOString().split('T')[0];
-        p.to_date = lastDay.toISOString().split('T')[0];
+        // Week = Sunday to Saturday, based on today's date in IST
+        const [y, m, d] = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).split("-").map(Number);
+        const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+        const firstDay = new Date(Date.UTC(y, m - 1, d - dow));
+        const lastDay = new Date(Date.UTC(y, m - 1, d - dow + 6));
+        p.from_date = firstDay.toISOString().split("T")[0];
+        p.to_date = lastDay.toISOString().split("T")[0];
       } else if (dateFilter === "this_month") {
         const today = new Date();
         const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -58,9 +61,47 @@ export default function DailyCollection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalRevenue = useMemo(() => items.reduce((acc, it) => acc + (it.total_charge ?? it.daily_rate), 0), [items]);
-  const totalSettled = useMemo(() => items.reduce((acc, it) => acc + it.today_paid, 0), [items]);
-  const totalUnsettled = totalRevenue - totalSettled;
+  // Deposit is a ONE-TIME payment per driver, so it is counted once, on the row of the
+  // day it was paid. Paid deposits are de-duplicated by transaction id; pending deposits
+  // (no txn yet) are de-duplicated per driver and shown on the driver's latest row.
+  const { totalRevenue, totalSettled, totalUnsettled, depositRowIds } = useMemo(() => {
+    let revenue = 0, settled = 0, pendingDeposit = 0;
+    const seen = new Set();
+    const rowIds = new Set();
+
+    for (const it of items) {
+      revenue += (it.total_charge ?? it.daily_rate) || 0;
+      settled += it.today_paid || 0;
+
+      if (!(it.deposit > 0)) continue;
+      const isPaid = it.deposit_status === "paid";
+
+      if (isPaid) {
+        // only the day it was paid (legacy records without a paid date fall through to the first row)
+        if (it.deposit_paid_date && it.deposit_paid_date !== it.date) continue;
+        const key = `paid:${it.deposit_transaction_id || it.driver_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rowIds.add(it.id);
+        const amt = it.deposit_paid || it.deposit || 0;
+        revenue += amt;
+        settled += amt;
+      } else {
+        const key = `pending:${it.driver_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rowIds.add(it.id);
+        revenue += it.deposit;
+        pendingDeposit += it.deposit;
+      }
+    }
+    return {
+      totalRevenue: revenue,
+      totalSettled: settled,
+      totalUnsettled: revenue - settled,
+      depositRowIds: rowIds,
+    };
+  }, [items]);
 
   return (
     <div>
@@ -156,19 +197,20 @@ export default function DailyCollection() {
               <th className="px-5 py-4">Driver</th>
               <th className="px-5 py-4">Date</th>
               <th className="px-5 py-4">Vehicle</th>
-              <th className="px-5 py-4">Start Meter</th>
-              <th className="px-5 py-4">End Meter</th>
+              <th className="px-5 py-4">Start KM</th>
+              <th className="px-5 py-4">End KM</th>
               <th className="px-5 py-4">Total KM</th>
               <th className="px-5 py-4 text-amber-500">Revenue</th>
               <th className="px-5 py-4 text-red-500">Extra KM</th>
-              <th className="px-5 py-4">Payment Status</th>
+              <th className="px-5 py-4">Daily Rent</th>
+              <th className="px-5 py-4">Extra KM Charges</th>
               <th className="px-5 py-4">Deposit</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="9" className="px-5 py-16 text-center text-mv-muted">
+                <td colSpan="10" className="px-5 py-16 text-center text-mv-muted">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                     Loading collection data...
@@ -177,7 +219,7 @@ export default function DailyCollection() {
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan="9" className="px-5 py-16 text-center">
+                <td colSpan="10" className="px-5 py-16 text-center">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                       <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -193,7 +235,7 @@ export default function DailyCollection() {
                   <tr key={it.id} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
                     <td className="px-5 py-4 font-medium flex items-center gap-3">
                       <Avatar className="w-8 h-8"><AvatarImage src={it.driver_avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{it.driver_name?.[0]}</AvatarFallback></Avatar>
-                      {it.driver_name}
+                      {it.driver_name} <DriverCode id={it.driver_id} className="block" />
                     </td>
                     <td className="px-5 py-4 text-mv-muted whitespace-nowrap">{it.date || "—"}</td>
                     <td className="px-5 py-4">
@@ -224,32 +266,16 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      {(it.start_meter && !it.end_meter) ? (
-                        /* Trip still ongoing — start posted but no end KM yet */
-                        <div className="inline-flex flex-col gap-0.5">
-                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 text-blue-600 text-xs font-bold tracking-wide">
-                            🔄 Trip In Progress
-                          </div>
-                          <span className="text-[11px] text-blue-500/80 ml-1">Yet to pay after ride ends</span>
-                        </div>
-                      ) : it.daily_status === "paid" ? (
+                      {it.rent_status === "paid" ? (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
                           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
-                            {it.payment_method === "razorpay" && <span className="ml-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] uppercase tracking-wider border border-indigo-100">Razorpay</span>}
-                            {it.payment_method === "cash" && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 text-[9px] uppercase tracking-wider border border-amber-100">Cash</span>}
                           </div>
-                          <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.total_charge ?? it.today_paid)}</span>
-                          {it.extra_km_charge > 0 && (
-                            <span className="text-[10px] text-slate-500">Rent {inr(it.daily_rate)} + Extra KM {inr(it.extra_km_charge)}</span>
-                          )}
-                          {it.transaction_id && (
+                          <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.rent_amount)}</span>
+                          {it.rent_transaction_id && (
                             <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
-                              TXN {it.transaction_id}
+                              TXN {it.rent_transaction_id}
                             </div>
-                          )}
-                          {it.paid_on && it.paid_on !== it.date && (
-                            <div className="text-[10px] font-semibold text-slate-400">Paid on {it.paid_on}</div>
                           )}
                         </div>
                       ) : (
@@ -257,12 +283,40 @@ export default function DailyCollection() {
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
                             NOT PAID
                           </div>
-                          <span className="text-xs font-bold text-red-500/80 ml-1">Due: {inr(Math.max(it.outstanding_amount || 0, (it.total_charge ?? it.daily_rate) - it.today_paid))}</span>
+                          <span className="text-xs font-bold text-red-500/80 ml-1">{inr(it.rent_amount)}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {(it.start_meter && !it.end_meter) ? (
+                        <span className="text-[11px] text-blue-500/80">Trip in progress</span>
+                      ) : (it.extra_km_amount || 0) <= 0 ? (
+                        <span className="text-slate-400 font-medium">0</span>
+                      ) : it.extra_km_status === "paid" ? (
+                        <div className="flex flex-col gap-1 mt-1 mb-1">
+                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+                            <Check className="w-3.5 h-3.5" /> PAID
+                          </div>
+                          <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.extra_km_amount)}</span>
+                          {it.extra_km_transaction_id && (
+                            <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
+                              TXN {it.extra_km_transaction_id}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="inline-flex flex-col gap-0.5">
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
+                            NOT PAID
+                          </div>
+                          <span className="text-xs font-bold text-red-500/80 ml-1">{inr(it.extra_km_amount)}</span>
                         </div>
                       )}
                     </td>
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
-                      {it.deposit_status !== "paid" && it.deposit > 0 ? (
+                      {!depositRowIds.has(it.id) ? (
+                        <span className="text-slate-400 font-medium">—</span>
+                      ) : it.deposit_status !== "paid" && it.deposit > 0 ? (
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-bold">DEPOSIT PENDING</span>
                           <span className="text-red-500 font-bold">{inr(it.deposit)}</span>
