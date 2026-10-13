@@ -157,7 +157,7 @@ export default function OdometerApprovals() {
               <th className="px-3 py-4 whitespace-nowrap text-red-500">Extra KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Daily KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Status</th>
-              <th className="px-3 py-4 whitespace-nowrap text-center">Photos</th>
+              {/* <th className="px-3 py-4 whitespace-nowrap text-center">Photos</th> */}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -208,7 +208,8 @@ export default function OdometerApprovals() {
                     </td>
                     
                     {/* Date */}
-                    <td className="px-3 py-4 text-slate-500 whitespace-nowrap">{idx === 0 ? log.date : ""}</td>
+                    {/* <td className="px-3 py-4 text-slate-500 whitespace-nowrap">{idx === 0 ? log.date : ""}</td> */}
+                    <td className="px-3 py-4 text-slate-500 whitespace-nowrap">{log.date || ""}</td>
                     
                     {/* Package */}
                     <td className="px-3 py-4 whitespace-nowrap">
@@ -280,7 +281,7 @@ export default function OdometerApprovals() {
                       </span>
                     </td>
                     
-                    {/* Photos */}
+                    {/* Photos column hidden
                     <td className="px-3 py-4 text-center whitespace-nowrap">
                       <div className="flex gap-2 justify-center">
                         <button
@@ -301,6 +302,7 @@ export default function OdometerApprovals() {
                         )}
                       </div>
                     </td>
+                    Photos column hidden */}
                   </tr>
                 );
                   })}

@@ -160,14 +160,15 @@ export default function DriverHome() {
       if ((data.account.rent_due || 0) > 0) return setOdoError("You must pay your Daily Rent before starting a trip.");
     }
     if (!odoReading) return setOdoError("Reading is required");
-    if (!odoImage) return setOdoError("Image is required");
+    // if (!odoImage) return setOdoError("Image is required");  // odometer image is now optional
     setOdoLoading(true);
     setOdoError("");
     //const wasEndingTrip = !!data?.driver?.active_trip_id;
     try {
       const fd = new FormData();
       fd.append("reading", odoReading);
-      fd.append("image", odoImage);
+      // fd.append("image", odoImage);
+      if (odoImage) fd.append("image", odoImage);  // optional
       await dapi.post("/driver/odometer", fd);
       setShowEndModal(false);
       setOdoReading("");
@@ -339,6 +340,7 @@ export default function DriverHome() {
               </div>
             ) : (
               <form onSubmit={submitOdo} className="space-y-4">
+                {/* ODOMETER IMAGE FIELD HIDDEN (optional now)
                 <button 
                   type="button" 
                   onClick={async () => {
@@ -366,6 +368,7 @@ export default function DriverHome() {
                     </>
                   )}
                 </button>
+                END ODOMETER IMAGE FIELD HIDDEN */}
 
               <input 
                 type="number" 

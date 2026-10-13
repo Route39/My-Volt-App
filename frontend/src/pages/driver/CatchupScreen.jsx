@@ -43,12 +43,13 @@ export default function CatchupScreen() {
   };
 
   const submitPhoto = async () => {
-    if (!image) return setSubmitError("Please capture your current odometer photo.");
+    // if (!image) return setSubmitError("Please capture your current odometer photo.");  // optional now
     setSubmitting(true);
     setSubmitError("");
     try {
       const fd = new FormData();
-      fd.append("image", image);
+      // fd.append("image", image);
+      if (image) fd.append("image", image);  // optional
       await dapi.post("/driver/catchup/photo", fd);
       await refresh();
     } catch (err) {
@@ -114,11 +115,11 @@ export default function CatchupScreen() {
               className="w-full h-12 mt-1.5 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 font-medium outline-none focus:border-amber-500 focus:bg-white transition-colors" />
             <div className="text-[11px] text-slate-400 mt-1">Last recorded reading: {baseline} km</div>
 
-            <div className="mt-4"><CameraBox /></div>
+            {/* <div className="mt-4"><CameraBox /></div> */}
 
             {quoteError && <div className="text-red-600 text-xs font-semibold mt-3 text-center">{quoteError}</div>}
 
-            <button onClick={getQuote} disabled={quoteLoading || !reading || !image}
+            <button onClick={getQuote} disabled={quoteLoading || !reading}
               className="mt-5 w-full h-12 rounded-2xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
               {quoteLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Continue to Payment"}
             </button>
@@ -131,11 +132,11 @@ export default function CatchupScreen() {
             <div className="text-xs text-slate-500 mb-1">Confirmed odometer reading</div>
             <div className="text-lg font-bold text-slate-800 mb-4">{account.catchup_reading} km</div>
 
-            <CameraBox />
+            {/* <CameraBox /> */}
 
             {submitError && <div className="text-red-600 text-xs font-semibold mt-3 text-center">{submitError}</div>}
 
-            <button onClick={submitPhoto} disabled={submitting || !image}
+            <button onClick={submitPhoto} disabled={submitting}
               className="mt-5 w-full h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit & Continue"}
             </button>

@@ -85,7 +85,7 @@ function NewServiceDialog({ open, setOpen, onDone }) {
   const save = async () => {
     const v = vehicles.find((x) => x.id === form.vehicle_id);
     if (!v) { toast.error("Select a vehicle"); return; }
-    const body = { ...form, vehicle_number: v.vehicle_number, registration_number: v.registration_number, city: v.city, cost: Number(form.cost), labour: Number(form.labour), start_date: new Date(form.start_date).toISOString(), completion_date: new Date(form.completion_date).toISOString(), next_service_date: form.next_service_date ? new Date(form.next_service_date).toISOString() : null, parts: [] };
+    const body = { ...form, vehicle_number: v.vehicle_number, registration_number: v.registration_number, city: v.city, cost: Number(form.cost), labour: Number(form.labour), start_date: form.start_date ? new Date(form.start_date).toISOString() : null, completion_date: form.completion_date ? new Date(form.completion_date).toISOString() : null, next_service_date: form.next_service_date ? new Date(form.next_service_date).toISOString() : null, parts: [] };
     if (!body.service_request_id) delete body.service_request_id;
     try { await api.post("/vehicle-services", body); toast.success("Vehicle service completed ✓"); onDone(); } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
@@ -140,6 +140,7 @@ function EditServiceDialog({ open, setOpen, service, onDone }) {
       <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-display">Edit Vehicle Service</DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-4 pt-1">
+          <div className="col-span-2"><Field label="Vehicle No."><TextInput value={service?.registration_number ? `${service.registration_number} (${service.vehicle_number})` : (service?.vehicle_number || "")} disabled readOnly className="opacity-70 cursor-not-allowed" /></Field></div>
           <Field label="Service Centre"><TextInput value={form.service_centre} onChange={(e) => set("service_centre", e.target.value)} /></Field>
           <Field label="Technician"><TextInput value={form.technician} onChange={(e) => set("technician", e.target.value)} /></Field>
           <Field label="Issue"><TextInput value={form.issue} onChange={(e) => set("issue", e.target.value)} /></Field>

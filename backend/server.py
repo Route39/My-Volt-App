@@ -4224,7 +4224,8 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
 async def submit_odometer(
     request: Request,
     reading: int = Form(...),
-    image: UploadFile = File(...)
+    # image: UploadFile = File(...)
+    image: Optional[UploadFile] = File(None)  # odometer image is optional
 ):
     user = await get_user(request)
     require_driver(user)
@@ -4232,12 +4233,20 @@ async def submit_odometer(
     today = _today_ist().strftime("%Y-%m-%d")
     current_month_str = _today_ist().strftime("%Y-%m")
 
-    ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
-    filename = f"{user['id']}_odo_{uuid.uuid4().hex[:8]}.{ext}"
-    path = f"uploads/{filename}"
-    with open(path, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
-    url = f"/uploads/{filename}"
+    # ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
+    # filename = f"{user['id']}_odo_{uuid.uuid4().hex[:8]}.{ext}"
+    # path = f"uploads/{filename}"
+    # with open(path, "wb") as buffer:
+    #     shutil.copyfileobj(image.file, buffer)
+    # url = f"/uploads/{filename}"
+    url = None
+    if image is not None and image.filename:
+        ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
+        filename = f"{user['id']}_odo_{uuid.uuid4().hex[:8]}.{ext}"
+        path = f"uploads/{filename}"
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        url = f"/uploads/{filename}"
     
     active_trip_id = user.get("active_trip_id")
     
@@ -4543,7 +4552,8 @@ async def driver_catchup_quote(reading: int, request: Request):
 
 
 @api.post("/driver/catchup/photo")
-async def driver_catchup_photo(request: Request, image: UploadFile = File(...)):
+# async def driver_catchup_photo(request: Request, image: UploadFile = File(...)):
+async def driver_catchup_photo(request: Request, image: Optional[UploadFile] = File(None)):  # image optional
     user = await get_user(request)
     require_driver(user)
     org = user.get("organization_id")
@@ -4558,12 +4568,20 @@ async def driver_catchup_photo(request: Request, image: UploadFile = File(...)):
         raise HTTPException(400, "Missing catch-up reading. Please contact support.")
     baseline = acct.get("catchup_baseline_reading") or 0
 
-    ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
-    filename = f"{did}_catchup_{uuid.uuid4().hex[:8]}.{ext}"
-    path = f"uploads/{filename}"
-    with open(path, "wb") as buffer:
-        shutil.copyfileobj(image.file, buffer)
-    url = f"/uploads/{filename}"
+    # ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
+    # filename = f"{did}_catchup_{uuid.uuid4().hex[:8]}.{ext}"
+    # path = f"uploads/{filename}"
+    # with open(path, "wb") as buffer:
+    #     shutil.copyfileobj(image.file, buffer)
+    # url = f"/uploads/{filename}"
+    url = None
+    if image is not None and image.filename:
+        ext = image.filename.split(".")[-1] if "." in image.filename else "jpg"
+        filename = f"{did}_catchup_{uuid.uuid4().hex[:8]}.{ext}"
+        path = f"uploads/{filename}"
+        with open(path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        url = f"/uploads/{filename}"
 
     diff_km = max(0, reading - baseline)
     today = _today_ist().strftime("%Y-%m-%d")
