@@ -18,7 +18,11 @@ function loadRazorpay() {
 }
 
 // Reusable payment sheet. kind: deposit | daily | outstanding
-export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {} }) {
+// Tomorrow's date in IST (YYYY-MM-DD) - earliest date allowed for the 2nd half payment
+const tomorrowIST = () => new Date(Date.now() + 5.5 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {}, askNextDate = false }) {
+  const [nextDate, setNextDate] = useState("");
   const [phase, setPhase] = useState("confirm"); // confirm | processing | success
   const [result, setResult] = useState(null);
 
@@ -27,9 +31,12 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
   const close = () => { setPhase("confirm"); setResult(null); onClose(); };
 
   const pay = async () => {
+    if (askNextDate && (!nextDate || nextDate < tomorrowIST())) {
+      return toast.error("Select a date for the next half payment (from tomorrow).");
+    }
     setPhase("processing");
     try {
-      const { data: order } = await dapi.post("/driver/payments/create-order", { kind, ...extraParams });
+      const { data: order } = await dapi.post("/driver/payments/create-order", { kind, ...extraParams, ...(askNextDate ? { next_payment_date: nextDate } : {}) });
       let verifyRes;
       if (order.gateway === "razorpay") {
         if (Capacitor.isNativePlatform()) {
@@ -140,10 +147,18 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
                 </div>
               ))}
             </div>
-            <button onClick={pay} disabled={phase === "processing"} data-testid="pay-now-btn"
+            <button onClick={pay} disabled={phase === "processing" || (askNextDate && !nextDate)} data-testid="pay-now-btn"
               className="mt-5 w-full h-12 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-70">
               {phase === "processing" ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</> : <>Pay {inr(amount)}</>}
             </button>
+            {askNextDate && (
+              <div className="mt-4" data-testid="pay-next-date">
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">Select date for next half payment</label>
+                <input type="date" min={tomorrowIST()} value={nextDate} onChange={(e) => setNextDate(e.target.value)}
+                  className="w-full h-11 rounded-xl border border-slate-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                <div className="text-[11px] text-slate-400 mt-1">Pick a date from tomorrow onwards to enable the Pay button.</div>
+              </div>
+            )}
             <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
               <ShieldCheck className="w-3.5 h-3.5" /> Secured payment · confirmed by server
             </div>

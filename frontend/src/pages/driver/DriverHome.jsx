@@ -63,7 +63,7 @@ export default function DriverHome() {
   useEffect(() => {
     if (!data) return;
     if (data.driver?.active_trip_id) return;
-    if (data.deposit && data.deposit.amount > 0 && data.deposit.status !== "paid") return;
+    if (data.deposit?.action_required) return;
     if (showKycModal) return;
     const extraKmDue = data.account?.extra_km_due || 0;
     const rentDue = data.account?.rent_due || 0;
@@ -122,7 +122,7 @@ export default function DriverHome() {
     }
     
     // Auto-show deposit popup if unpaid
-    if (data && data.deposit && data.deposit.amount > 0 && data.deposit.status !== "paid") {
+    if (data?.deposit?.action_required) {
       setPay("deposit");
     }
     
@@ -154,7 +154,7 @@ export default function DriverHome() {
   
   const submitOdo = async (e) => {
     e.preventDefault();
-    if (!data?.deposit || data.deposit.status !== "paid") return setOdoError("You must pay the Security Deposit before starting a trip.");
+    if (!data?.deposit || data.deposit.action_required) return setOdoError("You must pay the Security Deposit before starting a trip.");
     if (!data?.driver?.active_trip_id && data?.account) {
       if ((data.account.extra_km_due || 0) > 0) return setOdoError("You must pay your Extra KM charges before starting a trip.");
       if ((data.account.rent_due || 0) > 0) return setOdoError("You must pay your Daily Rent before starting a trip.");
@@ -196,7 +196,7 @@ export default function DriverHome() {
   const km_percentage = Math.min(100, (current_month_kms / limit_km) * 100);
 
   const st = STATUS_UI[account?.status || "active"];
-  const depositPaid = !deposit || deposit.amount === 0 || deposit.status === "paid";
+  const depositPaid = !deposit || deposit.amount === 0 || !deposit.action_required;
   const kyc = driver.kyc_status;
   
   // Must match the backend, which stores last_odometer_date in IST
@@ -562,8 +562,8 @@ export default function DriverHome() {
         {!depositPaid && deposit?.amount > 0 && (
           <div className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid="home-deposit">
             <div className="flex items-center gap-1.5 text-slate-500 text-xs"><Wallet className="w-3.5 h-3.5" /> Security Deposit</div>
-            <div className="text-xl font-extrabold mt-1 text-slate-900">{inr(deposit.amount)}</div>
-            <div className="text-[11px] mt-0.5 text-amber-600">Pending</div>
+            <div className="text-xl font-extrabold mt-1 text-slate-900">{inr(deposit.pay_now)}</div>
+            <div className="text-[11px] mt-0.5 text-amber-600">{deposit.status === "partial" ? "Remaining half due" : deposit.partial_enabled ? "First half pending" : "Pending"}</div>
           </div>
         )}
       </div>
@@ -580,7 +580,7 @@ export default function DriverHome() {
       {(!depositPaid && deposit?.amount > 0) && (
         <button onClick={() => setPay("deposit")} data-testid="home-pay-deposit-btn"
           className="w-full h-12 rounded-2xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors mt-5">
-          Pay Security Deposit. {inr(deposit.amount)}
+          Pay Security Deposit. {inr(deposit.pay_now)}
         </button>
       )}
 
@@ -692,8 +692,18 @@ export function PayModals({ pay, setPay, data, refresh }) {
           { label: "Extra KM Overage", value: inr(account?.extra_km_due || 0) },
           { label: "Total Payable", value: inr(account?.extra_km_due || 0), strong: true },
         ]} {...common} />
-      <PayModal open={pay === "deposit"} kind="deposit" title="Security Deposit" amount={deposit?.amount ?? 0}
-        lines={[
+      <PayModal open={pay === "deposit"} kind="deposit"
+        title={deposit?.status === "partial" ? "Pay Remaining Security Deposit" : deposit?.partial_enabled ? "Pay Partial Deposit Amount" : "Security Deposit"}
+        amount={deposit?.pay_now ?? 0}
+        askNextDate={deposit?.status !== "partial" && !!deposit?.partial_enabled}
+        lines={deposit?.status === "partial" ? [
+          { label: "Security Amount", value: inr(deposit?.amount ?? 0) },
+          { label: "Already Paid", value: inr(deposit?.paid_amount ?? 0) },
+          { label: "Pay Remaining Half Security Amount", value: inr(deposit?.remaining_amount ?? 0), strong: true },
+        ] : deposit?.partial_enabled ? [
+          { label: "Security Amount", value: inr(deposit?.amount ?? 0) },
+          { label: "Pay Half Of The Amount", value: inr(deposit?.half_amount ?? 0), strong: true },
+        ] : [
           { label: "Refundable Security Deposit", value: inr(deposit?.amount ?? 0) },
           { label: "Total Payable", value: inr(deposit?.amount ?? 0), strong: true },
         ]} {...common} />

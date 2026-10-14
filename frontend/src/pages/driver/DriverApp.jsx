@@ -54,6 +54,9 @@ function DriverShell() {
 
   if (data?.admin_block) return <AdminBlockedScreen type={data.admin_block} reason={data.admin_block_reason} />;
 
+  // Remaining half of the security deposit is due: keep the driver on Home, where the pay popup is shown
+  if (data?.deposit?.remaining_due && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
+
   return (
     <div className="h-[100dvh] bg-slate-50 flex flex-col overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <div className="max-w-md w-full mx-auto flex flex-col h-full bg-slate-50 relative">

@@ -6,7 +6,7 @@ import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { StatusChip, Skeleton, KycStatusChip } from "../components/common/Primitives";
 import { Field, PrimaryBtn, GhostBtn, TextInput } from "../components/common/Page";
-import { fmtDate } from "../lib/format";
+import { fmtDate, inr } from "../lib/format";
 import imgUrl from "../lib/imgUrl";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
@@ -49,10 +49,10 @@ export default function DriverProfile() {
           </div>
         </div>
         {canEdit && (
-          <div className="flex gap-2">
-            <GhostBtn onClick={() => setAssign(true)} data-testid="assign-vehicle-btn"><ArrowRightLeft className="w-4 h-4" /> Change Vehicle</GhostBtn>
+            <div className="flex flex-wrap justify-end gap-2 sm:w-[864px] [&>button]:whitespace-nowrap [&>button]:w-[calc((100%_-_0.5rem)/2)] sm:[&>button]:w-[210px]">
+            
             <GhostBtn onClick={() => setEdit(true)}><Edit className="w-4 h-4" /> Edit</GhostBtn>
-            {d.deposit_status !== "paid" ? (
+            {/* {d.deposit_status !== "paid" ? (
               <GhostBtn onClick={async () => {
                 if(window.confirm("Mark deposit as paid manually via QR?")) {
                   try {
@@ -80,7 +80,83 @@ export default function DriverProfile() {
               }} className="text-orange-600 hover:text-orange-700 hover:bg-orange-50">
                 <AlertTriangle className="w-4 h-4" /> Mark Deposit Unpaid
               </GhostBtn>
-            )}
+            )} */}
+                        {(() => {
+              const partialOn = !!d.deposit_partial_enabled || d.deposit_status === "partial";
+              const fullDone = d.deposit_status === "paid";
+              const doneCls = "bg-emerald-50 text-emerald-700 border-emerald-300 cursor-default hover:bg-emerald-50";
+              const doneClickCls = "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100";
+              return (
+                <>
+                  <GhostBtn
+                    disabled={fullDone}
+                    title={fullDone ? "Deposit already fully paid" : ""}
+                    data-testid="enable-partial-deposit-btn"
+                    onClick={async () => {
+                      if (fullDone) return;
+                      const enable = !partialOn;
+                      const msg = enable
+                        ? "Enable partial deposit for this driver? The driver will be asked to pay HALF the deposit in the driver app and select a date for the remaining half."
+                        : d.deposit_status === "partial"
+                          ? "Disable partial deposit? The first half already paid will be reset and the driver will be asked for the FULL deposit again."
+                          : "Disable partial deposit? The driver will be asked for the FULL deposit again.";
+                      if (!window.confirm(msg)) return;
+                      try {
+                        await api.post(`/admin/drivers/${d.id}/deposit-partial-toggle`, { enabled: enable });
+                        toast.success(enable ? "Partial deposit enabled" : "Partial deposit disabled");
+                        load();
+                      } catch (e) {
+                        toast.error(e.response?.data?.detail || "Failed to update partial deposit option");
+                      }
+                    }}
+                    className={fullDone ? "opacity-50 cursor-not-allowed " + (partialOn ? doneCls : "") : partialOn ? doneClickCls : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+                    <Check className="w-4 h-4" /> {partialOn ? "Partial Deposit Enabled" : "Enable Partial Deposit"}
+                  </GhostBtn>
+                  <GhostBtn
+                    data-testid="mark-full-deposit-btn"
+                    onClick={async () => {
+                      if (fullDone) {
+                        if (!window.confirm(d.deposit_partial_enabled ? "Mark deposit as UNPAID? The driver will be asked to pay the remaining half." : "Mark deposit as UNPAID? The driver will be asked to pay the full deposit again.")) return;
+                        try {
+                          await api.post(`/admin/drivers/${d.id}/deposit-full-unpaid`);
+                          toast.success("Full deposit marked as unpaid");
+                          load();
+                        } catch (e) {
+                          toast.error(e.response?.data?.detail || "Failed to mark full deposit as unpaid");
+                        }
+                        return;
+                      }
+                      if (window.confirm(d.deposit_status === "partial" ? "Mark the remaining half as paid (full deposit)?" : "Mark the FULL deposit as paid manually via QR?")) {
+                        try {
+                          await api.post(`/admin/drivers/${d.id}/deposit-paid`);
+                          toast.success("Full deposit marked as paid");
+                          load();
+                        } catch (e) {
+                          toast.error(e.response?.data?.detail || "Failed to mark full deposit as paid");
+                        }
+                      }
+                    }}
+                    className={fullDone ? "text-orange-600 hover:text-orange-700 hover:bg-orange-50" : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+                    {fullDone ? <AlertTriangle className="w-4 h-4" /> : <Check className="w-4 h-4" />} {fullDone ? "Mark Deposit Unpaid" : "Mark Deposit Paid (QR)"}
+                  </GhostBtn>
+                  {/* {partialDone && (
+                    <GhostBtn onClick={async () => {
+                      if (window.confirm("Mark deposit as UNPAID? This will prompt the driver to pay again.")) {
+                        try {
+                          await api.post(`/admin/drivers/${d.id}/deposit-unpaid`);
+                          toast.success("Deposit marked as unpaid");
+                          load();
+                        } catch (e) {
+                          toast.error(e.response?.data?.detail || "Failed to mark deposit as unpaid");
+                        }
+                      }
+                    }} className="text-orange-600 hover:text-orange-700 hover:bg-orange-50">
+                      <AlertTriangle className="w-4 h-4" /> Mark Deposit Unpaid
+                    </GhostBtn>
+                  )} */}
+                </>
+              );
+            })()}
             {d.admin_block ? (
               <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
             ) : (
@@ -88,6 +164,7 @@ export default function DriverProfile() {
                 <GhostBtn onClick={() => setLeaveOpen(true)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"><CalendarDays className="w-4 h-4" /> Paid Leave</GhostBtn>
                 <GhostBtn onClick={() => setBlockType("temporary")} className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"><Clock className="w-4 h-4" /> Temporary Block</GhostBtn>
                 <GhostBtn onClick={() => setBlockType("permanent")} className="text-red-500 hover:text-red-600 hover:bg-red-50"><Ban className="w-4 h-4" /> Permanent Block</GhostBtn>
+                <GhostBtn onClick={() => setAssign(true)} data-testid="assign-vehicle-btn"><ArrowRightLeft className="w-4 h-4" /> Change Vehicle</GhostBtn>
               </>
             )}
             {/* <GhostBtn onClick={() => setDel(true)} data-testid="delete-driver-btn" className="text-red-500 hover:text-red-600 hover:bg-red-50"><Trash2 className="w-4 h-4" /> Delete</GhostBtn> */}
@@ -106,6 +183,16 @@ export default function DriverProfile() {
               <div key={k} className="mv-card p-4"><div className="mv-label">{k}</div><div className="text-sm font-medium mt-1">{v || "—"}</div></div>
             ))}
             
+            <div className="mv-card p-4" data-testid="next-half-payment-card">
+              <div className="mv-label">Next Half Payment Date</div>
+              <div className="text-sm font-medium mt-1">
+                {d.deposit_status === "partial" ? (d.deposit_next_payment_date || "Date not set") : d.deposit_status === "paid" ? "Deposit fully paid" : "—"}
+              </div>
+              {d.deposit_status === "partial" && (
+                <div className="text-[11px] text-mv-muted mt-0.5">{inr(d.deposit_remaining_amount)} remaining of {inr(d.deposit_amount)}</div>
+              )}
+            </div>
+
             <div className="mv-card p-4 flex flex-col justify-between">
               <div>
                 <div className="mv-label">Paid Leaves (This Month)</div>

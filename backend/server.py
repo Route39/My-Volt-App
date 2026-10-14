@@ -781,6 +781,12 @@ async def get_driver(did: str, request: Request):
     
     sec_dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": user.get("organization_id") or "route39-org"})
     out["deposit_status"] = sec_dep.get("status", "pending") if sec_dep else "pending"
+    _dep_view = _deposit_decorate(dict(sec_dep)) if sec_dep else {}
+    out["deposit_amount"] = _dep_view.get("amount", 0)
+    out["deposit_paid_amount"] = _dep_view.get("paid_amount", 0)
+    out["deposit_remaining_amount"] = _dep_view.get("remaining_amount", 0)
+    out["deposit_next_payment_date"] = (sec_dep or {}).get("next_payment_date")
+    out["deposit_partial_enabled"] = bool((sec_dep or {}).get("partial_enabled"))
     
     cur_month = _today_ist().strftime("%Y-%m")
     joined_date = d.get("created_at") or _today_ist().isoformat()
@@ -997,10 +1003,92 @@ async def override_deposit_paid(did: str, request: Request):
         "gateway": "manual_qr",
         "created_at": now_iso()
     }
+    if sec_dep and sec_dep.get("status") == "partial":
+        # First half already paid -> this marks only the REMAINING half as paid
+        rec["deposit_part"] = "second"
+        rec["deposit_total"] = float(sec_dep.get("amount") or amount)
+        rec["amount"] = round(rec["deposit_total"] - float(sec_dep.get("paid_amount") or 0), 2)
     insert_res = await db.rental_payments.insert_one(rec)
     rec["_id"] = insert_res.inserted_id
     
     await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
+    return {"ok": True}
+
+
+@api.post("/admin/drivers/{did}/deposit-partial-toggle")
+async def toggle_deposit_partial(did: str, request: Request, body: dict):
+    """Enable / disable the 'pay half now, half later' option for ONE driver.
+    The driver then pays the half from the driver app (no QR / admin payment)."""
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    enabled = bool(body.get("enabled"))
+    dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
+    if not dep:
+        raise HTTPException(status_code=404, detail="Deposit record not found for this driver.")
+    if dep.get("status") == "paid":
+        raise HTTPException(status_code=400, detail="Deposit is already fully paid.")
+    if dep.get("status") == "partial":
+        if enabled:
+            return {"ok": True}
+        # switching it off after the first half was paid: reset to unpaid, full amount is asked again
+        await db.security_deposits.update_one(
+            {"_id": dep["_id"]},
+            {"$set": {"status": "pending", "partial_enabled": False, "transaction_id": None, "paid_at": None},
+             "$unset": {"paid_amount": "", "next_payment_date": "", "first_paid_at": "",
+                        "second_paid_at": "", "first_transaction_id": ""}})
+    else:
+        await db.security_deposits.update_one({"_id": dep["_id"]}, {"$set": {"partial_enabled": enabled}})
+    await log_audit(user, "deposit_partial_enabled" if enabled else "deposit_partial_disabled", "driver", did,
+                    "Partial deposit " + ("enabled" if enabled else "disabled"))
+    return {"ok": True}
+
+
+@api.post("/admin/drivers/{did}/deposit-full-unpaid")
+async def override_deposit_full_unpaid(did: str, request: Request):
+    """Fully paid -> half paid: the remaining half becomes due immediately (popup in driver app)."""
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
+    if not dep or dep.get("status") != "paid":
+        raise HTTPException(status_code=400, detail="Deposit is not fully paid.")
+    total = float(dep.get("amount") or 0)
+    if dep.get("partial_enabled") or dep.get("first_paid_at"):
+        # paid through the partial flow: step back to "first half paid", remaining half due now
+        await db.security_deposits.update_one(
+            {"_id": dep["_id"]},
+            {"$set": {"status": "partial", "paid_amount": round(total / 2, 2),
+                      "next_payment_date": _today_ist().isoformat(), "paid_at": None},
+             "$unset": {"second_paid_at": ""}})
+    else:
+        # paid in full (partial deposit never enabled): back to plain unpaid, partial stays OFF
+        await db.security_deposits.update_one(
+            {"_id": dep["_id"]},
+            {"$set": {"status": "pending", "transaction_id": None, "paid_at": None},
+             "$unset": {"paid_amount": "", "next_payment_date": "", "first_paid_at": "",
+                        "second_paid_at": "", "first_transaction_id": ""}})
+    await log_audit(user, "deposit_full_marked_unpaid", "driver", did, "Full deposit marked unpaid; remaining half due")
+    return {"ok": True}
+
+
+@api.post("/admin/drivers/{did}/deposit-unpaid")
+async def override_deposit_unpaid(did: str, request: Request):
+    """Reset the security deposit back to 'pending' (driver is asked to pay again)."""
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    cur = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
+    if cur and cur.get("status") == "paid":
+        raise HTTPException(status_code=400, detail="Mark the full deposit unpaid first.")
+    res = await db.security_deposits.update_one(
+        {"driver_id": did, "organization_id": org},
+        {"$set": {"status": "pending", "transaction_id": None, "paid_at": None},
+         "$unset": {"paid_amount": "", "next_payment_date": "", "first_paid_at": "",
+                    "second_paid_at": "", "first_transaction_id": ""}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Deposit record not found")
+    await log_audit(user, "deposit_marked_unpaid", "driver", did, "Security deposit reset to unpaid")
     return {"ok": True}
 
 # ===== PAID LEAVE (rent-free days) =====
@@ -1578,7 +1666,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
         sec_dep = await db.security_deposits.find_one({"driver_id": r["driver_id"], "organization_id": user.get("organization_id")})
         if sec_dep:
             deposit = sec_dep.get("amount", 5000)
-            deposit_paid = deposit if sec_dep.get("status") == "paid" else 0
+            deposit_paid = deposit if sec_dep.get("status") == "paid" else float(sec_dep.get("paid_amount") or 0)
             deposit_status = sec_dep.get("status", "pending")
             deposit_txn_id = sec_dep.get("transaction_id", "")
             # paid_at is stored as a UTC ISO string; the first 10 chars are the same
@@ -1848,6 +1936,14 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "deposit_status": deposit_status,
                         "deposit_transaction_id": deposit_txn_id,
                         "deposit_paid_date": deposit_paid_date,
+                        # split (half + half) deposit info
+                        "deposit_split": bool((sec_dep or {}).get("first_paid_at")),
+                        "deposit_first_paid_date": ((sec_dep or {}).get("first_paid_at") or "")[:10],
+                        "deposit_second_paid_date": ((sec_dep or {}).get("second_paid_at") or "")[:10] if (sec_dep or {}).get("status") == "paid" else "",
+                        "deposit_first_txn": (sec_dep or {}).get("first_transaction_id") or "",
+                        "deposit_first_amount": round(float(deposit) / 2, 2),
+                        "deposit_second_amount": round(float(deposit) - round(float(deposit) / 2, 2), 2),
+                        "deposit_next_payment_date": (sec_dep or {}).get("next_payment_date") or "",
                         "driver_id": r.get("driver_id"),
                         "start_meter": start_meter if start_meter else None,
                         "end_meter": end_meter if end_meter else None,
@@ -3145,7 +3241,7 @@ async def _rental_account(rental):
         marker = existing.get("rent_charged_through")
         if not marker:
             dep_doc = await db.security_deposits.find_one({"organization_id": org, "driver_id": did})
-            deposit_ok = (not dep_doc) or dep_doc.get("status") == "paid" or (dep_doc.get("amount", 0) or 0) <= 0
+            deposit_ok = (not dep_doc) or dep_doc.get("status") in ("paid", "partial") or (dep_doc.get("amount", 0) or 0) <= 0
             if deposit_ok:
                 marker = (today - timedelta(days=1)).isoformat()
             if rent_by_date:
@@ -3412,6 +3508,46 @@ async def _rental_account(rental):
     return acct
 
 
+def _deposit_decorate(dep):
+    """Adds computed split-deposit fields (half now / half later) to a deposit dict.
+    status: pending -> partial (first half paid) -> paid (fully paid)."""
+    total = float(dep.get("amount") or 0)
+    status = dep.get("status") or "pending"
+    paid_amt = float(dep.get("paid_amount") or 0)
+    if status == "paid" and paid_amt <= 0:
+        paid_amt = total  # old records that were paid in one go
+    if status == "pending":
+        paid_amt = 0.0
+    nxt = dep.get("next_payment_date")
+    due = status == "partial" and bool(nxt) and nxt <= _today_ist().isoformat()
+    dep["paid_amount"] = paid_amt
+    dep["half_amount"] = round(total / 2, 2)
+    dep["remaining_amount"] = round(max(0.0, total - paid_amt), 2)
+    dep["remaining_due"] = due
+    dep["action_required"] = total > 0 and (status == "pending" or due)
+    partial_on = bool(dep.get("partial_enabled")) or status == "partial"
+    dep["partial_enabled"] = partial_on
+    # pending: HALF only if admin enabled partial deposit for this driver, otherwise the FULL amount
+    dep["pay_now"] = (dep["half_amount"] if partial_on else total) if status == "pending" else dep["remaining_amount"]
+    return dep
+
+
+def _deposit_set_fields(rec, txn):
+    """Fields to store on the security_deposits doc when a deposit payment clears."""
+    now = now_iso()
+    part = rec.get("deposit_part")
+    total = float(rec.get("deposit_total") or rec["amount"])
+    if part == "first":
+        return {"status": "partial", "amount": total, "paid_amount": float(rec["amount"]),
+                "transaction_id": txn, "first_transaction_id": txn, "first_paid_at": now,
+                "next_payment_date": rec.get("next_payment_date")}
+    fields = {"status": "paid", "amount": total, "paid_amount": total,
+              "transaction_id": txn, "paid_at": now}
+    if part == "second":
+        fields["second_paid_at"] = now
+    return fields
+
+
 async def _driver_payload(user):
     org = user.get("organization_id")
     did = user["id"]
@@ -3520,7 +3656,7 @@ async def _driver_payload(user):
         out["driver"]["today_extra_km"] = _daily_overage(0, today_km_used, daily_limit_km)
         
         if plan:
-            if out["deposit"] and out["deposit"].get("status") != "paid":
+            if out["deposit"] and out["deposit"].get("status", "pending") == "pending":
                 out["deposit"]["amount"] = plan.get("deposit", out["deposit"]["amount"])
             elif not out["deposit"]:
                 out["deposit"] = {"status": "pending", "amount": plan.get("deposit", 5000)}
@@ -3546,6 +3682,8 @@ async def _driver_payload(user):
                 pass
                 
         out["account"] = acct
+    if out.get("deposit"):
+        _deposit_decorate(out["deposit"])
     return out
 
 
@@ -3567,7 +3705,7 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
         await db.security_deposits.update_one(
             {"organization_id": org, "driver_id": did},
             {
-                "$set": {"status": "paid", "transaction_id": txn, "paid_at": now_iso(), "amount": rec["amount"]},
+                "$set": _deposit_set_fields(rec, txn),
                 "$setOnInsert": {"organization_id": org, "driver_id": did, "created_at": now_iso()},
             },
             upsert=True,
@@ -3578,7 +3716,7 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
         # it here, once, the moment the deposit clears — guarded by "nothing owed yet" so it
         # can never double-charge, no matter how many times a deposit payment is retried.
         rental = await _active_rental(org, did)
-        if rental:
+        if rental and rec.get("deposit_part") != "second":  # 2nd half must never re-charge first-trip rent
             daily_rate = float(rental.get("daily_rate", 0) or 0)
             acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
             nothing_owed_yet = (
@@ -4253,7 +4391,7 @@ async def submit_odometer(
     if not active_trip_id:
         # START TRIP
         deposit = await db.security_deposits.find_one({"driver_id": user["id"]})
-        if deposit and deposit.get("status") != "paid" and deposit.get("amount", 0) > 0:
+        if deposit and _deposit_decorate(dict(deposit)).get("action_required"):
             raise HTTPException(400, "You must pay your Security Deposit before starting a trip.")
             
             
@@ -4700,6 +4838,7 @@ async def driver_payment_history(request: Request):
 class CreateOrderBody(BaseModel):
     kind: str  # deposit | daily | extra_km | outstanding | catchup
     reading: Optional[int] = None
+    next_payment_date: Optional[str] = None  # deposit 1st half: date chosen for the 2nd half
 
 
 @api.post("/driver/payments/create-order")
@@ -4714,6 +4853,7 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
         raise HTTPException(status_code=400, detail="No active rental")
     covers = []
     covers_amounts = {}
+    deposit_extra = {}
     if kind == "deposit":
         dep = await db.security_deposits.find_one({"organization_id": org, "driver_id": did})
         if dep and dep.get("status") == "paid":
@@ -4726,6 +4866,24 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
             if plan: amount = plan.get("deposit", 5000)
         elif dep:
             amount = dep.get("amount", 5000)
+        # ---- split deposit: half now, remaining half on the date the driver picks ----
+        total = float(amount)
+        if total > 0:
+            if dep and dep.get("status") == "partial":
+                total = float(dep.get("amount") or total)  # total locked at first payment
+                amount = round(total - float(dep.get("paid_amount") or 0), 2)
+                deposit_extra = {"deposit_part": "second", "deposit_total": total}
+            elif dep and dep.get("partial_enabled"):
+                # half now + date for the rest: only for drivers the admin enabled partial deposit for
+                nd = (body.next_payment_date or "").strip()
+                try:
+                    nd_date = date.fromisoformat(nd)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Select a date for the next half payment.")
+                if nd_date <= _today_ist():
+                    raise HTTPException(status_code=400, detail="Next payment date must be from tomorrow onwards.")
+                amount = round(total / 2, 2)
+                deposit_extra = {"deposit_part": "first", "deposit_total": total, "next_payment_date": nd}
     elif kind == "daily":
         acct = await _rental_account(rental)
         if acct["status"] == "blocked":
@@ -4784,6 +4942,7 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
            "payment_status": "pending", "payment_method": None, "transaction_id": None,
            "gateway_order_id": None, "gateway_ref": None, "paid_at": None,
            "gateway": "razorpay" if rzp_client else "sandbox", "created_at": now_iso()}
+    rec.update(deposit_extra)
     res = await db.rental_payments.insert_one(rec)
     pid = str(res.inserted_id)
     if amount <= 0:

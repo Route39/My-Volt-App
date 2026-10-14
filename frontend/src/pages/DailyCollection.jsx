@@ -78,16 +78,39 @@ export default function DailyCollection() {
   // Deposit is a ONE-TIME payment per driver, so it is counted once, on the row of the
   // day it was paid. Paid deposits are de-duplicated by transaction id; pending deposits
   // (no txn yet) are de-duplicated per driver and shown on the driver's latest row.
-  const { totalRevenue, totalSettled, totalUnsettled, depositRowIds } = useMemo(() => {
+  const { totalRevenue, totalSettled, totalUnsettled, depositRowIds, remainingRowIds } = useMemo(() => {
     let revenue = 0, settled = 0, pendingDeposit = 0;
     const seen = new Set();
     const rowIds = new Set();
+    const remIds = new Set();
 
     for (const it of items) {
       revenue += (it.total_charge ?? it.daily_rate) || 0;
       settled += it.today_paid || 0;
 
       if (!(it.deposit > 0)) continue;
+
+      // Split (half + half) deposit: total counted once on the day the 1st half was paid,
+      // 1st half settled that day, 2nd half settled on the day the remaining amount was paid.
+      if (it.deposit_split && (it.deposit_status === "partial" || it.deposit_status === "paid")) {
+        if (it.date === it.deposit_first_paid_date && !seen.has(`first:${it.driver_id}`)) {
+          seen.add(`first:${it.driver_id}`);
+          revenue += it.deposit_first_amount || 0;
+          settled += it.deposit_first_amount || 0;
+        }
+        if (it.deposit_status === "paid" && it.date === it.deposit_second_paid_date && !seen.has(`second:${it.driver_id}`)) {
+          seen.add(`second:${it.driver_id}`);
+          remIds.add(it.id);
+          revenue += it.deposit_second_amount || 0;
+          settled += it.deposit_second_amount || 0;
+        }
+        // 2nd half still pending: added to revenue (as unsettled) only from the next payment date onwards
+        if (it.deposit_status === "partial" && it.deposit_next_payment_date && it.date >= it.deposit_next_payment_date && !seen.has(`pending:${it.driver_id}`)) {
+          seen.add(`pending:${it.driver_id}`);
+          revenue += it.deposit_second_amount || 0;
+        }
+        continue;
+      }
       const isPaid = it.deposit_status === "paid";
 
       if (isPaid) {
@@ -114,8 +137,27 @@ export default function DailyCollection() {
       totalSettled: settled,
       totalUnsettled: revenue - settled,
       depositRowIds: rowIds,
+      remainingRowIds: remIds,
     };
   }, [items]);
+
+  // Split (half + half) security deposit: which layout this row's Deposit cell uses
+  const depositMode = (it) => {
+    if (!it.deposit_split || !(it.deposit > 0)) return null;
+    const f = it.deposit_first_paid_date, s = it.deposit_second_paid_date;
+    if (!f || it.date < f) return null;
+    if (it.deposit_status === "partial") return "partial";
+    if (it.deposit_status === "paid" && s) {
+      if (it.date < s) return "partial";
+      if (it.date === s && remainingRowIds.has(it.id)) return "remaining";
+    }
+    return null;
+  };
+  const txnChip = (t) => t ? (
+    <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${t.startsWith('QR_') ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+      {t.startsWith('QR_') ? 'Paid by QR' : `TXN ${t}`}
+    </div>
+  ) : null;
 
   return (
     <div>
@@ -354,7 +396,19 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
-                      {it.deposit_status !== "paid" && it.deposit > 0 ? (
+                      {depositMode(it) === "partial" ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">PARTIALLY PAID - {inr(it.deposit_first_amount)}</span>
+                          {txnChip(it.deposit_first_txn)}
+                          <span className="text-red-500 font-bold text-xs">Pending amount - {inr(it.deposit_second_amount)}</span>
+                        </div>
+                      ) : depositMode(it) === "remaining" ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">REMAINING AMOUNT PAID - {inr(it.deposit_second_amount)}</span>
+                          {txnChip(it.deposit_transaction_id)}
+                          <span className="text-emerald-600 font-bold text-xs">Total amount - {inr(it.deposit)}</span>
+                        </div>
+                      ) : it.deposit_status !== "paid" && it.deposit > 0 ? (
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-bold">DEPOSIT PENDING</span>
                           <span className="text-red-500 font-bold">{inr(it.deposit)}</span>
