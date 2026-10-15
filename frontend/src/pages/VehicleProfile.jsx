@@ -37,7 +37,7 @@ export default function VehicleProfile() {
 
   const canEdit = ["admin", "city_manager"].includes(user?.role);
   const info = [
-    ["Model", v.model], ["Chassis", v.chassis_number], ["Odometer", `${(v.odometer || 0).toLocaleString()} km`],
+    ["Model", v.model], ["VIN", v.vin_number], ["Chassis", v.chassis_number], ["Odometer", `${(v.odometer || 0).toLocaleString()} km`],
     ["City", v.city], ["Parking", v.parking],
   ];
 
@@ -141,6 +141,7 @@ function EditVehicleDialog({ open, setOpen, vehicle, onDone }) {
   useEffect(() => { if (open) setForm(vehicle); }, [open, vehicle]);
 
   const save = async () => {
+    if ("vin_number" in form && !/^[A-Z0-9]{17}$/.test((form.vin_number || "").trim())) { toast.error("VIN Number must be exactly 17 characters (letters A-Z and numbers 0-9 only)"); return; }
     setSaving(true);
     try { await api.put(`/vehicles/${vehicle.id || vehicle._id}`, form); toast.success("Vehicle updated ✓"); onDone(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed to update"); } finally { setSaving(false); }
@@ -153,6 +154,9 @@ function EditVehicleDialog({ open, setOpen, vehicle, onDone }) {
         <div className="space-y-4 pt-2">
           <Field label="Registration Number">
             <TextInput value={form.registration_number || ""} onChange={(e) => set("registration_number", e.target.value)} />
+          </Field>
+          <Field label="VIN Number">
+            <TextInput value={form.vin_number || ""} onChange={(e) => set("vin_number", e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 17))} maxLength={17} className="uppercase" />
           </Field>
           <Field label="Model">
             <TextInput value={form.model || ""} onChange={(e) => set("model", e.target.value)} />

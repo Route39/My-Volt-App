@@ -385,6 +385,7 @@ async def _find(collection, user, extra=None, sort=None, limit=1000):
 class VehicleBody(BaseModel):
     vehicle_number: str
     registration_number: Optional[str] = None
+    vin_number: Optional[str] = None
     model: str = "Route39 EV"
     manufacturing_year: Optional[int] = None
     chassis_number: Optional[str] = None
@@ -463,6 +464,11 @@ async def create_vehicle(body: VehicleBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
+    doc["vin_number"] = (doc.get("vin_number") or "").strip().upper()
+    if not doc["vin_number"]:
+        raise HTTPException(status_code=400, detail="VIN Number is required")
+    if not re.fullmatch(r"[A-Z0-9]{17}", doc["vin_number"]):
+        raise HTTPException(status_code=400, detail="VIN Number must be exactly 17 characters (letters A-Z and numbers 0-9 only)")
     doc["organization_id"] = user.get("organization_id")
     doc["created_at"] = now_iso()
     res = await db.vehicles.insert_one(doc)
@@ -476,6 +482,10 @@ async def update_vehicle(vid: str, body: dict, request: Request):
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     for k in ("id", "_id", "assignments", "services", "documents", "incidents", "service_requests", "current_rental"):
         body.pop(k, None)
+    if "vin_number" in body:
+        body["vin_number"] = (body.get("vin_number") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{17}", body["vin_number"]):
+            raise HTTPException(status_code=400, detail="VIN Number must be exactly 17 characters (letters A-Z and numbers 0-9 only)")
     await db.vehicles.update_one(org_filter(user, {"_id": oid(vid)}), {"$set": body})
     await log_audit(user, "vehicle_updated", "vehicle", vid, "Vehicle updated")
     return ser(await db.vehicles.find_one({"_id": oid(vid)}))
@@ -938,6 +948,96 @@ async def override_deposit_paid(did: str, request: Request):
     await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
     return {"ok": True}
 
+# ===== PAID LEAVE (rent-free days) =====
+PAID_LEAVE_MAX_PER_MONTH = 3
+
+
+async def _rent_paid_for_date(did, d_str):
+    """True if the daily rent for this date is already paid (or a trip was already started on it with paid rent)."""
+    pay = await db.rental_payments.find_one({
+        "driver_id": did, "payment_status": "paid",
+        "kind": {"$in": ["daily", "outstanding", "catchup"]},
+        "covers_dates": d_str,
+    })
+    if pay:
+        return True
+    trip = await db.driver_odometer_logs.find_one({
+        "driver_id": did, "date": d_str,
+        "snapshot_rent_txn_id": {"$nin": [None, ""]},
+    })
+    return bool(trip)
+
+
+@api.get("/drivers/{did}/paid-leave")
+async def get_paid_leave(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    today_iso = _today_ist().isoformat()
+    month_prefix = today_iso[:7]
+    return {
+        "dates": sorted(x for x in (drv.get("paid_leave_dates") or []) if x.startswith(month_prefix)),
+        "today": today_iso,
+        "today_rent_paid": await _rent_paid_for_date(did, today_iso),
+        "max_days": PAID_LEAVE_MAX_PER_MONTH,
+    }
+
+
+@api.post("/drivers/{did}/paid-leave")
+async def set_paid_leave(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    body = await request.json()
+    picked = sorted({str(x)[:10] for x in (body.get("dates") or [])})
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    today = _today_ist()
+    today_iso = today.isoformat()
+    month_prefix = today_iso[:7]
+    old = drv.get("paid_leave_dates") or []
+
+    for x in picked:
+        try:
+            date.fromisoformat(x)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date")
+        if x < today_iso or not x.startswith(month_prefix):
+            raise HTTPException(status_code=400, detail="Paid leave can only be set for today or later days of the current month")
+
+    # Leave days that already passed stay on record and still count toward this month's limit.
+    keep = [x for x in old if x < today_iso]
+    used_this_month = [x for x in keep if x.startswith(month_prefix)]
+    if len(used_this_month) + len(picked) > PAID_LEAVE_MAX_PER_MONTH:
+        raise HTTPException(status_code=400, detail=f"Maximum {PAID_LEAVE_MAX_PER_MONTH} paid leave days per month")
+
+    # Today can be newly added only if today's rent has NOT been paid.
+    if today_iso in picked and today_iso not in old:
+        if await _rent_paid_for_date(did, today_iso):
+            raise HTTPException(status_code=400, detail="Today's rent is already paid, so today cannot be a paid leave day")
+
+    new_list = sorted(set(keep) | set(picked))
+    await db.drivers.update_one({"_id": oid(did)}, {"$set": {"paid_leave_dates": new_list}})
+
+    # Leave for TODAY was cancelled: let today's rent be charged again.
+    if today_iso in old and today_iso not in new_list:
+        await db.rental_accounts.update_one(
+            {"driver_id": did},
+            {"$set": {"rent_charged_through": (today - timedelta(days=1)).isoformat()}}
+        )
+
+    # Re-run the account roll-forward now so any rent already accrued for a leave day is removed immediately.
+    rental = await _active_rental(drv.get("organization_id"), did)
+    if rental:
+        await _rental_account(rental)
+
+    await log_audit(user, "driver_paid_leave_set", "driver", did, f"Paid leave days: {', '.join(picked) if picked else 'none'}")
+    return {"ok": True, "dates": [x for x in new_list if x.startswith(month_prefix)]}
+
+
 # ===== ADMIN BLOCK =====
 @api.post("/drivers/{did}/admin-block")
 async def admin_block_driver(did: str, request: Request):
@@ -1384,6 +1484,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
         
         drv_doc = await db.drivers.find_one({"_id": ObjectId(r["driver_id"])}) if r.get("driver_id") else None
         driver_avatar = drv_doc.get("avatar") if drv_doc else None
+        paid_leave_set = set((drv_doc or {}).get("paid_leave_dates") or [])
         
         acct = await _rental_account(r)
         outstanding_amount = float(acct["outstanding_amount"]) if acct else 0
@@ -1536,6 +1637,10 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 second_trip_same_day = bool(odo_log) and idx > 0
                 if second_trip_same_day:
                     daily_rate = 0.0
+                # Paid leave date: no daily rent for this day.
+                is_paid_leave = d_str in paid_leave_set
+                if is_paid_leave:
+                    daily_rate = 0.0
                 
                 # Extract extra KM data from the odometer log snapshot
                 extra_km = odo_log.get("extra_km", 0) if odo_log else 0
@@ -1581,6 +1686,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 if consumed_rent_txns:
                     rent_txn_id = ", ".join([t for t in consumed_rent_txns if t])
                 rent_status = "paid" if daily_rate > 0 and rent_paid_amt >= daily_rate - 0.01 else ("paid" if second_trip_same_day else "not_paid")
+                if is_paid_leave:
+                    rent_status = "paid_leave"
                 
                 # Consume extra-KM payments for this row until the extra-km charge is covered.
                 extra_km_paid_amt = 0.0
@@ -2882,6 +2989,25 @@ async def _rental_account(rental):
             {"$set": {"rent_charged_through": today_iso}}
         )
 
+    # ─── PAID LEAVE (rent-free days) ────────────────────────────────────────
+    # Dates the admin / city manager marked as paid leave never carry daily rent.
+    # If rent was already accrued for such a date (e.g. leave granted for today),
+    # take it off rent_due / outstanding / unpaid_dates right here.
+    _drv_leave = await db.drivers.find_one({"_id": ObjectId(did)}, {"paid_leave_dates": 1})
+    paid_leave = set((_drv_leave or {}).get("paid_leave_dates") or [])
+    _leave_hit = [k for k in rent_by_date if k in paid_leave]
+    _leave_unpaid = [k for k in unpaid if k in paid_leave]
+    if _leave_hit or _leave_unpaid:
+        _lv_removed = round(sum(rent_by_date.pop(k) for k in _leave_hit), 2)
+        rent_due = max(0.0, round(float(rent_due) - _lv_removed, 2))
+        outstanding = max(0.0, round(float(outstanding) - _lv_removed, 2))
+        unpaid = [k for k in unpaid if k not in paid_leave]
+        _lv_upd = {"$pull": {"unpaid_dates": {"$in": list(set(_leave_hit + _leave_unpaid))}}}
+        if _leave_hit:
+            _lv_upd["$unset"] = {f"rent_by_date.{k}": "" for k in _leave_hit}
+            _lv_upd["$inc"] = {"outstanding_amount": -_lv_removed, "rent_due": -_lv_removed}
+        await db.rental_accounts.update_one({"organization_id": org, "driver_id": did}, _lv_upd)
+
     # Legacy accounts: rent is owed but was never broken down per day.
     if rent_due > 0 and not rent_by_date:
         rent_by_date = {(max(unpaid) if unpaid else today_iso): round(float(rent_due), 2)}
@@ -2929,7 +3055,7 @@ async def _rental_account(rental):
                 while d_ <= today and guard < 90:
                     k = d_.isoformat()
                     amt = today_rate if d_ == today else past_rate
-                    if amt > 0 and k not in rent_by_date:
+                    if amt > 0 and k not in rent_by_date and k not in paid_leave:
                         rent_by_date[k] = amt
                         rbd_changed = True
                     d_ += timedelta(days=1)
@@ -3825,7 +3951,9 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         _today_str_fin = _today_ist().isoformat()
         _acct_fin = await db.rental_accounts.find_one({"driver_id": driver_id})
         _leftover = float((_acct_fin or {}).get("rent_by_date", {}).get(_today_str_fin, 0) or 0)
-        if _leftover > 0:
+        # Only wipe today's rent if THIS trip started today (rent was paid before it began).
+        # A trip started on an earlier day and ended today must leave today's rent due.
+        if _leftover > 0 and (log.get("date") or _today_str_fin) == _today_str_fin:
             await db.rental_accounts.update_one(
                 {"driver_id": driver_id},
                 {"$unset": {f"rent_by_date.{_today_str_fin}": ""},
@@ -4112,7 +4240,9 @@ async def submit_odometer(
         _today_str_fin = _today_ist().isoformat()
         _acct_fin = await db.rental_accounts.find_one({"driver_id": user["id"], "organization_id": user.get("organization_id")})
         _leftover = float((_acct_fin or {}).get("rent_by_date", {}).get(_today_str_fin, 0) or 0)
-        if _leftover > 0:
+        # Only wipe today's rent if THIS trip started today (rent was paid before it began).
+        # A trip started on an earlier day and ended today must leave today's rent due.
+        if _leftover > 0 and (log.get("date") or _today_str_fin) == _today_str_fin:
             await db.rental_accounts.update_one(
                 {"driver_id": user["id"], "organization_id": user.get("organization_id")},
                 {"$unset": {f"rent_by_date.{_today_str_fin}": ""},
