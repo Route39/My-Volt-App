@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Loader2, CheckCircle2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import dapi from "../../lib/driverApi";
@@ -26,7 +26,14 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
   const [phase, setPhase] = useState("confirm"); // confirm | processing | success
   const [result, setResult] = useState(null);
 
+  // Nothing to pay (amount is 0) and no payment just completed -> close the popup.
+  useEffect(() => {
+    if (open && phase === "confirm" && kind !== "deposit" && !(Number(amount) > 0)) onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, amount, phase, kind]);
+
   if (!open) return null;
+  if (phase === "confirm" && kind !== "deposit" && !(Number(amount) > 0)) return null;
 
   const close = () => { setPhase("confirm"); setResult(null); onClose(); };
 
@@ -130,9 +137,7 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
             </div>
             {kind === "outstanding" && result?.account?.status === "active" && (
               <div className="mt-4 text-sm text-emerald-600 font-semibold space-y-1" data-testid="pay-reactivated">
-                <div>✓ Outstanding Cleared</div>
                 <div>✓ Payment Confirmed</div>
-                <div>✓ Rental Account Activated</div>
               </div>
             )}
             <button onClick={close} data-testid="pay-continue" className="mt-5 w-full h-12 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold transition-colors">Continue</button>

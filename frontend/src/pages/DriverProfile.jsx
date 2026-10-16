@@ -25,6 +25,7 @@ export default function DriverProfile() {
   const [del, setDel] = useState(false);
   const [blockType, setBlockType] = useState(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [partialOpen, setPartialOpen] = useState(false);
 
   const load = useCallback(async () => { const { data } = await api.get(`/drivers/${id}`); setD(data); }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -95,6 +96,7 @@ export default function DriverProfile() {
                     onClick={async () => {
                       if (fullDone) return;
                       const enable = !partialOn;
+                      if (enable) { setPartialOpen(true); return; }  // open the form instead of a browser prompt
                       const msg = enable
                         ? "Enable partial deposit for this driver? The driver will be asked to pay HALF the deposit in the driver app and select a date for the remaining half."
                         : d.deposit_status === "partial"
@@ -186,8 +188,11 @@ export default function DriverProfile() {
             <div className="mv-card p-4" data-testid="next-half-payment-card">
               <div className="mv-label">Next Half Payment Date</div>
               <div className="text-sm font-medium mt-1">
-                {d.deposit_status === "partial" ? (d.deposit_next_payment_date || "Date not set") : d.deposit_status === "paid" ? "Deposit fully paid" : "—"}
+                {d.deposit_status === "partial" ? (d.deposit_next_payment_date || "Date not set") : d.deposit_status === "paid" ? "Deposit fully paid" : (d.deposit_partial_enabled && d.deposit_partial_next_date) ? d.deposit_partial_next_date : "—"}
               </div>
+              {d.deposit_partial_enabled && d.deposit_status !== "partial" && d.deposit_status !== "paid" && d.deposit_partial_first_amount > 0 && (
+                <div className="text-[11px] text-mv-muted mt-0.5">Driver needs to pay first partial amount {inr(d.deposit_partial_first_amount)}</div>
+              )}
               {d.deposit_status === "partial" && (
                 <div className="text-[11px] text-mv-muted mt-0.5">{inr(d.deposit_remaining_amount)} remaining of {inr(d.deposit_amount)}</div>
               )}
@@ -301,9 +306,77 @@ export default function DriverProfile() {
       <AssignVehicleDialog open={assign} setOpen={setAssign} driver={d} onDone={() => { setAssign(false); load(); }} />
       <EditDriverDialog open={edit} setOpen={setEdit} driver={d} onDone={() => { setEdit(false); load(); }} />
       <BlockDriverDialog type={blockType} setType={setBlockType} driver={d} onDone={() => { setBlockType(null); load(); }} />
+      <PartialDepositDialog open={partialOpen} setOpen={setPartialOpen} driver={d} onDone={(v) => {
+        setPartialOpen(false);
+        // show the saved values in the card immediately, then reload from the server
+        if (v) setD((p) => ({ ...p, deposit_partial_enabled: true, deposit_partial_first_amount: v.first_amount, deposit_partial_next_date: v.next_payment_date, deposit_amount: v.total || p.deposit_amount }));
+        load();
+      }} />
       <PaidLeaveDialog open={leaveOpen} setOpen={setLeaveOpen} driver={d} onDone={() => { setLeaveOpen(false); load(); }} />
       <DeleteDriverDialog open={del} setOpen={setDel} driver={d} onDone={() => { setDel(false); nav("/drivers"); }} />
     </div>
+  );
+}
+
+function PartialDepositDialog({ open, setOpen, driver, onDone }) {
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(undefined);
+  const [busy, setBusy] = useState(false);
+  const total = Number(driver?.deposit_amount || 0);
+  const toKey = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  const tomorrow = new Date();
+  tomorrow.setHours(0, 0, 0, 0);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  useEffect(() => { if (open) { setAmount(""); setDate(undefined); } }, [open]);
+
+  const first = Number(amount) || 0;
+  const amountOk = first > 0 && first < total;
+  const remaining = amountOk ? Math.round((total - first) * 100) / 100 : "";
+
+  const save = async () => {
+    if (!amountOk) return toast.error(`Enter an amount more than 0 and less than ${inr(total)}`);
+    if (!date) return toast.error("Select the date for the next payment");
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/admin/drivers/${driver.id}/deposit-partial-toggle`, { enabled: true, first_amount: first, next_payment_date: toKey(date) });
+      toast.success("Partial deposit enabled");
+      onDone({ first_amount: first, next_payment_date: toKey(date), total: data?.total });
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to enable partial deposit");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto" data-testid="partial-deposit-dialog">
+        <DialogHeader><DialogTitle>Enable Partial Deposit</DialogTitle></DialogHeader>
+        <p className="text-sm text-mv-muted">Total security deposit: <b>{inr(total)}</b></p>
+        <Field label="Amount driver has to pay now">
+          <TextInput type="number" min="1" max={total} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Enter amount" data-testid="partial-first-amount" />
+        </Field>
+        <Field label="Date for next payment">
+          <div className="flex justify-center rounded-xl border border-mv-border">
+            <Calendar
+              mode="single"
+              selected={date}
+              onSelect={setDate}
+              disabled={(day) => day < tomorrow}
+              defaultMonth={tomorrow}
+              fromMonth={tomorrow}
+            />
+          </div>
+          <p className="text-xs text-mv-muted mt-1">{date ? `Selected: ${toKey(date)}` : "Pick a date from tomorrow onwards"}</p>
+        </Field>
+        <Field label="Remaining amount (auto)">
+          <TextInput value={remaining === "" ? "" : String(remaining)} readOnly disabled placeholder="Calculated automatically" data-testid="partial-remaining-amount" />
+        </Field>
+        <div className="flex justify-end gap-2 mt-2">
+          <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
+          <PrimaryBtn onClick={save} disabled={busy || !amountOk || !date}>{busy ? "Please wait..." : "Enable"}</PrimaryBtn>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

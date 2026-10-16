@@ -65,9 +65,12 @@ export default function DriverHome() {
     if (data.driver?.active_trip_id) return;
     if (data.deposit?.action_required) return;
     if (showKycModal) return;
+    // Blocked / catch-up screens handle their own payment. Don't open the home popup behind them.
+    if (data.account?.pending_catchup || data.account?.status === "blocked") return;
     const extraKmDue = data.account?.extra_km_due || 0;
     const rentDue = data.account?.rent_due || 0;
-    const kind = extraKmDue > 0 ? "extra_km" : rentDue > 0 ? "daily" : null;
+    // rent + extra KM both due -> ONE combined popup ("outstanding" pays both together)
+    const kind = (extraKmDue > 0 && rentDue > 0) ? "outstanding" : extraKmDue > 0 ? "extra_km" : rentDue > 0 ? "daily" : null;
     if (!kind) { dismissedRef.current = { kind: null, rentDue: null, extraKmDue: null }; return; }
     if (pay) return;
     const d = dismissedRef.current;
@@ -563,7 +566,7 @@ export default function DriverHome() {
           <div className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid="home-deposit">
             <div className="flex items-center gap-1.5 text-slate-500 text-xs"><Wallet className="w-3.5 h-3.5" /> Security Deposit</div>
             <div className="text-xl font-extrabold mt-1 text-slate-900">{inr(deposit.pay_now)}</div>
-            <div className="text-[11px] mt-0.5 text-amber-600">{deposit.status === "partial" ? "Remaining half due" : deposit.partial_enabled ? "First half pending" : "Pending"}</div>
+            <div className="text-[11px] mt-0.5 text-amber-600">{deposit.status === "partial" ? "Remaining amount due" : deposit.partial_enabled ? "Partial payment pending" : "Pending"}</div>
           </div>
         )}
       </div>
@@ -695,23 +698,25 @@ export function PayModals({ pay, setPay, data, refresh }) {
       <PayModal open={pay === "deposit"} kind="deposit"
         title={deposit?.status === "partial" ? "Pay Remaining Security Deposit" : deposit?.partial_enabled ? "Pay Partial Deposit Amount" : "Security Deposit"}
         amount={deposit?.pay_now ?? 0}
-        askNextDate={deposit?.status !== "partial" && !!deposit?.partial_enabled}
+        // askNextDate={deposit?.status !== "partial" && !!deposit?.partial_enabled}
         lines={deposit?.status === "partial" ? [
           { label: "Security Amount", value: inr(deposit?.amount ?? 0) },
           { label: "Already Paid", value: inr(deposit?.paid_amount ?? 0) },
-          { label: "Pay Remaining Half Security Amount", value: inr(deposit?.remaining_amount ?? 0), strong: true },
+          { label: "Pay Remaining Security Amount", value: inr(deposit?.remaining_amount ?? 0), strong: true },
         ] : deposit?.partial_enabled ? [
           { label: "Security Amount", value: inr(deposit?.amount ?? 0) },
-          { label: "Pay Half Of The Amount", value: inr(deposit?.half_amount ?? 0), strong: true },
+          { label: "Remaining (pay later)", value: inr(deposit?.partial_remaining_amount ?? 0) },
+          ...(deposit?.partial_next_date ? [{ label: "Next Payment Date", value: deposit.partial_next_date.split("-").reverse().join("-") }] : []),
+          { label: "Pay Now", value: inr(deposit?.pay_now ?? 0), strong: true },
         ] : [
           { label: "Refundable Security Deposit", value: inr(deposit?.amount ?? 0) },
           { label: "Total Payable", value: inr(deposit?.amount ?? 0), strong: true },
         ]} {...common} />
-      <PayModal open={pay === "outstanding"} kind="outstanding" title="Outstanding Balance" amount={account?.outstanding_amount || 0}
+      <PayModal open={pay === "outstanding"} kind="outstanding" title={(account?.rent_due || 0) > 0 && (account?.extra_km_due || 0) > 0 ? "Daily Rent + Extra KM" : "Outstanding Balance"} amount={account?.outstanding_amount || 0}
         lines={[
-          { label: `Daily Rent · ${rental?.package_name}`, value: inr(rental?.daily_rate || 0) },
-          ...((account?.outstanding_amount || 0) > (rental?.daily_rate || 0) ? [
-            { label: `Extra KM Overage`, value: inr((account?.outstanding_amount || 0) - (rental?.daily_rate || 0)) }
+          { label: `Daily Rent · ${rental?.package_name}`, value: inr(account?.rent_due || 0) },
+          ...((account?.extra_km_due || 0) > 0 ? [
+            { label: `Extra KM Charges`, value: inr(account?.extra_km_due || 0) }
           ] : []),
           { label: "Total Payable", value: inr(account?.outstanding_amount || 0), strong: true },
         ]} {...common} />

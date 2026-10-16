@@ -781,12 +781,17 @@ async def get_driver(did: str, request: Request):
     
     sec_dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": user.get("organization_id") or "route39-org"})
     out["deposit_status"] = sec_dep.get("status", "pending") if sec_dep else "pending"
-    _dep_view = _deposit_decorate(dict(sec_dep)) if sec_dep else {}
+    _dep_amt = await _deposit_amount_for(user.get("organization_id") or "route39-org", did, sec_dep)
+    _dep_src = dict(sec_dep) if sec_dep else {}
+    _dep_src["amount"] = _dep_amt
+    _dep_view = _deposit_decorate(_dep_src) if (sec_dep or _dep_amt) else {}
     out["deposit_amount"] = _dep_view.get("amount", 0)
     out["deposit_paid_amount"] = _dep_view.get("paid_amount", 0)
     out["deposit_remaining_amount"] = _dep_view.get("remaining_amount", 0)
     out["deposit_next_payment_date"] = (sec_dep or {}).get("next_payment_date")
     out["deposit_partial_enabled"] = bool((sec_dep or {}).get("partial_enabled"))
+    out["deposit_partial_first_amount"] = (sec_dep or {}).get("partial_first_amount")
+    out["deposit_partial_next_date"] = (sec_dep or {}).get("partial_next_date")
     
     cur_month = _today_ist().strftime("%Y-%m")
     joined_date = d.get("created_at") or _today_ist().isoformat()
@@ -1024,8 +1029,17 @@ async def toggle_deposit_partial(did: str, request: Request, body: dict):
     org = user.get("organization_id")
     enabled = bool(body.get("enabled"))
     dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
-    if not dep:
-        raise HTTPException(status_code=404, detail="Deposit record not found for this driver.")
+    if not dep or float(dep.get("amount") or 0) <= 0:
+        amt = await _deposit_amount_for(org, did, dep)
+        if amt <= 0:
+            raise HTTPException(status_code=404, detail="Deposit amount not found for this driver's package.")
+        if dep:
+            await db.security_deposits.update_one({"_id": dep["_id"]}, {"$set": {"amount": amt}})
+            dep["amount"] = amt
+        else:
+            dep = {"organization_id": org, "driver_id": did, "amount": amt, "status": "pending",
+                   "transaction_id": None, "paid_at": None, "created_at": now_iso()}
+            await db.security_deposits.insert_one(dep)
     if dep.get("status") == "paid":
         raise HTTPException(status_code=400, detail="Deposit is already fully paid.")
     if dep.get("status") == "partial":
@@ -1036,12 +1050,32 @@ async def toggle_deposit_partial(did: str, request: Request, body: dict):
             {"_id": dep["_id"]},
             {"$set": {"status": "pending", "partial_enabled": False, "transaction_id": None, "paid_at": None},
              "$unset": {"paid_amount": "", "next_payment_date": "", "first_paid_at": "",
-                        "second_paid_at": "", "first_transaction_id": ""}})
+                        "second_paid_at": "", "first_transaction_id": "", "first_amount": "",
+                        "partial_first_amount": "", "partial_next_date": ""}})
     else:
-        await db.security_deposits.update_one({"_id": dep["_id"]}, {"$set": {"partial_enabled": enabled}})
+        upd = {"$set": {"partial_enabled": enabled}}
+        if enabled:
+            # admin decides: amount the driver pays now + the date the remaining amount is due
+            total = float(dep.get("amount") or 0)
+            try:
+                first_amt = round(float(body.get("first_amount")), 2)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Enter the amount the driver has to pay now.")
+            if first_amt <= 0 or first_amt >= total:
+                raise HTTPException(status_code=400, detail=f"Amount must be more than 0 and less than the total deposit ({total:g}).")
+            try:
+                nd_date = date.fromisoformat((body.get("next_payment_date") or "").strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Select the date for the next payment.")
+            if nd_date <= _today_ist():
+                raise HTTPException(status_code=400, detail="Next payment date must be from tomorrow onwards.")
+            upd["$set"].update({"partial_first_amount": first_amt, "partial_next_date": nd_date.isoformat()})
+        else:
+            upd["$unset"] = {"partial_first_amount": "", "partial_next_date": ""}
+        await db.security_deposits.update_one({"_id": dep["_id"]}, upd)
     await log_audit(user, "deposit_partial_enabled" if enabled else "deposit_partial_disabled", "driver", did,
                     "Partial deposit " + ("enabled" if enabled else "disabled"))
-    return {"ok": True}
+    return {"ok": True, "total": float(dep.get("amount") or 0)}
 
 
 @api.post("/admin/drivers/{did}/deposit-full-unpaid")
@@ -1058,7 +1092,7 @@ async def override_deposit_full_unpaid(did: str, request: Request):
         # paid through the partial flow: step back to "first half paid", remaining half due now
         await db.security_deposits.update_one(
             {"_id": dep["_id"]},
-            {"$set": {"status": "partial", "paid_amount": round(total / 2, 2),
+            {"$set": {"status": "partial", "paid_amount": float(dep.get("first_amount") or round(total / 2, 2)),
                       "next_payment_date": _today_ist().isoformat(), "paid_at": None},
              "$unset": {"second_paid_at": ""}})
     else:
@@ -1755,16 +1789,31 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             # columns: "daily" pays rent only, "extra_km" pays extra-km only. A legacy
             # "outstanding" payment (from before the two were split) covered both at
             # once, so for display purposes it's counted toward rent first.
-            rent_payments = [
-                p for p in day_payments
-                if p.get("payment_status") == "paid" and p.get("type") != "refund"
-                and p.get("kind") in ("daily", "outstanding", "catchup")
-            ]
-            extra_km_payments = [
-                p for p in day_payments
-                if p.get("payment_status") == "paid" and p.get("type") != "refund"
-                and p.get("kind") in ("extra_km", "catchup")
-            ]
+            rent_payments = []
+            extra_km_payments = []
+            for p in day_payments:
+                if p.get("payment_status") != "paid" or p.get("type") == "refund":
+                    continue
+                _k = p.get("kind")
+                _amt = float(p.get("amount", 0) or 0)
+                if _k == "daily":
+                    rent_payments.append(p)
+                elif _k == "extra_km":
+                    extra_km_payments.append(p)
+                elif _k == "catchup":
+                    rent_payments.append(p)
+                    extra_km_payments.append(p)
+                elif _k == "outstanding":
+                    # Combined payment (rent + extra KM): split it so each column
+                    # shows only its own part. covers_amounts holds the rent days.
+                    _cov = p.get("covers_amounts") or {}
+                    _rent_part = float(_cov.get(d_str, sum(_cov.values()) if _cov else _amt) or 0)
+                    _rent_part = min(_rent_part, _amt)
+                    _extra_part = round(_amt - _rent_part, 2)
+                    if _rent_part > 0:
+                        rent_payments.append({**p, "amount": _rent_part})
+                    if _extra_part > 0:
+                        extra_km_payments.append({**p, "amount": _extra_part})
             
             odo_logs = await db.driver_odometer_logs.find({
                 "driver_id": r["driver_id"],
@@ -1793,7 +1842,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             )
             if not odo_logs:
                 odo_logs = [None]
-            elif pending_rent_here or pending_rent_paid_here:
+            elif False:  # rent is now billed at trip end and shown on that trip's own row
                 # A trip already happened on this date AND rent is now due (or has
                 # just been paid) for the NEXT trip (charged the moment that trip
                 # ended). Give it its own row instead of folding it into the
@@ -1941,8 +1990,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "deposit_first_paid_date": ((sec_dep or {}).get("first_paid_at") or "")[:10],
                         "deposit_second_paid_date": ((sec_dep or {}).get("second_paid_at") or "")[:10] if (sec_dep or {}).get("status") == "paid" else "",
                         "deposit_first_txn": (sec_dep or {}).get("first_transaction_id") or "",
-                        "deposit_first_amount": round(float(deposit) / 2, 2),
-                        "deposit_second_amount": round(float(deposit) - round(float(deposit) / 2, 2), 2),
+                        "deposit_first_amount": float((sec_dep or {}).get("first_amount") or round(float(deposit) / 2, 2)),
+                        "deposit_second_amount": round(float(deposit) - float((sec_dep or {}).get("first_amount") or round(float(deposit) / 2, 2)), 2),
                         "deposit_next_payment_date": (sec_dep or {}).get("next_payment_date") or "",
                         "driver_id": r.get("driver_id"),
                         "start_meter": start_meter if start_meter else None,
@@ -3088,7 +3137,7 @@ async def _get_package_snapshot(org, did):
     monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
     daily_limit_km = _effective_daily_limit(plan.get("daily_limit_km", 0) if plan else 0, monthly_km_limit)
     return {
-        "daily_rate": rental.get("daily_rate", 0),
+        "daily_rate": float(plan["amount"]) if plan and plan.get("amount") else rental.get("daily_rate", 0),
         "package_name": (plan.get("name") if plan else rental.get("package_name", "")) or "",
         "monthly_km_limit": monthly_km_limit,
         "daily_limit_km": daily_limit_km,
@@ -3150,6 +3199,22 @@ async def _catchup_overage(org, did, rental, baseline_reading, reading):
     overage_km = max(0, diff_km - allowed_km) if daily_limit > 0 else 0
     overage_charge = round(overage_km * overage_per_km, 2)
     return diff_km, overage_km, overage_charge
+
+
+async def _end_trip_rent_charge(org, did, rate):
+    """Daily rent is billed when the day's FIRST trip ends (once per day).
+    Returns 0 if today's rent was already billed/paid, today is a paid-leave day, or no rate is set."""
+    today_iso = _today_ist().isoformat()
+    acct = await db.rental_accounts.find_one({"driver_id": did, "organization_id": org})
+    if ((acct or {}).get("rent_charged_through") or "") >= today_iso:
+        return 0.0
+    if today_iso in ((acct or {}).get("rent_by_date") or {}):
+        return 0.0
+    drv = await db.drivers.find_one({"_id": ObjectId(did)}, {"paid_leaves": 1, "paid_leave_dates": 1})
+    leave = set((drv or {}).get("paid_leave_dates") or []) | set((drv or {}).get("paid_leaves") or [])
+    if today_iso in leave:
+        return 0.0
+    return round(float(rate or 0), 2)
 
 
 async def _rental_account(rental):
@@ -3246,7 +3311,9 @@ async def _rental_account(rental):
                 marker = (today - timedelta(days=1)).isoformat()
             if rent_by_date:
                 marker = max([marker or ""] + list(rent_by_date.keys())) or None
-        need_accrue = bool(marker) and marker < today_iso
+        # Today's rent is billed when the day's first trip ends; only fully elapsed days accrue here.
+        yesterday_iso = (today - timedelta(days=1)).isoformat()
+        need_accrue = bool(marker) and marker < yesterday_iso
         if need_accrue or rent_by_date:
             drv_doc = await db.drivers.find_one({"_id": ObjectId(did)})
             mid_trip = bool(drv_doc and drv_doc.get("active_trip_id"))
@@ -3264,7 +3331,7 @@ async def _rental_account(rental):
             today_rate = past_rate if mid_trip else live_rate   # mid-trip: rate stays frozen
             if need_accrue:
                 d_, guard = date.fromisoformat(marker) + timedelta(days=1), 0
-                while d_ <= today and guard < 90:
+                while d_ < today and guard < 90:
                     k = d_.isoformat()
                     amt = today_rate if d_ == today else past_rate
                     if amt > 0 and k not in rent_by_date and k not in paid_leave:
@@ -3274,7 +3341,7 @@ async def _rental_account(rental):
                     guard += 1
                 await db.rental_accounts.update_one(
                     {"organization_id": org, "driver_id": did},
-                    {"$set": {"rent_charged_through": today_iso}}
+                    {"$set": {"rent_charged_through": yesterday_iso}}
                 )
             # An unpaid entry for today follows the live plan rate (past days stay frozen).
             paid_leaves = (drv_doc or {}).get("paid_leaves", []) if need_accrue or rent_by_date else []
@@ -3508,6 +3575,26 @@ async def _rental_account(rental):
     return acct
 
 
+async def _deposit_amount_for(org, did, dep=None):
+    """Deposit amount for a driver: the stored record's amount if it has one,
+    otherwise the deposit set on the driver's rental package."""
+    amt = float((dep or {}).get("amount") or 0)
+    if amt > 0:
+        return amt
+    rental = await _active_rental(org, did)
+    if not rental:
+        return 0.0
+    plan = None
+    if rental.get("plan_id"):
+        plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+    elif rental.get("package_name"):
+        plan = await db.rental_plans.find_one({
+            "name": {"$regex": f"^{re.escape(rental['package_name'])}$", "$options": "i"},
+            "city": {"$regex": f"^{re.escape(rental.get('city', '') or '')}$", "$options": "i"},
+            "organization_id": org})
+    return float((plan or {}).get("deposit") or rental.get("deposit") or 0)
+
+
 def _deposit_decorate(dep):
     """Adds computed split-deposit fields (half now / half later) to a deposit dict.
     status: pending -> partial (first half paid) -> paid (fully paid)."""
@@ -3528,7 +3615,13 @@ def _deposit_decorate(dep):
     partial_on = bool(dep.get("partial_enabled")) or status == "partial"
     dep["partial_enabled"] = partial_on
     # pending: HALF only if admin enabled partial deposit for this driver, otherwise the FULL amount
-    dep["pay_now"] = (dep["half_amount"] if partial_on else total) if status == "pending" else dep["remaining_amount"]
+    # admin-configured split: amount to pay now, remaining amount and the fixed next payment date
+    first_cfg = float(dep.get("partial_first_amount") or 0)
+    if not (0 < first_cfg < total):
+        first_cfg = dep["half_amount"]  # old records enabled before the admin form existed
+    dep["partial_first_amount"] = first_cfg
+    dep["partial_remaining_amount"] = round(total - first_cfg, 2)
+    dep["pay_now"] = (first_cfg if partial_on else total) if status == "pending" else dep["remaining_amount"]
     return dep
 
 
@@ -3540,6 +3633,7 @@ def _deposit_set_fields(rec, txn):
     if part == "first":
         return {"status": "partial", "amount": total, "paid_amount": float(rec["amount"]),
                 "transaction_id": txn, "first_transaction_id": txn, "first_paid_at": now,
+                "first_amount": float(rec["amount"]),
                 "next_payment_date": rec.get("next_payment_date")}
     fields = {"status": "paid", "amount": total, "paid_amount": total,
               "transaction_id": txn, "paid_at": now}
@@ -3716,7 +3810,7 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
         # it here, once, the moment the deposit clears — guarded by "nothing owed yet" so it
         # can never double-charge, no matter how many times a deposit payment is retried.
         rental = await _active_rental(org, did)
-        if rental and rec.get("deposit_part") != "second":  # 2nd half must never re-charge first-trip rent
+        if False and rental and rec.get("deposit_part") != "second":  # disabled: daily rent is now billed when the trip ends
             daily_rate = float(rental.get("daily_rate", 0) or 0)
             acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
             nothing_owed_yet = (
@@ -4138,7 +4232,7 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             if acct and acct.get("last_rent_paid_amount") is not None
             else (snap["daily_rate"] if snap else 0)
         )
-        rent_txn_for_trip = acct.get("last_rent_paid_txn") if acct and acct.get("last_rent_paid_amount") is not None else None
+        rent_txn_for_trip = None  # rent is billed at trip end and matched by covers_dates, never claimed by a later trip
         
         # (Removed daily rent addition at start; it will be added at end trip)
         res = await db.driver_odometer_logs.insert_one({
@@ -4149,7 +4243,7 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
             "start_image_url": url,
             "status": "active",
             "created_at": now_iso(),
-            "snapshot_daily_rent": trip_daily_rent,
+            "snapshot_daily_rent": (snap["daily_rate"] if snap else trip_daily_rent),
             "snapshot_rent_txn_id": rent_txn_for_trip,
             "snapshot_package_name": snap["package_name"] if snap else "",
             "snapshot_daily_limit": snap["daily_limit_km"] if snap else 0,
@@ -4239,8 +4333,8 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         overage_km = _daily_overage(day_km_before, driven, daily_limit_km)
         overage_charge = round(overage_km * overage_per_km, 2)
         
-        # Rent is charged once per calendar day, not at trip end (see _rental_account).
-        rent_charge = 0.0
+        # UPDATED: today's rent is billed here, once per day, together with any extra KM.
+        rent_charge = await _end_trip_rent_charge(driver.get("organization_id"), driver_id, daily_rate)
         total_charge = rent_charge + overage_charge
         
         if total_charge > 0:
@@ -4268,7 +4362,7 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         _leftover = float((_acct_fin or {}).get("rent_by_date", {}).get(_today_str_fin, 0) or 0)
         # Only wipe today's rent if THIS trip started today (rent was paid before it began).
         # A trip started on an earlier day and ended today must leave today's rent due.
-        if _leftover > 0 and (log.get("date") or _today_str_fin) == _today_str_fin:
+        if False and _leftover > 0 and (log.get("date") or _today_str_fin) == _today_str_fin:  # disabled: rent is now billed at trip end
             await db.rental_accounts.update_one(
                 {"driver_id": driver_id},
                 {"$unset": {f"rent_by_date.{_today_str_fin}": ""},
@@ -4426,7 +4520,7 @@ async def submit_odometer(
             if acct and acct.get("last_rent_paid_amount") is not None
             else (snap["daily_rate"] if snap else 0)
         )
-        rent_txn_for_trip = acct.get("last_rent_paid_txn") if acct and acct.get("last_rent_paid_amount") is not None else None
+        rent_txn_for_trip = None  # rent is billed at trip end and matched by covers_dates, never claimed by a later trip
         
         
         # (Removed daily rent addition at start; it will be added at end trip)
@@ -4438,7 +4532,7 @@ async def submit_odometer(
             "start_image_url": url,
             "status": "active",
             "created_at": now_iso(),
-            "snapshot_daily_rent": trip_daily_rent,
+            "snapshot_daily_rent": (snap["daily_rate"] if snap else trip_daily_rent),
             "snapshot_rent_txn_id": rent_txn_for_trip,
             "snapshot_package_name": snap["package_name"] if snap else "",
             "snapshot_daily_limit": snap["daily_limit_km"] if snap else 0,
@@ -4537,7 +4631,8 @@ async def submit_odometer(
         
                 # Rent is now charged once per calendar day (see daily accrual in
         # _rental_account), NOT at trip end. Trip end bills extra-km only.
-        rent_charge = 0.0
+        # UPDATED: today's rent is billed here, once per day, together with any extra KM.
+        rent_charge = await _end_trip_rent_charge(user.get("organization_id"), user["id"], daily_rate)
         total_charge = rent_charge + overage_charge        
         if total_charge > 0:
             total_charge = round(float(total_charge), 2)
@@ -4566,7 +4661,7 @@ async def submit_odometer(
         _leftover = float((_acct_fin or {}).get("rent_by_date", {}).get(_today_str_fin, 0) or 0)
         # Only wipe today's rent if THIS trip started today (rent was paid before it began).
         # A trip started on an earlier day and ended today must leave today's rent due.
-        if _leftover > 0 and (log.get("date") or _today_str_fin) == _today_str_fin:
+        if False and _leftover > 0 and (log.get("date") or _today_str_fin) == _today_str_fin:  # disabled: rent is now billed at trip end
             await db.rental_accounts.update_one(
                 {"driver_id": user["id"], "organization_id": user.get("organization_id")},
                 {"$unset": {f"rent_by_date.{_today_str_fin}": ""},
@@ -4874,15 +4969,12 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
                 amount = round(total - float(dep.get("paid_amount") or 0), 2)
                 deposit_extra = {"deposit_part": "second", "deposit_total": total}
             elif dep and dep.get("partial_enabled"):
-                # half now + date for the rest: only for drivers the admin enabled partial deposit for
-                nd = (body.next_payment_date or "").strip()
-                try:
-                    nd_date = date.fromisoformat(nd)
-                except ValueError:
-                    raise HTTPException(status_code=400, detail="Select a date for the next half payment.")
-                if nd_date <= _today_ist():
-                    raise HTTPException(status_code=400, detail="Next payment date must be from tomorrow onwards.")
-                amount = round(total / 2, 2)
+                # amount + next payment date are fixed by the admin; the driver can only pay
+                first_cfg = float(dep.get("partial_first_amount") or 0)
+                if not (0 < first_cfg < total):
+                    first_cfg = round(total / 2, 2)
+                nd = dep.get("partial_next_date") or (_today_ist() + timedelta(days=1)).isoformat()
+                amount = round(first_cfg, 2)
                 deposit_extra = {"deposit_part": "first", "deposit_total": total, "next_payment_date": nd}
     elif kind == "daily":
         acct = await _rental_account(rental)

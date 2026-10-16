@@ -45,7 +45,11 @@ export default function RentalCreate() {
       api.get("/drivers", { params: { city: selCity, unassigned: true } }).then(r => setAllDrivers(r.data));
       api.get("/vehicles", { params: { status: "available", page_size: 200, city: selCity } }).then(r => setAllVehicles(r.data.items));
       api.get("/rental-plans").then(r => {
-        const pkgs = r.data.filter(p => (p.city === selCity || p.city === "All") && p.active !== false);
+        const pkgs = r.data.filter(p =>
+          (p.city === selCity || p.city === "All") && p.active !== false &&
+          // "In-Build Vehicles" is not offered in Bangalore
+          !(selCity?.trim().toLowerCase() === "bangalore" && p.package_type === "In-Build Vehicles")
+        );
         setAllPackages(pkgs);
       });
     }

@@ -7,7 +7,15 @@ import { PrimaryBtn, GhostBtn } from "../components/common/Page";
 import { useApp } from "../context/AppContext";
 import PackageLock from "../components/common/PackageLock";
 
-const PACKAGE_TYPES = ["Silver", "Gold", "Platinum"];
+const PACKAGE_TYPES = ["Silver", "Gold", "Platinum", "In-Build Vehicles"];
+// "In-Build Vehicles" is already a full name, so don't add " Package" after it
+const defaultPkgName = (type) => (type === "In-Build Vehicles" ? type : `${type} Package`);
+
+// "In-Build Vehicles" is not offered in Bangalore (only Coimbatore, Chennai, Tiruppur)
+const typesForCity = (city) =>
+  (city || "").trim().toLowerCase() === "bangalore"
+    ? PACKAGE_TYPES.filter((t) => t !== "In-Build Vehicles")
+    : PACKAGE_TYPES;
 
 export default function Packages() {
   const { cities } = useApp(); // city managers get only their own city; admins get all
@@ -58,7 +66,7 @@ export default function Packages() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-mv-text tracking-tight">Rental Packages</h1>
-          <p className="text-mv-muted mt-1">Manage strict Silver, Gold, and Platinum packages per city.</p>
+          <p className="text-mv-muted mt-1">Manage strict Silver, Gold, Platinum, and In-Build Vehicles packages per city.</p>
         </div>
       </div>
 
@@ -74,8 +82,8 @@ export default function Packages() {
             return (
               <div key={city}>
                 <h2 className="text-2xl font-bold text-mv-text mb-6 flex items-center gap-2"><MapPin className="w-6 h-6 text-mv-primary" /> {city}</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {PACKAGE_TYPES.map(type => {
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${typesForCity(city).length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
+                  {typesForCity(city).map(type => {
                     const pkg = packages.find(p => p.city === city && p.package_type === type);
                     const isActive = pkg && pkg.active;
                     const isConfigured = !!pkg;
@@ -97,7 +105,7 @@ export default function Packages() {
                             <Package className="w-6 h-6" />
                           </div>
                           <div>
-                            <h3 className="font-bold text-lg text-mv-text leading-tight">{pkg?.name || `${type} Package`}</h3>
+                            <h3 className="font-bold text-lg text-mv-text leading-tight">{pkg?.name || defaultPkgName(type)}</h3>
                             {isActive ? (
                               <div className="text-[10px] text-mv-muted mt-0.5 font-medium">{type} · Double click to lock</div>
                             ) : (
@@ -140,7 +148,7 @@ export default function Packages() {
 function PackageForm({ editData, onBack, onSaved }) {
   const { city, type, pkg } = editData;
   const [form, setForm] = useState({
-    name: pkg?.name || `${type} Package`,
+    name: pkg?.name || defaultPkgName(type),
     package_type: type,
     city: city,
     amount: pkg?.amount || "",
@@ -195,7 +203,7 @@ function PackageForm({ editData, onBack, onSaved }) {
           <button onClick={onBack} className="p-2 hover:bg-mv-surface2 rounded-full transition-colors">
             <ArrowLeft className="w-5 h-5 text-mv-muted" />
           </button>
-          <h1 className="text-2xl font-display font-bold">Configure {type} Package for {city}</h1>
+          <h1 className="text-2xl font-display font-bold">Configure {defaultPkgName(type)} for {city}</h1>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-mv-muted">Status:</span>
