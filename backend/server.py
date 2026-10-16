@@ -85,6 +85,12 @@ def oid(id_str):
 
 
 async def get_user(request: Request):
+    _su = getattr(request.state, "service_user", None)
+    if _su:
+        return _su
+    _k = os.environ.get("CONNECT_API_KEY")
+    if _k and request.method == "GET" and request.url.path.startswith("/api/connect/") and secrets.compare_digest(request.headers.get("X-API-Key", ""), _k):
+        return {"id": "connect-integration", "role": "admin", "organization_id": os.environ.get("CONNECT_ORG_ID", "route39-org"), "name": "TheConnect"}
     user = await authlib.current_user_from_request(request, db)
     if not user.get("organization_id"):
         user["organization_id"] = "route39-org"
@@ -5095,6 +5101,136 @@ async def delete_document(did: str, request: Request):
     res = await db.documents.delete_one(org_filter(user, {"_id": oid(did)}))
     if res.deleted_count == 0: raise HTTPException(404)
     return {"ok": True}
+
+
+async def _connect_safe(coro):
+    try:
+        return await coro
+    except HTTPException:
+        return []
+
+
+@api.get("/connect/export")
+async def connect_export(request: Request, from_date: Optional[str] = None, to_date: Optional[str] = None):
+    import time as _t
+    async def timed(name, coro):
+        t0 = _t.time()
+        try:
+            return await coro
+        finally:
+            logger.info(f"connect_export {name}: {_t.time() - t0:.1f}s")
+    summary, drivers, vehicles, rentals, packages, daily, odo = await asyncio.gather(
+        timed("summary", dashboard_summary(request, city=None)),
+        timed("drivers", list_drivers(request, city=None, status=None, unassigned=None, q=None)),
+        timed("vehicles", list_vehicles(request, status=None, city=None, q=None, page=1, page_size=1000)),
+        timed("rentals", list_rentals(request, status=None, city=None, q=None)),
+        timed("packages", _connect_safe(rental_admin_packages(request))),
+        timed("daily_collection", get_daily_collection(request, city=None, from_date=from_date, to_date=to_date, driver_name=None)),
+        timed("odometer", get_odometer_logs(request, city=None, from_date=None, to_date=None, driver_name=None)),
+    )
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "summary": summary, "drivers": drivers,
+            "vehicles": vehicles, "rentals": rentals, "packages": packages, "daily_collection": daily, "odometer": odo}
+
+
+# ---------- external API for TheConnect ----------
+@api.get("/external/vehicles")
+async def external_vehicles(request: Request):
+    key = os.environ.get("CONNECT_API_KEY") or ""
+    if not key or not secrets.compare_digest(request.headers.get("X-API-Key", ""), key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    vehicles = await db.vehicles.find({"organization_id": os.environ.get("CONNECT_ORG_ID", "route39-org")}).sort("vehicle_number", 1).to_list(5000)
+    drv_ids = [oid(v["current_driver_id"]) for v in vehicles if v.get("current_driver_id")]
+    drivers = {str(d["_id"]): d for d in await db.drivers.find({"_id": {"$in": drv_ids}}).to_list(5000)}
+    accts = {a["driver_id"]: a for a in await db.rental_accounts.find({"driver_id": {"$in": list(drivers.keys())}}).to_list(5000)}
+    items = []
+    for v in vehicles:
+        d = drivers.get(v.get("current_driver_id") or "")
+        a = accts.get(str(d["_id"])) if d else None
+        items.append({
+            "id": str(v["_id"]), "vehicle_number": v.get("vehicle_number"),
+            "registration_number": v.get("registration_number"), "vin_number": v.get("vin_number"),
+            "model": v.get("model"), "city": v.get("city"), "status": v.get("status"),
+            "odometer": (d.get("last_odometer_reading") if d and d.get("last_odometer_reading") else v.get("odometer", 0)),
+            "odometer_date": d.get("last_odometer_date") if d else None,
+            "driver_id": str(d["_id"]) if d else None, "driver_code": d.get("driver_code") if d else None,
+            "driver_name": d.get("name") if d else v.get("current_driver_name"),
+            "driver_phone": d.get("phone") if d else None,
+            "outstanding_amount": float((a or {}).get("outstanding_amount", 0) or 0),
+        })
+    return {"total": len(items), "items": items}
+
+
+# ---------- external odometer API for TheConnect ----------
+@api.get("/external/odometer")
+async def external_odometer(request: Request, days: int = 30):
+    key = os.environ.get("CONNECT_API_KEY") or ""
+    if not key or not secrets.compare_digest(request.headers.get("X-API-Key", ""), key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    org = os.environ.get("CONNECT_ORG_ID", "route39-org")
+    drivers = {str(d["_id"]): d for d in await db.drivers.find({"organization_id": org}, {"name": 1, "city": 1, "driver_code": 1}).to_list(10000)}
+    since = (_today_ist() - timedelta(days=days)).strftime("%Y-%m-%d")
+    logs = await db.driver_odometer_logs.find({"driver_id": {"$in": list(drivers.keys())}, "date": {"$gte": since}}).sort("created_at", -1).to_list(3000)
+    totals = {}
+    for l in logs:
+        k = (l.get("driver_id"), l.get("date"))
+        totals[k] = totals.get(k, 0) + (l.get("driven_today") or 0)
+    items = []
+    for l in logs:
+        d = drivers.get(l.get("driver_id")) or {}
+        items.append({
+            "id": str(l["_id"]), "date": l.get("date"), "driver_id": l.get("driver_id"),
+            "driver_name": d.get("name"), "driver_code": d.get("driver_code"), "driver_city": d.get("city"),
+            "package_name": l.get("snapshot_package_name"), "daily_limit_km": l.get("snapshot_daily_limit"),
+            "start_reading": l.get("start_reading"), "end_reading": l.get("end_reading"),
+            "driven_today": l.get("driven_today"), "day_total_km": totals.get((l.get("driver_id"), l.get("date")), 0),
+            "extra_km": l.get("extra_km", 0), "extra_km_charge": l.get("extra_km_charge", 0),
+            "status": l.get("status"), "type": l.get("type"),
+            "start_image_url": l.get("start_image_url"), "end_image_url": l.get("end_image_url"),
+        })
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "total": len(items), "odometer": items}
+
+
+# ---------- external drivers API for TheConnect ----------
+@api.get("/external/drivers")
+async def external_drivers(request: Request):
+    key = os.environ.get("CONNECT_API_KEY") or ""
+    if not key or not secrets.compare_digest(request.headers.get("X-API-Key", ""), key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    org = os.environ.get("CONNECT_ORG_ID", "route39-org")
+    drivers = await db.drivers.find({"organization_id": org}, {"password_hash": 0}).sort("name", 1).to_list(10000)
+    vehs = {v.get("current_driver_id"): v for v in await db.vehicles.find({"organization_id": org, "current_driver_id": {"$nin": [None, ""]}}, {"vehicle_number": 1, "registration_number": 1, "current_driver_id": 1}).to_list(10000)}
+    rents = {}
+    for r in await db.rentals.find({"organization_id": org, "status": {"$nin": ["closed", "ended"]}}).to_list(10000):
+        rents.setdefault(r.get("driver_id"), r)
+    items = []
+    for d in drivers:
+        did = str(d["_id"])
+        v, r = vehs.get(did) or {}, rents.get(did) or {}
+        items.append({
+            "id": did, "name": d.get("name"), "driver_code": d.get("driver_code"), "phone": d.get("phone"),
+            "city": d.get("city"), "status": d.get("status"), "kyc_status": d.get("kyc_status"),
+            "license_number": d.get("license_number"), "address": d.get("address"),
+            "emergency_contact": d.get("emergency_contact"), "rental_block_status": d.get("rental_block_status"),
+            "package_name": r.get("package_name") or r.get("plan_name"), "package_rate": r.get("daily_rate"),
+            "current_vehicle_number": v.get("vehicle_number"), "current_vehicle_reg": v.get("registration_number"),
+            "rental_status": r.get("status"),
+        })
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "total": len(items), "items": items, "drivers": items}
+
+
+# ---------- external summary API for TheConnect ----------
+@api.get("/external/summary")
+async def external_summary(request: Request):
+    key = os.environ.get("CONNECT_API_KEY") or ""
+    if not key or not secrets.compare_digest(request.headers.get("X-API-Key", ""), key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    _org = os.environ.get("CONNECT_ORG_ID") or "org_myklick"
+    _svc = await db.users.find_one({"organization_id": _org, "role": {"$in": ["admin", "company_admin"]}}, {"_id": 0})
+    if not _svc:
+        raise HTTPException(status_code=500, detail="No admin user for CONNECT_ORG_ID")
+    request.state.service_user = _svc
+    summary, packages = await asyncio.gather(dashboard_summary(request, city=None), _connect_safe(rental_admin_packages(request)))
+    return {"generated_at": datetime.now(timezone.utc).isoformat(), "summary": summary, "packages": packages}
 
 
 app.include_router(api)
