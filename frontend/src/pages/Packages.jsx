@@ -308,9 +308,9 @@ function PackageForm({ editData, onBack, onSaved }) {
           </div>
         </div>
 
-        <div className="flex justify-end pt-4 gap-4">
+        <div className="flex flex-wrap justify-end pt-4 gap-3 sm:gap-4">
           <GhostBtn onClick={onBack} disabled={saving}>Cancel</GhostBtn>
-          <PrimaryBtn onClick={save} disabled={saving} className="min-w-[200px]">
+          <PrimaryBtn onClick={save} disabled={saving} className="w-full sm:w-auto sm:min-w-[200px]">
             {saving ? "Saving..." : "Save Configuration"}
           </PrimaryBtn>
         </div>

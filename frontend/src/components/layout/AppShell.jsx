@@ -147,7 +147,7 @@ export default function AppShell({ children }) {
           </div>
         </header>
 
-        <main className="px-4 sm:px-6 py-6 pb-28 lg:pb-10 max-w-[1600px] mx-auto">{children}</main>
+        <main className="px-3 m375:px-4 sm:px-6 d1440:px-8 py-6 pb-28 lg:pb-10 max-w-[1600px] mx-auto">{children}</main>
       </div>
 
       {/* Mobile bottom nav */}

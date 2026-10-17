@@ -32,7 +32,7 @@ export default function Notifications() {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[360px] p-0 bg-mv-surface border-mv-border text-mv-text">
+      <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-[360px] p-0 bg-mv-surface border-mv-border text-mv-text">
         <div className="flex items-center justify-between px-4 py-3 border-b border-mv-border">
           <span className="font-display font-semibold">Notifications</span>
           <button onClick={markAll} data-testid="mark-all-read" className="text-xs text-mv-primary hover:underline flex items-center gap-1">
