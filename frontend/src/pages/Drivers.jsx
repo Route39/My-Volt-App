@@ -111,7 +111,7 @@ export default function Drivers() {
                 </div>
               )}
               {d.rental_status === "active" && d.rental_block_status !== "blocked" && <div className="mt-3"><StatusChip status="active" label="Rental Active" /></div>}
-              {d.rental_block_status === "blocked" && (
+              {/* {d.rental_block_status === "blocked" && (
                 <div className="mt-3 flex items-center justify-between">
                   <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-red-100 text-red-600 text-[10px] font-bold">Blocked (Unpaid)</span>
                   <button onClick={async (e) => {
@@ -121,7 +121,7 @@ export default function Drivers() {
                     }
                   }} className="text-[10px] text-emerald-600 font-bold hover:underline px-2 py-1 bg-emerald-50 rounded-lg">Unblock Driver</button>
                 </div>
-              )}
+              )} */}
             </button>
           ))}
         </div>
