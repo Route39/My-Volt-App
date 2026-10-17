@@ -5471,6 +5471,10 @@ async def external_drivers(request: Request):
     rents = {}
     for r in await db.rentals.find({"organization_id": org, "status": {"$nin": ["closed", "ended"]}}).to_list(10000):
         rents.setdefault(r.get("driver_id"), r)
+    accts = {a.get("driver_id"): a for a in await db.rental_accounts.find({"organization_id": org}, {"driver_id": 1, "outstanding_amount": 1, "extra_km_due": 1}).to_list(10000)}
+    odo = {x["_id"]: x async for x in db.driver_odometer_logs.aggregate([
+        {"$match": {"driver_id": {"$in": [str(d["_id"]) for d in drivers]}}}, {"$sort": {"date": -1}},
+        {"$group": {"_id": "$driver_id", "date": {"$first": "$date"}, "end": {"$first": "$end_reading"}, "start": {"$first": "$start_reading"}, "km": {"$first": "$day_total_km"}}}])}
     items = []
     for d in drivers:
         did = str(d["_id"])
@@ -5483,8 +5487,53 @@ async def external_drivers(request: Request):
             "package_name": r.get("package_name") or r.get("plan_name"), "package_rate": r.get("daily_rate"),
             "current_vehicle_number": v.get("vehicle_number"), "current_vehicle_reg": v.get("registration_number"),
             "rental_status": r.get("status"),
+            "outstanding_amount": (accts.get(did) or {}).get("outstanding_amount", r.get("outstanding")),
+            "extra_km_due": (accts.get(did) or {}).get("extra_km_due"),
+            "last_odo_date": (odo.get(did) or {}).get("date"),
+            "last_odo_reading": (odo.get(did) or {}).get("end") or (odo.get(did) or {}).get("start"),
+            "last_day_km": (odo.get(did) or {}).get("km"),
         })
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "total": len(items), "items": items, "drivers": items}
+
+
+# ---------- external earnings API for TheConnect ----------
+@api.get("/external/earnings")
+async def external_earnings(request: Request, month: str):
+    key = os.environ.get("CONNECT_API_KEY") or ""
+    if not key or not secrets.compare_digest(request.headers.get("X-API-Key", ""), key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    org = os.environ.get("CONNECT_ORG_ID", "route39-org")
+    vehs = await db.vehicles.find({"organization_id": org}, {"vehicle_number": 1, "registration_number": 1, "city": 1}).to_list(10000)
+    rmap = {str(r["_id"]): r.get("vehicle_id") for r in await db.rentals.find({"organization_id": org}, {"vehicle_id": 1}).to_list(100000)}
+    dmap = {str(r["_id"]): r.get("vehicle_id") for r in await db.driver_rentals.find({"organization_id": org}, {"vehicle_id": 1}).to_list(100000)}
+    agg = {}
+    def add(vid, amt, days):
+        if not vid:
+            return
+        e = agg.setdefault(str(vid), {"rent_collected": 0.0, "days_paid": 0, "payments": 0})
+        e["rent_collected"] += amt; e["days_paid"] += days; e["payments"] += 1
+    # A: admin manual payments (rentals) - payment minus refund
+    async for p in db.rental_payments.find({"organization_id": org, "kind": {"$exists": False},
+                                            "type": {"$in": ["payment", "refund"]}, "payment_date": {"$regex": f"^{month}"}}):
+        amt = float(p.get("amount") or 0)
+        add(rmap.get(p.get("rental_id")), -amt if p.get("type") == "refund" else amt, 0)
+    # B: driver app rent payments (no deposit / extra_km)
+    async for p in db.rental_payments.find({"organization_id": org, "kind": {"$in": ["daily", "outstanding", "catchup"]},
+                                            "$or": [{"payment_status": "paid"}, {"status": "paid"}],
+                                            "paid_at": {"$regex": f"^{month}"}}):
+        ca = p.get("covers_amounts") or {}
+        amt = sum(float(x or 0) for x in ca.values()) if ca else float(p.get("amount") or 0)
+        rid = p.get("rental_id")
+        add(dmap.get(rid) or rmap.get(rid), amt, len(ca))
+    items = []
+    for v in vehs:
+        e = agg.get(str(v["_id"]), {"rent_collected": 0.0, "days_paid": 0, "payments": 0})
+        items.append({"vehicle_id": str(v["_id"]), "vehicle_number": v.get("vehicle_number"),
+                      "registration_number": v.get("registration_number"), "city": v.get("city"),
+                      "rent_collected": round(e["rent_collected"], 2), "days_paid": e["days_paid"], "payments": e["payments"]})
+    return {"month": month, "generated_at": datetime.now(timezone.utc).isoformat(), "total": len(items), "items": items}
 
 
 # ---------- external summary API for TheConnect ----------
@@ -5498,7 +5547,39 @@ async def external_summary(request: Request):
     if not _svc:
         raise HTTPException(status_code=500, detail="No admin user for CONNECT_ORG_ID")
     request.state.service_user = _svc
-    summary, packages = await asyncio.gather(dashboard_summary(request, city=None), _connect_safe(rental_admin_packages(request)))
+    org = os.environ.get("CONNECT_ORG_ID", "route39-org")
+    summary, pkgs, drs, rts = await asyncio.gather(
+        dashboard_summary(request, city=None),
+        db.rental_packages.find({"organization_id": org}).sort("daily_rate", 1).to_list(200),
+        db.driver_rentals.find({"organization_id": org, "status": "active"}).to_list(10000),
+        db.rentals.find({"organization_id": org, "status": {"$nin": ["closed", "ended", "cancelled"]}}).to_list(10000))
+    users = {str(u["_id"]): u for u in await db.users.find({"_id": {"$in": [oid(x["driver_id"]) for x in drs if x.get("driver_id")]}}, {"name": 1, "phone": 1}).to_list(10000)}
+    vnum = {str(v["_id"]): v.get("vehicle_number") for v in await db.vehicles.find({"organization_id": org}, {"vehicle_number": 1}).to_list(10000)}
+    assigned = {}
+    for x in drs:
+        u = users.get(str(x.get("driver_id"))) or {}
+        assigned.setdefault(x.get("package_id") or x.get("package_name"), []).append({
+            "driver_name": x.get("driver_name") or u.get("name"), "driver_phone": x.get("driver_phone") or u.get("phone"),
+            "vehicle_number": vnum.get(str(x.get("vehicle_id"))), "vehicle_reg": x.get("vehicle_reg"),
+            "daily_rate": x.get("daily_rate"), "start_date": x.get("start_date")})
+    for x in rts:
+        assigned.setdefault(x.get("package_name") or x.get("plan_name"), []).append({
+            "driver_name": x.get("driver_name"), "driver_phone": None, "vehicle_number": x.get("vehicle_number"),
+            "vehicle_reg": None, "daily_rate": x.get("daily_rate"), "start_date": x.get("start")})
+    plans = await db.rental_plans.find({"organization_id": org}).to_list(200)
+    packages, used = [], set()
+    for pk in pkgs + plans:
+        d = ser(pk)
+        keys = [k for k in (str(pk["_id"]), pk.get("name")) if k and k not in used]
+        d["drivers"] = [x for k in keys for x in assigned.get(k, [])]
+        used.update(keys)
+        d["drivers_count"] = len(d["drivers"])
+        packages.append(d)
+    for k, lst in assigned.items():
+        if k not in used:
+            packages.append({"id": None, "name": k or "No package", "daily_rate": lst[0].get("daily_rate") if lst else None,
+                             "status": "active", "drivers": lst, "drivers_count": len(lst)})
+    packages.sort(key=lambda x: -x["drivers_count"])
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "summary": summary, "packages": packages}
 
 

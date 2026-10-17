@@ -99,3 +99,4 @@ backend/uploads/
 *.bak
 *.bak[0-9]*
 *.bak-*
+frontend/yarn.lock
