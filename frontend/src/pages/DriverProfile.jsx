@@ -417,6 +417,10 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const save = async () => {
     if (!form.name || !form.phone) { toast.error("Name & phone required"); return; }
+    if (!/^\d{10}$/.test(form.phone) || (form.emergency_contact && !/^\d{10}$/.test(form.emergency_contact))) {
+      toast.error("Phone and Emergency Contact must be exactly 10 digits");
+      return;
+    }
     setSaving(true);
     try { await api.put(`/drivers/${driver.id}`, form); toast.success("Driver updated ✓"); onDone(); } catch (e) { toast.error(e.response?.data?.detail || "Failed to update"); } finally { setSaving(false); }
   };
@@ -426,7 +430,7 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
         <DialogHeader><DialogTitle className="font-display">Edit Driver</DialogTitle></DialogHeader>
         <div className="grid grid-cols-2 gap-4 pt-2">
           <Field label="Name"><TextInput value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-          <Field label="Phone"><TextInput value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+91 9…" /></Field>
+          <Field label="Phone"><TextInput value={form.phone} inputMode="numeric" maxLength={10} onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           <Field label="City">
             <Select value={form.city} onValueChange={(v) => set("city", v)}>
               <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
@@ -440,7 +444,7 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
             </Select>
           </Field>
           <Field label="Licence No."><TextInput value={form.license_number} onChange={(e) => set("license_number", e.target.value)} /></Field>
-          <Field label="Emergency Contact"><TextInput value={form.emergency_contact} onChange={(e) => set("emergency_contact", e.target.value)} /></Field>
+          <Field label="Emergency Contact"><TextInput value={form.emergency_contact} inputMode="numeric" maxLength={10} onChange={(e) => set("emergency_contact", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           <div className="col-span-2"><Field label="Address"><TextInput value={form.address} onChange={(e) => set("address", e.target.value)} /></Field></div>
         </div>
         <div className="flex justify-end pt-1"><PrimaryBtn onClick={save} disabled={saving}>Save Changes</PrimaryBtn></div>

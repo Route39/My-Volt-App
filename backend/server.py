@@ -949,6 +949,12 @@ async def create_driver(body: DriverBody, request: Request):
     if await db.drivers.find_one({"phone": phone}):
         raise HTTPException(status_code=400, detail="Mobile number already exists")
     doc["phone"] = phone
+    if not re.fullmatch(r"\d{10}", phone):
+        raise HTTPException(status_code=400, detail="Mobile number must be exactly 10 digits")
+    emergency = re.sub(r"\s+", "", body.emergency_contact or "")
+    if not re.fullmatch(r"\d{10}", emergency):
+        raise HTTPException(status_code=400, detail="Emergency contact must be exactly 10 digits")
+    doc["emergency_contact"] = emergency
     doc["driver_code"] = await _next_driver_code(doc.get("city"))
     res = await db.drivers.insert_one(doc)
     await log_audit(user, "driver_created", "driver", str(res.inserted_id), f"Driver {body.name} added")
@@ -967,6 +973,8 @@ async def update_driver(did: str, body: dict, request: Request):
             raise HTTPException(status_code=400, detail="Mobile number is required")
         if await db.drivers.find_one({"phone": phone, "_id": {"$ne": oid(did)}}):
             raise HTTPException(status_code=400, detail="Mobile number already exists")
+        if not re.fullmatch(r"\d{10}", phone):
+            raise HTTPException(status_code=400, detail="Mobile number must be exactly 10 digits")
         body["phone"] = phone
     res = await db.drivers.update_one({"_id": oid(did), "organization_id": user.get("organization_id")}, {"$set": body})
     if res.matched_count == 0:
@@ -1000,7 +1008,11 @@ async def override_deposit_paid(did: str, request: Request):
         return {"ok": True, "message": "Already paid"}
         
     amount = 5000.0
-    if sec_dep and "amount" in sec_dep:
+    if (not sec_dep) or sec_dep.get("status", "pending") == "pending":
+        # nothing paid yet (or no deposit record yet) -> use the current package deposit
+        _live = await _deposit_amount_for(org, did, sec_dep)
+        amount = _live if _live > 0 else float((sec_dep or {}).get("amount") or 5000)
+    elif sec_dep and "amount" in sec_dep:
         amount = float(sec_dep["amount"])
     elif rental and "deposit" in rental:
         amount = float(rental["deposit"])
@@ -1035,7 +1047,7 @@ async def toggle_deposit_partial(did: str, request: Request, body: dict):
     org = user.get("organization_id")
     enabled = bool(body.get("enabled"))
     dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
-    if not dep or float(dep.get("amount") or 0) <= 0:
+    if not dep or dep.get("status", "pending") == "pending" or float(dep.get("amount") or 0) <= 0:
         amt = await _deposit_amount_for(org, did, dep)
         if amt <= 0:
             raise HTTPException(status_code=404, detail="Deposit amount not found for this driver's package.")
@@ -1706,6 +1718,9 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
         sec_dep = await db.security_deposits.find_one({"driver_id": r["driver_id"], "organization_id": user.get("organization_id")})
         if sec_dep:
             deposit = sec_dep.get("amount", 5000)
+            if sec_dep.get("status", "pending") == "pending":
+                # nothing paid yet -> follow the current package deposit
+                deposit = await _deposit_amount_for(user.get("organization_id"), r["driver_id"], sec_dep) or deposit
             deposit_paid = deposit if sec_dep.get("status") == "paid" else float(sec_dep.get("paid_amount") or 0)
             deposit_status = sec_dep.get("status", "pending")
             deposit_txn_id = sec_dep.get("transaction_id", "")
@@ -1713,7 +1728,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             # UTC date format the rows use for `date`
             deposit_paid_date = (sec_dep.get("paid_at") or "")[:10] if sec_dep.get("status") == "paid" else ""
         else:
-            deposit = r.get("deposit", 5000)
+            deposit = await _deposit_amount_for(user.get("organization_id"), r["driver_id"], None) or r.get("deposit", 5000)
             deposit_paid = 0
             deposit_status = "pending"
             deposit_txn_id = ""
@@ -3584,12 +3599,12 @@ async def _rental_account(rental):
 async def _deposit_amount_for(org, did, dep=None):
     """Deposit amount for a driver: the stored record's amount if it has one,
     otherwise the deposit set on the driver's rental package."""
-    amt = float((dep or {}).get("amount") or 0)
-    if amt > 0:
-        return amt
+    stored = float((dep or {}).get("amount") or 0)
+    if stored > 0 and (dep or {}).get("status") in ("partial", "paid"):
+        return stored  # something already paid -> amount is locked
     rental = await _active_rental(org, did)
     if not rental:
-        return 0.0
+        return stored
     plan = None
     if rental.get("plan_id"):
         plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
@@ -3598,7 +3613,8 @@ async def _deposit_amount_for(org, did, dep=None):
             "name": {"$regex": f"^{re.escape(rental['package_name'])}$", "$options": "i"},
             "city": {"$regex": f"^{re.escape(rental.get('city', '') or '')}$", "$options": "i"},
             "organization_id": org})
-    return float((plan or {}).get("deposit") or rental.get("deposit") or 0)
+    live = float((plan or {}).get("deposit") or rental.get("deposit") or 0)
+    return live if live > 0 else stored
 
 
 def _deposit_decorate(dep):
