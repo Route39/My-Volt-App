@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, Plus, Users, Car, MapPin, Phone, KeyRound, LayoutGrid, List, Trash2 } from "lucide-react";
+import { Search, Plus, Users, Car, MapPin, Phone, KeyRound, LayoutGrid, List } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
@@ -163,6 +163,7 @@ export default function Drivers() {
                       Unblock
                     </button>
                   )}
+                  {/* Delete driver button removed (drivers can no longer be deleted from the list)
                   <button onClick={async () => {
                     if(window.confirm("Delete driver completely?")) {
                       await api.delete(`/drivers/${d.id}`);
@@ -171,6 +172,7 @@ export default function Drivers() {
                   }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
+                  */}
                 </td>
               </tr>
             ))}</tbody>
@@ -213,6 +215,10 @@ function AddDriverDialog({ open, setOpen, onDone }) {
 
 
   const save = async () => {
+    if (!/^\d{10}$/.test(form.phone) || !/^\d{10}$/.test(form.emergency_contact)) {
+      toast.error("Phone and Emergency Contact must be exactly 10 digits");
+      return;
+    }
     if (!form.name || !form.phone || !form.city || !form.license_number || !form.address || !form.emergency_contact) { 
       toast.error("Please fill in all details (Name, Phone, City, Licence No, Address, Emergency Contact)"); 
       return; 
@@ -234,7 +240,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
 
         <div className="grid grid-cols-2 gap-4 pt-2 animate-in fade-in slide-in-from-left-4 duration-300">
           <Field label="Name"><TextInput data-testid="driver-name" value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-          <Field label="Phone"><TextInput data-testid="driver-phone" value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+91 9…" /></Field>
+          <Field label="Phone"><TextInput data-testid="driver-phone" value={form.phone} inputMode="numeric" maxLength={10} onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           <Field label="City">
             <Select value={form.city} onValueChange={(v) => set("city", v)}>
               <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue /></SelectTrigger>
@@ -245,7 +251,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
           </Field>
           <Field label="Licence No."><TextInput value={form.license_number} onChange={(e) => set("license_number", e.target.value)} /></Field>
           <Field label="Address"><TextInput value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
-          <Field label="Emergency Contact"><TextInput value={form.emergency_contact} onChange={(e) => set("emergency_contact", e.target.value)} /></Field>
+          <Field label="Emergency Contact"><TextInput value={form.emergency_contact} inputMode="numeric" maxLength={10} onChange={(e) => set("emergency_contact", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           
           <div className="col-span-2 flex justify-end pt-4">
             <PrimaryBtn onClick={save} disabled={saving} data-testid="save-driver-btn">{saving ? "Saving..." : "Save Driver"}</PrimaryBtn>

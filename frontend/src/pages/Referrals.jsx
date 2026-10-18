@@ -283,7 +283,7 @@ function ReferralDialog({ value, setValue, fixedReferrerId, fixedReferrerName, f
                         </Field>
                     </div>
                     <Field label="Referred Driver Name"><TextInput value={f.referred_name || ""} onChange={(e) => set("referred_name", e.target.value)} /></Field>
-                    <Field label="Phone"><TextInput value={f.referred_phone || ""} onChange={(e) => set("referred_phone", e.target.value)} placeholder="9876543210" /></Field>
+                    <Field label="Phone"><TextInput value={f.referred_phone || ""} inputMode="numeric" maxLength={10} onChange={(e) => set("referred_phone", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="9876543210" /></Field>
                     <Field label="Referred On"><TextInput type="date" value={f.referred_at || ""} onChange={(e) => set("referred_at", e.target.value)} /></Field>
                     <Field label="Joined On (optional)"><TextInput type="date" value={f.joined_at || ""} onChange={(e) => set("joined_at", e.target.value)} /></Field>
                 </div>
