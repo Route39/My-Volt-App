@@ -342,7 +342,11 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4">
-                      {it.rent_status === "paid_leave" ? (
+                      {it.rent_status === "week_off" ? (
+                        <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">
+                          Week-off
+                        </div>
+                      ) : it.rent_status === "paid_leave" ? (
                         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">
                           PAID LEAVE
                         </div>

@@ -43,13 +43,12 @@ export default function CatchupScreen() {
   };
 
   const submitPhoto = async () => {
-    // if (!image) return setSubmitError("Please capture your current odometer photo.");  // optional now
+    if (!image) return setSubmitError("Please capture your current odometer photo.");
     setSubmitting(true);
     setSubmitError("");
     try {
       const fd = new FormData();
-      // fd.append("image", image);
-      if (image) fd.append("image", image);  // optional
+      fd.append("image", image);
       await dapi.post("/driver/catchup/photo", fd);
       await refresh();
     } catch (err) {
@@ -115,7 +114,7 @@ export default function CatchupScreen() {
               className="w-full h-12 mt-1.5 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 font-medium outline-none focus:border-amber-500 focus:bg-white transition-colors" />
             <div className="text-[11px] text-slate-400 mt-1">Last recorded reading: {baseline} km</div>
 
-            {/* <div className="mt-4"><CameraBox /></div> */}
+            <div className="mt-4"><CameraBox /></div>
 
             {quoteError && <div className="text-red-600 text-xs font-semibold mt-3 text-center">{quoteError}</div>}
 
@@ -132,7 +131,7 @@ export default function CatchupScreen() {
             <div className="text-xs text-slate-500 mb-1">Confirmed odometer reading</div>
             <div className="text-lg font-bold text-slate-800 mb-4">{account.catchup_reading} km</div>
 
-            {/* <CameraBox /> */}
+            <CameraBox />
 
             {submitError && <div className="text-red-600 text-xs font-semibold mt-3 text-center">{submitError}</div>}
 

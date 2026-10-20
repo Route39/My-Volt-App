@@ -163,15 +163,14 @@ export default function DriverHome() {
       if ((data.account.rent_due || 0) > 0) return setOdoError("You must pay your Daily Rent before starting a trip.");
     }
     if (!odoReading) return setOdoError("Reading is required");
-    // if (!odoImage) return setOdoError("Image is required");  // odometer image is now optional
+    if (!odoImage) return setOdoError("Odometer image is required");
     setOdoLoading(true);
     setOdoError("");
     //const wasEndingTrip = !!data?.driver?.active_trip_id;
     try {
       const fd = new FormData();
       fd.append("reading", odoReading);
-      // fd.append("image", odoImage);
-      if (odoImage) fd.append("image", odoImage);  // optional
+      fd.append("image", odoImage);
       await dapi.post("/driver/odometer", fd);
       setShowEndModal(false);
       setOdoReading("");
@@ -213,7 +212,10 @@ export default function DriverHome() {
   const isTripActiveToday = isFullyAssigned && activeTripId && driver?.last_odometer_date === today;
   const isTripCompletedToday = isFullyAssigned && !activeTripId && driver?.last_odometer_date === today;
   
-  const showOdoModal = (needsStartTrip || needsEndTripForced || showEndModal) && isFullyAssigned && depositPaid;
+  // The START form no longer opens by itself: the driver must tap the START TRIP button
+  // (showEndModal). Only an unfinished trip from a previous day still forces the END form.
+  const showOdoModal = (needsEndTripForced || showEndModal) && isFullyAssigned && depositPaid;
+  const canShowStartBtn = needsStartTrip && depositPaid;
   
   const modalTitle = activeTripId ? "End Trip Odometer" : "Start Trip Odometer";
   const modalDesc = activeTripId 
@@ -224,7 +226,7 @@ export default function DriverHome() {
     <div className="px-5 pt-6 space-y-5 pb-20" data-testid="driver-home">
       
       {/* Floating Action Buttons - Constrained to Mobile Viewport */}
-      {(isTripActiveToday || isTripCompletedToday) && (
+      {(isTripActiveToday || isTripCompletedToday || canShowStartBtn) && (
         <div className="fixed inset-0 z-50 pointer-events-none flex justify-center">
           <div className="w-full max-w-md relative">
             
@@ -240,8 +242,8 @@ export default function DriverHome() {
               </button>
             )}
 
-            {/* START NEW TRIP BUTTON */}
-            {isTripCompletedToday && (
+            {/* START TRIP BUTTON (first trip of the day, or a new trip after one was completed) */}
+            {(isTripCompletedToday || canShowStartBtn) && (
               <button 
                 onClick={() => setShowEndModal(true)}
                 className="absolute right-5 bottom-40 w-16 h-16 bg-gradient-to-b from-emerald-500 to-teal-700 rounded-full shadow-[0_8px_30px_rgb(16,185,129,0.6)] flex flex-col items-center justify-center text-white hover:scale-105 active:scale-95 transition-all border-4 border-white group pointer-events-auto"
@@ -343,7 +345,6 @@ export default function DriverHome() {
               </div>
             ) : (
               <form onSubmit={submitOdo} className="space-y-4">
-                {/* ODOMETER IMAGE FIELD HIDDEN (optional now)
                 <button 
                   type="button" 
                   onClick={async () => {
@@ -371,7 +372,6 @@ export default function DriverHome() {
                     </>
                   )}
                 </button>
-                END ODOMETER IMAGE FIELD HIDDEN */}
 
               <input 
                 type="number" 

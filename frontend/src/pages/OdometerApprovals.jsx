@@ -157,7 +157,7 @@ export default function OdometerApprovals() {
               <th className="px-3 py-4 whitespace-nowrap text-red-500">Extra KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Daily KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Status</th>
-              {/* <th className="px-3 py-4 whitespace-nowrap text-center">Photos</th> */}
+              <th className="px-3 py-4 whitespace-nowrap text-center">Photos</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -281,16 +281,19 @@ export default function OdometerApprovals() {
                       </span>
                     </td>
                     
-                    {/* Photos column hidden
+                    {/* Photos */}
                     <td className="px-3 py-4 text-center whitespace-nowrap">
                       <div className="flex gap-2 justify-center">
-                        <button
-                          onClick={() => setImgModal(imgUrl(log.start_image_url || log.image_url))}
-                          className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg inline-flex"
-                          title="View Start Photo"
-                        >
-                          <ImageIcon className="w-4 h-4" />
-                        </button>
+                        {(log.start_image_url || log.image_url) && (
+                          <button
+                            onClick={() => setImgModal(imgUrl(log.start_image_url || log.image_url))}
+                            className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg inline-flex"
+                            title="View Start Photo"
+                          >
+                            <ImageIcon className="w-4 h-4" />
+                          </button>
+                        )}
+                        {!(log.start_image_url || log.image_url || log.end_image_url) && <span className="text-slate-400">—</span>}
                         {log.end_image_url && (
                           <button
                             onClick={() => setImgModal(imgUrl(log.end_image_url))}
@@ -302,7 +305,6 @@ export default function OdometerApprovals() {
                         )}
                       </div>
                     </td>
-                    Photos column hidden */}
                   </tr>
                 );
                   })}

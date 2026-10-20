@@ -26,6 +26,7 @@ export default function DriverProfile() {
   const [blockType, setBlockType] = useState(null);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [partialOpen, setPartialOpen] = useState(false);
+  const [rentOpen, setRentOpen] = useState(false);
 
   const load = useCallback(async () => { const { data } = await api.get(`/drivers/${id}`); setD(data); }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -90,13 +91,13 @@ export default function DriverProfile() {
               return (
                 <>
                   <GhostBtn
-                    disabled={fullDone}
-                    title={fullDone ? "Deposit already fully paid" : ""}
+                    disabled={fullDone && !d.deposit_first_paid_at}
+                    title={fullDone && !d.deposit_first_paid_at ? "Deposit already fully paid" : ""}
                     data-testid="enable-partial-deposit-btn"
                     onClick={async () => {
-                      if (fullDone) return;
+                      if (fullDone && !d.deposit_first_paid_at) return;
                       const enable = !partialOn;
-                      if (enable) { setPartialOpen(true); return; }  // open the form instead of a browser prompt
+                      if (enable || partialOn) { setPartialOpen(true); return; }  // open the form (new, or with the saved values) instead of a browser prompt
                       const msg = enable
                         ? "Enable partial deposit for this driver? The driver will be asked to pay HALF the deposit in the driver app and select a date for the remaining half."
                         : d.deposit_status === "partial"
@@ -111,7 +112,7 @@ export default function DriverProfile() {
                         toast.error(e.response?.data?.detail || "Failed to update partial deposit option");
                       }
                     }}
-                    className={fullDone ? "opacity-50 cursor-not-allowed " + (partialOn ? doneCls : "") : partialOn ? doneClickCls : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+                    className={(fullDone && !d.deposit_first_paid_at) ? "opacity-50 cursor-not-allowed " + (partialOn ? doneCls : "") : partialOn ? doneClickCls : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
                     <Check className="w-4 h-4" /> {partialOn ? "Partial Deposit Enabled" : "Enable Partial Deposit"}
                   </GhostBtn>
                   <GhostBtn
@@ -159,6 +160,7 @@ export default function DriverProfile() {
                 </>
               );
             })()}
+            <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> Rent Paid</GhostBtn>
             {d.admin_block ? (
               <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
             ) : (
@@ -202,7 +204,7 @@ export default function DriverProfile() {
               <div>
                 <div className="mv-label">Paid Leaves (This Month)</div>
                 <div className="text-sm font-medium mt-1 flex items-center gap-2">
-                  {d.leaves_taken_this_month || 0} / {d.leave_quota || 0}
+                  {d.leaves_taken_this_month || 0}
                   {d.leave_dates_this_month?.length > 0 && <span className="text-[10px] text-mv-muted bg-mv-elevated px-1.5 py-0.5 rounded">({d.leave_dates_this_month.join(', ')})</span>}
                 </div>
               </div>
@@ -225,6 +227,33 @@ export default function DriverProfile() {
               </button> */}
             </div>
             
+          <div className="mv-card p-4" data-testid="week-off-requests-card">
+            <div className="mv-label">Requested week-offs</div>
+            {(d.week_off_requests || []).length === 0 ? (
+              <div className="text-sm text-mv-muted mt-1">No week-off requests this month.</div>
+            ) : (d.week_off_requests || []).map((r) => (
+              <div key={r.id} className="mt-3 pb-3 border-b border-mv-border last:border-0 last:pb-0">
+                <div className="text-sm font-medium">{(r.dates || []).join(", ")}</div>
+                <div className={`text-xs mt-0.5 capitalize ${r.status === "approved" ? "text-emerald-600" : r.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>{r.status}</div>
+                {r.status === "pending" && (
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={async () => {
+                        try { await api.post(`/admin/drivers/${d.id}/week-off/${r.id}/approve`); toast.success("Week-off approved"); load(); }
+                        catch (e) { toast.error(e.response?.data?.detail || "Failed to approve"); }
+                      }}
+                      className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-colors">Approve</button>
+                    <button
+                      onClick={async () => {
+                        try { await api.post(`/admin/drivers/${d.id}/week-off/${r.id}/reject`); toast.success("Week-off rejected"); load(); }
+                        catch (e) { toast.error(e.response?.data?.detail || "Failed to reject"); }
+                      }}
+                      className="px-3 py-1.5 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-bold transition-colors">Reject</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
           </div>
         </TabsContent>
 
@@ -312,6 +341,7 @@ export default function DriverProfile() {
         if (v) setD((p) => ({ ...p, deposit_partial_enabled: true, deposit_partial_first_amount: v.first_amount, deposit_partial_next_date: v.next_payment_date, deposit_amount: v.total || p.deposit_amount }));
         load();
       }} />
+      <RentPaidDialog open={rentOpen} setOpen={setRentOpen} driver={d} onDone={() => { setRentOpen(false); load(); }} />
       <PaidLeaveDialog open={leaveOpen} setOpen={setLeaveOpen} driver={d} onDone={() => { setLeaveOpen(false); load(); }} />
       <DeleteDriverDialog open={del} setOpen={setDel} driver={d} onDone={() => { setDel(false); nav("/drivers"); }} />
     </div>
@@ -322,26 +352,81 @@ function PartialDepositDialog({ open, setOpen, driver, onDone }) {
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(undefined);
   const [busy, setBusy] = useState(false);
+  const [firstPaid, setFirstPaid] = useState(false);       // "Partial deposit amount paid" toggle
+  const [paidDate, setPaidDate] = useState(undefined);     // date the partial amount was paid
+  const [secondPaid, setSecondPaid] = useState(false);     // "Remaining deposit amount paid" toggle
+  const [secondDate, setSecondDate] = useState(undefined);  // date the remaining amount was paid
+  // driver already has partial deposit enabled -> the form opens with the saved values
+  const manage = !!driver?.deposit_partial_enabled || driver?.deposit_status === "partial" || (driver?.deposit_status === "paid" && !!driver?.deposit_first_paid_at);
+  const toDate = (s) => { if (!s) return undefined; const [y, m, dd] = String(s).slice(0, 10).split("-").map(Number); return new Date(y, m - 1, dd); };
+  const disable = async () => {
+    const msg = driver?.deposit_status === "partial"
+      ? "Disable partial deposit? The first half already paid will be reset and the driver will be asked for the FULL deposit again."
+      : "Disable partial deposit? The driver will be asked for the FULL deposit again.";
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      await api.post(`/admin/drivers/${driver.id}/deposit-partial-toggle`, { enabled: false });
+      toast.success("Partial deposit disabled");
+      onDone();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to update partial deposit option");
+    } finally { setBusy(false); }
+  };
   const total = Number(driver?.deposit_amount || 0);
   const toKey = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
   const tomorrow = new Date();
   tomorrow.setHours(0, 0, 0, 0);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  useEffect(() => { if (open) { setAmount(""); setDate(undefined); } }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const paid1 = !!driver?.deposit_first_paid_at && ["partial", "paid"].includes(driver?.deposit_status);
+    const paid2 = driver?.deposit_status === "paid" && !!driver?.deposit_second_paid_at;
+    const savedFirst = driver?.deposit_partial_first_amount || driver?.deposit_first_amount || (Number(driver?.deposit_amount) ? Number(driver.deposit_amount) / 2 : "");
+    const savedNext = driver?.deposit_next_payment_date || driver?.deposit_partial_next_date;
+    setAmount(manage && savedFirst ? String(savedFirst) : "");
+    setDate(manage ? toDate(savedNext) : undefined);
+    setFirstPaid(manage && paid1);
+    setPaidDate(manage && paid1 ? toDate(driver.deposit_first_paid_at) : undefined);
+    setSecondPaid(manage && paid2);
+    setSecondDate(manage && paid2 ? toDate(driver.deposit_second_paid_at) : undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const first = Number(amount) || 0;
   const amountOk = first > 0 && first < total;
   const remaining = amountOk ? Math.round((total - first) * 100) / 100 : "";
 
+  // Exactly ONE of the two dates is used: "Date for next payment" OR "date the remaining amount was paid".
+  const hasNext = !!date;
+  const hasSecond = secondPaid && !!secondDate;
+  const dateOk = manage || hasNext || hasSecond;   // Enable is allowed when either date is chosen
+
   const save = async () => {
     if (!amountOk) return toast.error(`Enter an amount more than 0 and less than ${inr(total)}`);
-    if (!date) return toast.error("Select the date for the next payment");
+    if (!manage && !hasNext && !hasSecond) return toast.error("Select the date for the next payment OR the date the remaining amount was paid");
+    if (!manage && hasNext && secondPaid) return toast.error("Select only one date: next payment date or remaining amount paid date");
+    if (firstPaid && !paidDate) return toast.error("Select the date when the partial amount was paid");
+    if (secondPaid && !secondDate) return toast.error("Select the date when the remaining amount was paid");
     setBusy(true);
     try {
-      const { data } = await api.post(`/admin/drivers/${driver.id}/deposit-partial-toggle`, { enabled: true, first_amount: first, next_payment_date: toKey(date) });
+      if (manage) {
+        // already enabled: only update paid / unpaid (amount and next payment date stay as saved)
+        await api.post(`/admin/drivers/${driver.id}/deposit-partial-payments`, {
+          first_paid: firstPaid, first_paid_date: firstPaid ? toKey(paidDate) : null,
+          second_paid: secondPaid, second_paid_date: secondPaid ? toKey(secondDate) : null,
+        });
+        toast.success("Partial deposit updated");
+        onDone();
+        return;
+      }
+      const { data } = await api.post(`/admin/drivers/${driver.id}/deposit-partial-toggle`, {
+        enabled: true, first_amount: first, next_payment_date: date ? toKey(date) : null,
+        ...(firstPaid ? { first_paid: true, first_paid_date: toKey(paidDate), second_paid: secondPaid, second_paid_date: secondPaid ? toKey(secondDate) : null } : {}),
+      });
       toast.success("Partial deposit enabled");
-      onDone({ first_amount: first, next_payment_date: toKey(date), total: data?.total });
+      onDone({ first_amount: first, next_payment_date: date ? toKey(date) : null, total: data?.total });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to enable partial deposit");
     } finally { setBusy(false); }
@@ -352,31 +437,113 @@ function PartialDepositDialog({ open, setOpen, driver, onDone }) {
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto" data-testid="partial-deposit-dialog">
         <DialogHeader><DialogTitle>Enable Partial Deposit</DialogTitle></DialogHeader>
         <p className="text-sm text-mv-muted">Total security deposit: <b>{inr(total)}</b></p>
-        <Field label="Amount driver has to pay now">
-          <TextInput type="number" min="1" max={total} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Enter amount" data-testid="partial-first-amount" />
+        <Field label="Partial Amount driver has to pay now/Already Paid">
+          <TextInput type="number" min="1" max={total} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Enter amount" disabled={manage} data-testid="partial-first-amount" />
         </Field>
         <Field label="Date for next payment">
-          <div className="flex justify-center rounded-xl border border-mv-border">
-            <Calendar
-              mode="single"
-              selected={date}
-              onSelect={setDate}
-              disabled={(day) => day < tomorrow}
-              defaultMonth={tomorrow}
-              fromMonth={tomorrow}
-            />
-          </div>
-          <p className="text-xs text-mv-muted mt-1">{date ? `Selected: ${toKey(date)}` : "Pick a date from tomorrow onwards"}</p>
+          {manage ? (
+            <TextInput value={date ? toKey(date) : ""} readOnly disabled data-testid="partial-next-date" />
+          ) : (
+            <>
+              <div className="flex justify-center rounded-xl border border-mv-border">
+                <Calendar
+                  mode="single"
+                  selected={date}
+                  onSelect={setDate}
+                  disabled={(day) => day < tomorrow || secondPaid}
+                  defaultMonth={tomorrow}
+                  fromMonth={tomorrow}
+                />
+              </div>
+              <p className="text-xs text-mv-muted mt-1">{secondPaid ? "Disabled: the remaining amount is marked as paid (switch that off to pick a next payment date)" : date ? `Selected: ${toKey(date)}` : "Pick a date from tomorrow onwards"}</p>
+            </>
+          )}
         </Field>
         <Field label="Remaining amount (auto)">
           <TextInput value={remaining === "" ? "" : String(remaining)} readOnly disabled placeholder="Calculated automatically" data-testid="partial-remaining-amount" />
         </Field>
+        <div className="flex flex-col gap-2">
+          <GhostBtn
+            type="button"
+            data-testid="partial-first-paid-btn"
+            disabled={firstPaid && secondPaid}
+            title={firstPaid && secondPaid ? "Mark the remaining deposit amount as unpaid first" : ""}
+            onClick={() => { const v = !firstPaid; setFirstPaid(v); if (!v) { setPaidDate(undefined); setSecondPaid(false); setSecondDate(undefined); } }}
+            className={(firstPaid ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100" : "text-blue-600 hover:text-blue-700 hover:bg-blue-50") + " disabled:opacity-50 disabled:cursor-not-allowed"}>
+            {firstPaid ? "Partial deposit amount unpaid" : "Partial deposit amount paid"}
+          </GhostBtn>
+          {firstPaid && (
+            <PaidDateField
+              testId="partial-paid-date-field"
+              label="Select the date when the partial amount paid"
+              placeholder="Select the date the partial amount was paid"
+              value={paidDate}
+              onChange={setPaidDate}
+              disabledDay={(day) => day > new Date()}
+            />
+          )}
+          <GhostBtn
+            type="button"
+            data-testid="partial-second-paid-btn"
+            disabled={!firstPaid || (hasNext && !secondPaid)}
+            title={!firstPaid ? "Mark the partial deposit amount as paid first" : (hasNext && !secondPaid) ? "Clear the next payment date first (only one date can be selected)" : ""}
+            onClick={() => { const v = !secondPaid; setSecondPaid(v); if (!v) setSecondDate(undefined); }}
+            className={secondPaid ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100" : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+            {secondPaid ? "Remaining deposit amount unpaid" : "Remaining deposit amount paid"}
+          </GhostBtn>
+          {secondPaid && (
+            <PaidDateField
+              testId="remaining-paid-date-field"
+              label="Select the date when the remaining amount paid"
+              placeholder="Select the date the remaining amount was paid"
+              value={secondDate}
+              onChange={setSecondDate}
+              disabledDay={(day) => day > new Date() || (paidDate && day < paidDate) || hasNext}
+            />
+          )}
+        </div>
         <div className="flex justify-end gap-2 mt-2">
+          {manage && driver?.deposit_status !== "paid" && (
+            <GhostBtn type="button" onClick={disable} disabled={busy} data-testid="partial-disable-btn"
+              className="mr-auto text-red-600 hover:text-red-700 hover:bg-red-50">Disable partial deposit</GhostBtn>
+          )}
           <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
-          <PrimaryBtn onClick={save} disabled={busy || !amountOk || !date}>{busy ? "Please wait..." : "Enable"}</PrimaryBtn>
+          <PrimaryBtn onClick={save} disabled={busy || !amountOk || !dateOk || (firstPaid && !paidDate) || (secondPaid && !secondDate)}>{busy ? "Please wait..." : manage ? "Save" : "Enable"}</PrimaryBtn>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Read-only date field with a calendar icon. The calendar opens only when the field / icon is clicked,
+// and the chosen day is written into the field only after pressing OK.
+function PaidDateField({ label, value, onChange, disabledDay, placeholder, testId }) {
+  const [open, setOpen] = useState(false);
+  const [temp, setTemp] = useState(undefined);
+  const fmt = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  const openCal = () => { setTemp(value); setOpen(true); };
+  return (
+    <div data-testid={testId}>
+      <div className="text-xs font-semibold text-mv-muted mb-1.5">{label}</div>
+      <div className="relative">
+        <button type="button" onClick={openCal}
+          className="w-full h-10 px-3 pr-10 text-left rounded-xl border border-mv-border bg-mv-surface2 text-sm hover:border-mv-primary transition-colors">
+          {value ? fmt(value) : <span className="text-mv-muted">{placeholder || "Select date"}</span>}
+        </button>
+        <CalendarDays className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mv-muted pointer-events-none" />
+      </div>
+      {open && (
+        <div className="mt-2 rounded-xl border border-mv-border">
+          <div className="flex justify-center">
+            <Calendar mode="single" selected={temp} onSelect={setTemp} defaultMonth={temp || value} disabled={disabledDay} />
+          </div>
+          <div className="flex justify-end gap-2 p-2 border-t border-mv-border">
+            <GhostBtn type="button" onClick={() => setOpen(false)}>Cancel</GhostBtn>
+            <PrimaryBtn type="button" disabled={!temp} onClick={() => { onChange(temp); setOpen(false); }}>OK</PrimaryBtn>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -543,6 +710,63 @@ function KycDocCard({ title, url }) {
     </div>
   );
 }
+
+function RentPaidDialog({ open, setOpen, driver, onDone }) {
+  const [sel, setSel] = useState([]);
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const toKey = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  const [txns, setTxns] = useState({});
+  useEffect(() => { if (open) { setSel([]); setAmount(""); setTxns({}); } }, [open]);
+  const amt = Number(amount) || 0;
+  const total = Math.round(amt * sel.length * 100) / 100;
+
+  const save = async () => {
+    if (!sel.length) return toast.error("Select at least one date");
+    if (amt <= 0) return toast.error("Enter a valid amount");
+    setBusy(true);
+    try {
+      await api.post(`/admin/drivers/${driver.id}/rent-paid`, { dates: sel.map(toKey).sort(), amount: amt, txn_ids: txns });
+      toast.success(`Rent marked paid for ${sel.length} day(s)`);
+      onDone();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to mark rent as paid");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle>Rent Paid</DialogTitle></DialogHeader>
+        <div className="flex justify-center rounded-xl border border-mv-border">
+          <Calendar mode="multiple" selected={sel} onSelect={(v) => setSel(v || [])} disabled={(day) => day > new Date()} />
+        </div>
+        {sel.length > 0 && (
+          <>
+            <div className="space-y-2">
+              <div className="mv-label">Transaction ID (per date)</div>
+              {sel.map(toKey).sort().map((k) => (
+                <div key={k} className="flex items-center gap-2">
+                  <span className="text-sm font-medium w-28 shrink-0">{k}</span>
+                  <TextInput value={txns[k] || ""} onChange={(e) => setTxns((t) => ({ ...t, [k]: e.target.value }))} placeholder="Enter transaction ID" />
+                </div>
+              ))}
+            </div>
+            <Field label="Rent amount (per day)">
+              <TextInput type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Enter amount" />
+            </Field>
+            {amt > 0 && <p className="text-sm">Total: <b>{inr(total)}</b> ({sel.length} × {inr(amt)})</p>}
+          </>
+        )}
+        <div className="flex justify-end gap-2 mt-2">
+          <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
+          <PrimaryBtn onClick={save} disabled={busy || !sel.length || amt <= 0}>{busy ? "Please wait..." : "Save"}</PrimaryBtn>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
   const [info, setInfo] = useState(null);
   const [sel, setSel] = useState([]);
@@ -561,14 +785,14 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
 
   const todayStr = info?.today;
   const pastUsed = info ? info.dates.filter((x) => x < todayStr) : [];
-  const maxPick = info ? Math.max(0, info.max_days - pastUsed.length) : 0;
+  const maxPick = Infinity;  // no limit on the number of paid leave days
   const savedToday = info ? info.dates.includes(todayStr) : false;
 
   // Only today / future days of the current month; today only if its rent is not paid yet.
   const isDisabled = (day) => {
     if (!info || maxPick === 0) return true;
     const k = toKey(day);
-    if (k < todayStr || k.slice(0, 7) !== todayStr.slice(0, 7)) return true;
+    if (k < todayStr) return true;
     if (k === todayStr && info.today_rent_paid && !savedToday) return true;
     return false;
   };
@@ -593,7 +817,7 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
         ) : (
           <>
             <p className="text-sm text-mv-muted">
-              Select up to {maxPick} day{maxPick === 1 ? "" : "s"} from today to the end of this month. No daily rent will be asked from {driver?.name} on these days.
+              Select any number of days from today onwards. No daily rent will be asked from {driver?.name} on these days.
               {info.today_rent_paid ? " Today's rent is already paid, so today cannot be selected." : ""}
             </p>
             <div className="flex justify-center">
@@ -601,11 +825,9 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
                 mode="multiple"
                 selected={sel}
                 onSelect={(v) => setSel(v || [])}
-                max={maxPick || undefined}
                 disabled={isDisabled}
                 defaultMonth={toDate(todayStr)}
                 fromMonth={toDate(todayStr)}
-                toMonth={toDate(todayStr)}
                 showOutsideDays={false}
                 modifiers={{ used: pastUsed.map(toDate) }}
                 modifiersClassNames={{ used: "bg-emerald-100 text-emerald-700 rounded-md" }}

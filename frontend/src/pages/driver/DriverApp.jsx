@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { Home, KeyRound, Receipt, User, Loader2, FileBadge, Ban, Clock, PhoneCall, LogOut } from "lucide-react";
+import { Home, KeyRound, Receipt, User, Loader2, FileBadge, Ban, Clock, PhoneCall, LogOut, CalendarDays, CalendarCheck } from "lucide-react";
 import { useState, useEffect } from "react";
 import { DriverAuthProvider, useDriver } from "../../context/DriverAuthContext";
 import DriverLogin from "./DriverLogin";
@@ -8,12 +8,15 @@ import DriverRental from "./DriverRental";
 import DriverPayments from "./DriverPayments";
 import DriverProfile from "./DriverProfile";
 import DriverKYC from "./DriverKYC";
+import DriverWeekOff from "./DriverWeekOff";
+//import dapi from "../../lib/driverApi";
 
 const NAV = [
   { to: "/driver", label: "Home", icon: Home, end: true },
   { to: "/driver/kyc", label: "KYC", icon: FileBadge },
   { to: "/driver/rental", label: "Rental", icon: KeyRound },
   { to: "/driver/payments", label: "Payments", icon: Receipt },
+  { to: "/driver/week-off", label: "Week-off", icon: CalendarDays },
   { to: "/driver/profile", label: "Profile", icon: User },
 ];
 
@@ -54,12 +57,18 @@ function DriverShell() {
 
   if (data?.admin_block) return <AdminBlockedScreen type={data.admin_block} reason={data.admin_block_reason} />;
 
+  // Approved week-off day: the app stays locked (no way to close this) until the day is over
+  // Only on an approved week-off day: full-screen, no close button, nothing behind it is rendered.
+  // It goes away by itself after midnight (the shell polls every 20s), and the app works as usual.
+  if (data?.week_off?.locked) return <WeekOffLockScreen date={data.week_off.date} />;
+
   // Remaining half of the security deposit is due: keep the driver on Home, where the pay popup is shown
   if (data?.deposit?.remaining_due && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
 
   return (
     <div className="h-[100dvh] bg-slate-50 flex flex-col overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <div className="max-w-md w-full mx-auto flex flex-col h-full bg-slate-50 relative">
+        {/* {data?.week_off?.notice && <WeekOffApprovedNotice notice={data.week_off.notice} onClose={refresh} />} */}
         <div className="flex-1 overflow-y-auto pb-6">
           <Outlet />
         </div>
@@ -75,6 +84,25 @@ function DriverShell() {
     </div>
   );
 }
+
+function WeekOffLockScreen({ date }) {
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center px-6" data-testid="week-off-lock-screen">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-7 text-center shadow-xl">
+        <div className="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center mb-5">
+          <CalendarCheck className="w-10 h-10 text-emerald-600" />
+        </div>
+        <h1 className="text-xl font-extrabold text-slate-900">Your week-off has been approved</h1>
+        <p className="text-sm text-slate-500 mt-2">
+          Today ({date}) is your week-off. The app will be available again once the day is over.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// One-time notice right after the admin approves (for week-off days that are still ahead)
+
 
 const SUPPORT_PHONE = "+919626499399"; // TODO: support number
 
@@ -127,6 +155,7 @@ export default function DriverApp() {
             <Route path="/driver/kyc" element={<DriverKYC />} />
             <Route path="/driver/rental" element={<DriverRental />} />
             <Route path="/driver/payments" element={<DriverPayments />} />
+            <Route path="/driver/week-off" element={<DriverWeekOff />} />
             <Route path="/driver/profile" element={<DriverProfile />} />
           </Route>
         </Route>

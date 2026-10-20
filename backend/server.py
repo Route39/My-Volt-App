@@ -484,6 +484,84 @@ async def create_vehicle(body: VehicleBody, request: Request):
     await log_audit(user, "vehicle_created", "vehicle", str(res.inserted_id), f"Vehicle {body.vehicle_number} added")
     return ser(await db.vehicles.find_one({"_id": res.inserted_id}))
 
+VEH_IMPORT_COLS = {"city": "city", "registrationnumber": "registration_number", "registrationno": "registration_number",
+                   "regno": "registration_number", "regnumber": "registration_number", "registration": "registration_number",
+                   "vinnumber": "vin_number", "vinno": "vin_number", "vin": "vin_number",
+                   "chassisnumber": "chassis_number", "chassisno": "chassis_number", "model": "model"}
+VEH_PREFIX = {"Coimbatore": "CBE", "Tiruppur": "TUP", "Chennai": "CHN", "Bangalore": "BAN"}
+
+
+@api.post("/vehicles/import")
+async def import_vehicles(request: Request, file: UploadFile = File(...)):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    import io
+    raw = await file.read()
+    fname = (file.filename or "").lower()
+    if fname.endswith(".csv"):
+        import csv
+        rows = list(csv.reader(io.StringIO(raw.decode("utf-8-sig", errors="ignore"))))
+    elif fname.endswith(".xlsx"):
+        from openpyxl import load_workbook
+        ws = load_workbook(io.BytesIO(raw), read_only=True, data_only=True).active
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    else:
+        raise HTTPException(status_code=400, detail="Upload an Excel (.xlsx) or CSV file")
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="File has no vehicle rows")
+    header = [VEH_IMPORT_COLS.get(re.sub(r"[^a-z]", "", str(h or "").lower())) for h in rows[0]]
+    required = ["city", "registration_number", "vin_number"]
+    missing = [c for c in required if c not in header]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing columns: {', '.join(missing)}")
+    org = user.get("organization_id")
+    is_cm = user.get("role") == "city_manager" and user.get("city")
+    created, errors, seen_reg, seen_vin = [], [], set(), set()
+    for row_no, r in enumerate(rows[1:], start=2):
+        rec = {}
+        for idx, key in enumerate(header):
+            if key and idx < len(r):
+                rec[key] = _import_cell(r[idx])
+        if not any(rec.values()):
+            continue
+        reg = re.sub(r"\s+", " ", (rec.get("registration_number") or "").upper()).strip()
+        vin = re.sub(r"\s+", "", (rec.get("vin_number") or "").upper())
+        city = user["city"] if is_cm else IMPORT_CITY_NAMES.get((rec.get("city") or "").strip().lower())
+        err = None
+        empty = [c for c in required if not rec.get(c)]
+        if empty:
+            err = f"Missing: {', '.join(empty)}"
+        elif not city:
+            err = f"Invalid city: {rec.get('city')}"
+        elif not re.fullmatch(r"[A-Z0-9]{17}", vin):
+            err = "VIN must be exactly 17 letters/numbers"
+        elif reg in seen_reg:
+            err = "Registration number repeated in file"
+        elif vin in seen_vin:
+            err = "VIN repeated in file"
+        elif await db.vehicles.find_one({"organization_id": org, "registration_number": {"$regex": f"^{re.escape(reg)}$", "$options": "i"}}):
+            err = "Registration number already exists"
+        elif await db.vehicles.find_one({"organization_id": org, "vin_number": vin}):
+            err = "VIN already exists"
+        if err:
+            errors.append({"row": row_no, "name": reg, "error": err})
+            continue
+        seen_reg.add(reg)
+        seen_vin.add(vin)
+        prefix = VEH_PREFIX.get(city, city[:3].upper())
+        n = await db.vehicles.count_documents({"organization_id": org, "vehicle_number": {"$regex": f"^{prefix}"}}) + 1
+        while await db.vehicles.find_one({"organization_id": org, "vehicle_number": f"{prefix}{n:03d}"}):
+            n += 1
+        doc = VehicleBody(vehicle_number=f"{prefix}{n:03d}", registration_number=reg, vin_number=vin, city=city,
+                          chassis_number=rec.get("chassis_number") or None,
+                          model=rec.get("model") or "Route39 EV").model_dump()
+        doc["organization_id"] = org
+        doc["created_at"] = now_iso()
+        res = await db.vehicles.insert_one(doc)
+        created.append({"id": str(res.inserted_id), "vehicle_number": doc["vehicle_number"]})
+    if created:
+        await log_audit(user, "vehicles_imported", "vehicle", "", f"{len(created)} vehicles imported from {file.filename}")
+    return {"created": len(created), "vehicles": created, "errors": errors}
 
 @api.put("/vehicles/{vid}")
 async def update_vehicle(vid: str, body: dict, request: Request):
@@ -798,6 +876,9 @@ async def get_driver(did: str, request: Request):
     out["deposit_partial_enabled"] = bool((sec_dep or {}).get("partial_enabled"))
     out["deposit_partial_first_amount"] = (sec_dep or {}).get("partial_first_amount")
     out["deposit_partial_next_date"] = (sec_dep or {}).get("partial_next_date")
+    out["deposit_first_paid_at"] = (sec_dep or {}).get("first_paid_at")
+    out["deposit_second_paid_at"] = (sec_dep or {}).get("second_paid_at") if (sec_dep or {}).get("status") == "paid" else None
+    out["deposit_first_amount"] = (sec_dep or {}).get("first_amount")
     
     cur_month = _today_ist().strftime("%Y-%m")
     joined_date = d.get("created_at") or _today_ist().isoformat()
@@ -808,6 +889,10 @@ async def get_driver(did: str, request: Request):
     _all_leaves = set(d.get("paid_leave_dates") or [])
     out["leave_dates_this_month"] = sorted(dl for dl in _all_leaves if dl.startswith(cur_month))
     out["leaves_taken_this_month"] = len(out["leave_dates_this_month"])
+    out["week_off_requests"] = [
+        {"id": str(r["_id"]), "dates": r.get("dates", []), "status": r.get("status", "pending")}
+        for r in await db.week_off_requests.find({"driver_id": did, "month": cur_month}).sort("created_at", -1).to_list(None)
+    ]
     
     return out
 
@@ -960,6 +1045,99 @@ async def create_driver(body: DriverBody, request: Request):
     await log_audit(user, "driver_created", "driver", str(res.inserted_id), f"Driver {body.name} added")
     return ser(await db.drivers.find_one({"_id": res.inserted_id}))
 
+IMPORT_CITY_NAMES = {"tiruppur": "Tiruppur", "tirupur": "Tiruppur", "coimbatore": "Coimbatore",
+                     "chennai": "Chennai", "bangalore": "Bangalore", "bengaluru": "Bangalore"}
+IMPORT_COLS = {"name": "name", "drivername": "name", "phone": "phone", "mobile": "phone",
+               "mobileno": "phone", "mobilenumber": "phone", "phonenumber": "phone", "phoneno": "phone",
+               "city": "city", "address": "address", "emergencycontact": "emergency_contact",
+               "emergencyno": "emergency_contact", "emergency": "emergency_contact",
+               "licenceno": "license_number", "licenseno": "license_number", "licencenumber": "license_number",
+               "licensenumber": "license_number", "licence": "license_number", "license": "license_number",
+               "dlno": "license_number", "dlnumber": "license_number"}
+
+
+def _import_cell(v):
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
+
+
+def _import_phone(v):
+    digits = re.sub(r"\D", "", v or "")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    return digits
+
+
+@api.post("/drivers/import")
+async def import_drivers(request: Request, file: UploadFile = File(...)):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    import io
+    raw = await file.read()
+    fname = (file.filename or "").lower()
+    if fname.endswith(".csv"):
+        import csv
+        rows = list(csv.reader(io.StringIO(raw.decode("utf-8-sig", errors="ignore"))))
+    elif fname.endswith(".xlsx"):
+        from openpyxl import load_workbook
+        ws = load_workbook(io.BytesIO(raw), read_only=True, data_only=True).active
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    else:
+        raise HTTPException(status_code=400, detail="Upload an Excel (.xlsx) or CSV file")
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="File has no driver rows")
+    header = [IMPORT_COLS.get(re.sub(r"[^a-z]", "", str(h or "").lower())) for h in rows[0]]
+    required = ["name", "phone", "city", "address", "emergency_contact", "license_number"]
+    missing = [c for c in required if c not in header]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing columns: {', '.join(missing)}")
+    org = user.get("organization_id") or "route39-org"
+    is_cm = user.get("role") == "city_manager" and user.get("city")
+    created, errors, seen = [], [], set()
+    for row_no, r in enumerate(rows[1:], start=2):
+        rec = {}
+        for idx, key in enumerate(header):
+            if key and idx < len(r):
+                rec[key] = _import_cell(r[idx])
+        if not any(rec.values()):
+            continue
+        rec["phone"] = _import_phone(rec.get("phone"))
+        rec["emergency_contact"] = _import_phone(rec.get("emergency_contact"))
+        city = user["city"] if is_cm else IMPORT_CITY_NAMES.get((rec.get("city") or "").strip().lower())
+        err = None
+        empty = [c for c in required if not rec.get(c)]
+        if empty:
+            err = f"Missing: {', '.join(empty)}"
+        elif not re.fullmatch(r"\d{10}", rec["phone"]):
+            err = "Phone must be 10 digits"
+        elif not re.fullmatch(r"\d{10}", rec["emergency_contact"]):
+            err = "Emergency contact must be 10 digits"
+        elif not city:
+            err = f"Invalid city: {rec.get('city')}"
+        elif rec["phone"] in seen:
+            err = "Phone repeated in file"
+        elif await db.drivers.find_one({"phone": rec["phone"]}):
+            err = "Mobile number already exists"
+        if err:
+            errors.append({"row": row_no, "name": rec.get("name", ""), "phone": rec.get("phone", ""), "error": err})
+            continue
+        seen.add(rec["phone"])
+        doc = {
+            "name": rec["name"], "phone": rec["phone"], "address": rec["address"],
+            "emergency_contact": rec["emergency_contact"], "city": city, "status": "active",
+            "avatar": None, "license_number": rec["license_number"], "package_name": None, "package_rate": None,
+            "organization_id": org, "created_at": now_iso(),
+            "driver_code": await _next_driver_code(city),
+        }
+        res = await db.drivers.insert_one(doc)
+        created.append({"id": str(res.inserted_id), "name": doc["name"], "driver_code": doc["driver_code"]})
+    if created:
+        await log_audit(user, "drivers_imported", "driver", "", f"{len(created)} drivers imported from {file.filename}")
+    return {"created": len(created), "drivers": created, "errors": errors}
+
 
 @api.put("/drivers/{did}")
 async def update_driver(did: str, body: dict, request: Request):
@@ -1037,6 +1215,57 @@ async def override_deposit_paid(did: str, request: Request):
     await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
     return {"ok": True}
 
+@api.post("/admin/drivers/{did}/rent-paid")
+async def admin_mark_rent_paid(did: str, request: Request, body: dict):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    dates = sorted(set(body.get("dates") or []))
+    try:
+        amount = round(float(body.get("amount") or 0), 2)
+    except (TypeError, ValueError):
+        amount = 0
+    if not dates:
+        raise HTTPException(status_code=400, detail="Select at least one date")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Enter a valid amount")
+    for d_ in dates:
+        try:
+            datetime.strptime(d_, "%Y-%m-%d")
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid date: {d_}")
+    rental = await _active_rental(org, did)
+    if not rental:
+        raise HTTPException(status_code=400, detail="No active rental for this driver")
+    already = await db.rental_payments.find({
+        "organization_id": org, "driver_id": did, "payment_status": "paid",
+        "kind": {"$in": ["daily", "outstanding", "catchup"]}, "covers_dates": {"$in": dates},
+    }).to_list(100)
+    dup = sorted({x for p in already for x in (p.get("covers_dates") or []) if x in dates})
+    if dup:
+        raise HTTPException(status_code=400, detail=f"Rent already paid for: {', '.join(dup)}")
+    for d_ in dates:
+        await db.rental_payments.insert_one({
+            "organization_id": org, "driver_id": did, "rental_id": str(rental["_id"]),
+            "kind": "daily", "amount": amount, "covers_dates": [d_], "covers_amounts": {d_: amount},
+            "payment_status": "paid", "payment_method": body.get("method") or "cash",
+                        "transaction_id": str((body.get("txn_ids") or {}).get(d_) or "").strip() or f"MANUAL_RENT_{uuid.uuid4().hex[:8].upper()}",
+            "gateway": "manual_admin", "gateway_ref": "ADMIN_RENT_PAID",
+            "paid_at": now_iso(), "created_at": now_iso(), "marked_by": user.get("id"),
+        })
+    acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+    if acct:
+        rbd = dict(acct.get("rent_by_date") or {})
+        owed = round(sum(float(rbd.pop(d_, 0) or 0) for d_ in dates), 2)
+        if owed > 0:
+            await db.rental_accounts.update_one({"_id": acct["_id"]}, {"$set": {
+                "rent_by_date": rbd,
+                "rent_due": max(0.0, round(float(acct.get("rent_due", 0) or 0) - owed, 2)),
+                "outstanding_amount": max(0.0, round(float(acct.get("outstanding_amount", 0) or 0) - owed, 2)),
+                "unpaid_dates": [x for x in (acct.get("unpaid_dates") or []) if x not in dates],
+            }})
+    await log_audit(user, "rent_marked_paid", "driver", did, f"Rent {amount} marked paid for {', '.join(dates)}")
+    return {"ok": True, "count": len(dates), "total": round(amount * len(dates), 2)}
 
 @api.post("/admin/drivers/{did}/deposit-partial-toggle")
 async def toggle_deposit_partial(did: str, request: Request, body: dict):
@@ -1081,19 +1310,157 @@ async def toggle_deposit_partial(did: str, request: Request, body: dict):
                 raise HTTPException(status_code=400, detail="Enter the amount the driver has to pay now.")
             if first_amt <= 0 or first_amt >= total:
                 raise HTTPException(status_code=400, detail=f"Amount must be more than 0 and less than the total deposit ({total:g}).")
-            try:
-                nd_date = date.fromisoformat((body.get("next_payment_date") or "").strip())
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Select the date for the next payment.")
-            if nd_date <= _today_ist():
-                raise HTTPException(status_code=400, detail="Next payment date must be from tomorrow onwards.")
-            upd["$set"].update({"partial_first_amount": first_amt, "partial_next_date": nd_date.isoformat()})
+            # Either the next payment date OR "remaining amount already paid" (with its paid date) – never both.
+            second_paid_flag = bool(body.get("second_paid"))
+            nd_raw = (body.get("next_payment_date") or "").strip()
+            if nd_raw and second_paid_flag:
+                raise HTTPException(status_code=400, detail="Select either the next payment date or the remaining-amount paid date, not both.")
+            nd_date = None
+            if nd_raw or not second_paid_flag:
+                try:
+                    nd_date = date.fromisoformat(nd_raw)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Select the date for the next payment.")
+                if nd_date <= _today_ist():
+                    raise HTTPException(status_code=400, detail="Next payment date must be from tomorrow onwards.")
+            upd["$set"]["partial_first_amount"] = first_amt
+            if nd_date:
+                upd["$set"]["partial_next_date"] = nd_date.isoformat()
+            # optional: admin already collected the partial / remaining amount (QR) outside the app
+            first_paid = bool(body.get("first_paid"))
+            second_paid = bool(body.get("second_paid"))
+            paid_on = None
+            if second_paid and not first_paid:
+                raise HTTPException(status_code=400, detail="Mark the partial deposit amount as paid first.")
+            if first_paid:
+                try:
+                    paid_on = date.fromisoformat((body.get("first_paid_date") or "").strip())
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Select the date when the partial amount was paid.")
+                if paid_on > _today_ist():
+                    raise HTTPException(status_code=400, detail="Paid date cannot be in the future.")
+            second_on = None
+            if second_paid:
+                second_on = _paid_date_or_400(body.get("second_paid_date"), "remaining")
+                if second_on < paid_on:
+                    raise HTTPException(status_code=400, detail="Remaining paid date cannot be before the partial paid date.")
         else:
             upd["$unset"] = {"partial_first_amount": "", "partial_next_date": ""}
         await db.security_deposits.update_one({"_id": dep["_id"]}, upd)
+        if enabled and first_paid:
+            # 1) partial amount paid -> deposit becomes "partial"; the driver app popup stays hidden
+            #    until next_payment_date (remaining_due only turns true on/after that date)
+            rec1 = {"organization_id": org, "driver_id": did, "amount": first_amt, "kind": "deposit",
+                    "payment_status": "pending", "gateway_order_id": f"MANUAL_{uuid.uuid4().hex[:10]}",
+                    "gateway": "manual_qr", "created_at": now_iso(),
+                    "deposit_part": "first", "deposit_total": total, "next_payment_date": nd_date.isoformat() if nd_date else None}
+            rec1["_id"] = (await db.rental_payments.insert_one(rec1)).inserted_id
+            await _apply_paid(rec1, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
+            # Daily Collection shows the "PARTIALLY PAID" cell from this date onwards
+            await db.security_deposits.update_one(
+                {"_id": dep["_id"]}, {"$set": {"first_paid_at": f"{paid_on.isoformat()}T00:00:00+00:00"}})
+            # 2) remaining amount also paid -> deposit fully paid, no popup in the driver app
+            if second_paid:
+                rec2 = {"organization_id": org, "driver_id": did, "amount": round(total - first_amt, 2), "kind": "deposit",
+                        "payment_status": "pending", "gateway_order_id": f"MANUAL_{uuid.uuid4().hex[:10]}",
+                        "gateway": "manual_qr", "created_at": now_iso(),
+                        "deposit_part": "second", "deposit_total": total}
+                rec2["_id"] = (await db.rental_payments.insert_one(rec2)).inserted_id
+                await _apply_paid(rec2, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
+                await db.security_deposits.update_one(
+                    {"_id": dep["_id"]}, {"$set": {"second_paid_at": _paid_at_iso(second_on), "paid_at": _paid_at_iso(second_on)}})
     await log_audit(user, "deposit_partial_enabled" if enabled else "deposit_partial_disabled", "driver", did,
                     "Partial deposit " + ("enabled" if enabled else "disabled"))
     return {"ok": True, "total": float(dep.get("amount") or 0)}
+
+
+def _paid_date_or_400(value, label):
+    """Parses a 'date paid' sent by the admin (today or a past day)."""
+    try:
+        d = date.fromisoformat((value or "").strip())
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail=f"Select the date when the {label} amount was paid.")
+    if d > _today_ist():
+        raise HTTPException(status_code=400, detail="Paid date cannot be in the future.")
+    return d
+
+
+def _paid_at_iso(d):
+    return f"{d.isoformat()}T00:00:00+00:00"
+
+
+async def _record_qr_deposit_part(org, did, part, amount, total, next_date=None):
+    """Records one part (first / second) of a split deposit as paid by QR (admin entered)."""
+    rec = {"organization_id": org, "driver_id": did, "amount": amount, "kind": "deposit",
+           "payment_status": "pending", "gateway_order_id": f"MANUAL_{uuid.uuid4().hex[:10]}",
+           "gateway": "manual_qr", "created_at": now_iso(),
+           "deposit_part": part, "deposit_total": total}
+    if next_date:
+        rec["next_payment_date"] = next_date
+    rec["_id"] = (await db.rental_payments.insert_one(rec)).inserted_id
+    await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
+
+
+@api.post("/admin/drivers/{did}/deposit-partial-payments")
+async def update_deposit_partial_payments(did: str, request: Request, body: dict):
+    """'Enable Partial Deposit' form for a driver who already has it enabled: mark the partial /
+    remaining amount as paid (with the date it was paid) or unpaid again.
+    Amount and next payment date stay exactly as saved."""
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    dep = await db.security_deposits.find_one({"driver_id": did, "organization_id": org})
+    if not dep or not (dep.get("partial_enabled") or dep.get("first_paid_at")):
+        raise HTTPException(status_code=400, detail="Partial deposit is not enabled for this driver.")
+    status = dep.get("status") or "pending"
+    if status == "paid" and not dep.get("first_paid_at"):
+        raise HTTPException(status_code=400, detail="Deposit was paid in full. Mark it unpaid first.")
+    total = float(dep.get("amount") or 0)
+    first_amt = float(dep.get("first_amount") or dep.get("partial_first_amount") or 0)
+    if not (0 < first_amt < total):
+        first_amt = round(total / 2, 2)
+    first_paid, second_paid = bool(body.get("first_paid")), bool(body.get("second_paid"))
+    if second_paid and not first_paid:
+        raise HTTPException(status_code=400, detail="Mark the partial deposit amount as paid first.")
+    first_on = _paid_date_or_400(body.get("first_paid_date"), "partial") if first_paid else None
+    second_on = _paid_date_or_400(body.get("second_paid_date"), "remaining") if second_paid else None
+    if second_on and second_on < first_on:
+        raise HTTPException(status_code=400, detail="Remaining paid date cannot be before the partial paid date.")
+
+    cur_first = status in ("partial", "paid")
+    cur_second = status == "paid"
+    nxt = dep.get("next_payment_date") or dep.get("partial_next_date") or (_today_ist() + timedelta(days=1)).isoformat()
+    q = {"_id": dep["_id"]}
+
+    # undo "remaining amount paid" -> back to "partial amount paid"
+    if cur_second and not second_paid:
+        await db.security_deposits.update_one(q, {
+            "$set": {"status": "partial", "paid_amount": first_amt,
+                     "transaction_id": dep.get("first_transaction_id"), "paid_at": None},
+            "$unset": {"second_paid_at": ""}})
+        cur_second = False
+    # undo "partial amount paid" -> back to nothing paid (saved amount / next date are kept)
+    if cur_first and not first_paid:
+        await db.security_deposits.update_one(q, {
+            "$set": {"status": "pending", "transaction_id": None, "paid_at": None},
+            "$unset": {"paid_amount": "", "next_payment_date": "", "first_paid_at": "",
+                       "second_paid_at": "", "first_transaction_id": "", "first_amount": ""}})
+        cur_first = False
+    # mark partial amount paid (or just change its date)
+    if first_paid:
+        if not cur_first:
+            await _record_qr_deposit_part(org, did, "first", first_amt, total, nxt)
+        await db.security_deposits.update_one(q, {"$set": {"first_paid_at": _paid_at_iso(first_on)}})
+    # mark remaining amount paid (or just change its date)
+    if second_paid:
+        if not cur_second:
+            await _record_qr_deposit_part(org, did, "second", round(total - first_amt, 2), total)
+        await db.security_deposits.update_one(
+            q, {"$set": {"second_paid_at": _paid_at_iso(second_on), "paid_at": _paid_at_iso(second_on)}})
+    await log_audit(user, "deposit_partial_payments_updated", "driver", did,
+                    f"Partial deposit payments updated: partial {'paid' if first_paid else 'unpaid'}, "
+                    f"remaining {'paid' if second_paid else 'unpaid'}")
+    return {"ok": True}
 
 
 @api.post("/admin/drivers/{did}/deposit-full-unpaid")
@@ -1173,7 +1540,7 @@ async def get_paid_leave(did: str, request: Request):
     today_iso = _today_ist().isoformat()
     month_prefix = today_iso[:7]
     return {
-        "dates": sorted(x for x in (drv.get("paid_leave_dates") or []) if x.startswith(month_prefix)),
+        "dates": sorted(x for x in (drv.get("paid_leave_dates") or []) if x.startswith(month_prefix) or x >= today_iso),
         "today": today_iso,
         "today_rent_paid": await _rent_paid_for_date(did, today_iso),
         "max_days": PAID_LEAVE_MAX_PER_MONTH,
@@ -1200,14 +1567,11 @@ async def set_paid_leave(did: str, request: Request):
             date.fromisoformat(x)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date")
-        if x < today_iso or not x.startswith(month_prefix):
-            raise HTTPException(status_code=400, detail="Paid leave can only be set for today or later days of the current month")
+        if x < today_iso:
+            raise HTTPException(status_code=400, detail="Paid leave can only be set for today or later days")
 
-    # Leave days that already passed stay on record and still count toward this month's limit.
+    # Leave days that already passed stay on record. No limit on the number of future leave days.
     keep = [x for x in old if x < today_iso]
-    used_this_month = [x for x in keep if x.startswith(month_prefix)]
-    if len(used_this_month) + len(picked) > PAID_LEAVE_MAX_PER_MONTH:
-        raise HTTPException(status_code=400, detail=f"Maximum {PAID_LEAVE_MAX_PER_MONTH} paid leave days per month")
 
     # Today can be newly added only if today's rent has NOT been paid.
     if today_iso in picked and today_iso not in old:
@@ -1231,6 +1595,174 @@ async def set_paid_leave(did: str, request: Request):
 
     await log_audit(user, "driver_paid_leave_set", "driver", did, f"Paid leave days: {', '.join(picked) if picked else 'none'}")
     return {"ok": True, "dates": [x for x in new_list if x.startswith(month_prefix)]}
+
+
+# ===== WEEK-OFF (driver requests, admin approves) =====
+WEEK_OFF_MAX_PER_MONTH = 3  # driver week-off days per month (separate from Paid Leave)
+
+
+async def _week_off_state(did):
+    """Week-off info sent to the driver app: the app is locked ONLY when today is an
+    approved week-off day. On every other day it works as usual."""
+    today_iso = _today_ist().isoformat()
+    drv = await db.drivers.find_one({"_id": oid(did)}, {"week_off_dates": 1}) or {}
+    locked = today_iso in set(drv.get("week_off_dates") or [])
+    return {"locked": locked, "date": today_iso if locked else None, "notice": None}
+
+
+@api.get("/driver/week-off")
+async def driver_week_off_info(request: Request):
+    user = await get_user(request)
+    require_driver(user)
+    did = user["id"]
+    today_iso = _today_ist().isoformat()
+    month = today_iso[:7]
+    drv = await db.drivers.find_one({"_id": oid(did)}) or {}
+    reqs = await db.week_off_requests.find({"driver_id": did, "month": month}).sort("created_at", -1).to_list(None)
+    return {
+        "today": today_iso,
+        "today_rent_paid": await _rent_paid_for_date(did, today_iso),
+        "max_days": WEEK_OFF_MAX_PER_MONTH,
+        "taken_dates": sorted(x for x in (drv.get("week_off_dates") or []) if x.startswith(month)),
+        "leave_dates": sorted(x for x in (drv.get("paid_leave_dates") or []) if x.startswith(month)),
+        "pending_dates": sorted({x for r in reqs if r.get("status") == "pending" for x in r.get("dates", [])}),
+        "requests": [{"id": str(r["_id"]), "dates": r.get("dates", []), "status": r.get("status", "pending")} for r in reqs],
+    }
+
+
+@api.post("/driver/week-off")
+async def driver_apply_week_off(request: Request, body: dict):
+    user = await get_user(request)
+    require_driver(user)
+    did = user["id"]
+    today_iso = _today_ist().isoformat()
+    month = today_iso[:7]
+    picked = sorted({str(x)[:10] for x in (body.get("dates") or [])})
+    if not picked:
+        raise HTTPException(status_code=400, detail="Select at least one date")
+    for x in picked:
+        try:
+            date.fromisoformat(x)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date")
+        if x < today_iso or not x.startswith(month):
+            raise HTTPException(status_code=400, detail="Week-off can only be applied for today or later days of the current month")
+    drv = await db.drivers.find_one({"_id": oid(did)}) or {}
+    taken = {x for x in (drv.get("week_off_dates") or []) if x.startswith(month)}
+    pending = {x for r in await db.week_off_requests.find({"driver_id": did, "month": month, "status": "pending"}).to_list(None)
+               for x in r.get("dates", [])}
+    if any(x in set(drv.get("paid_leave_dates") or []) for x in picked):
+        raise HTTPException(status_code=400, detail="A selected date is already a paid leave day")
+    if any(x in taken or x in pending for x in picked):
+        raise HTTPException(status_code=400, detail="A selected date already has a week-off or a pending request")
+    if len(taken | pending) + len(picked) > WEEK_OFF_MAX_PER_MONTH:
+        raise HTTPException(status_code=400, detail=f"Maximum {WEEK_OFF_MAX_PER_MONTH} week-off days per month")
+    if today_iso in picked and await _rent_paid_for_date(did, today_iso):
+        raise HTTPException(status_code=400, detail="Today's rent is already paid, so today cannot be a week-off day")
+    await db.week_off_requests.insert_one({
+        "organization_id": user.get("organization_id"), "driver_id": did, "month": month,
+        "dates": picked, "status": "pending", "created_at": now_iso(),
+    })
+    return {"ok": True}
+
+@api.put("/driver/week-off/{rid}")
+async def driver_edit_week_off(rid: str, request: Request, body: dict):
+    """Driver changes the dates of a request that the admin has not approved/rejected yet."""
+    user = await get_user(request)
+    require_driver(user)
+    did = user["id"]
+    today_iso = _today_ist().isoformat()
+    month = today_iso[:7]
+    req = await db.week_off_requests.find_one({"_id": oid(rid), "driver_id": did})
+    if not req or req.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Only a pending request can be edited")
+    picked = sorted({str(x)[:10] for x in (body.get("dates") or [])})
+    if not picked:
+        raise HTTPException(status_code=400, detail="Select at least one date")
+    for x in picked:
+        try:
+            date.fromisoformat(x)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date")
+        if x < today_iso or not x.startswith(month):
+            raise HTTPException(status_code=400, detail="Week-off can only be applied for today or later days of the current month")
+    drv = await db.drivers.find_one({"_id": oid(did)}) or {}
+    taken = {x for x in (drv.get("week_off_dates") or []) if x.startswith(month)}
+    # other pending requests only (this request's own dates are being replaced)
+    pending = {x for r in await db.week_off_requests.find(
+                   {"driver_id": did, "month": month, "status": "pending", "_id": {"$ne": req["_id"]}}).to_list(None)
+               for x in r.get("dates", [])}
+    if any(x in set(drv.get("paid_leave_dates") or []) for x in picked):
+        raise HTTPException(status_code=400, detail="A selected date is already a paid leave day")
+    if any(x in taken or x in pending for x in picked):
+        raise HTTPException(status_code=400, detail="A selected date already has a week-off or a pending request")
+    if len(taken | pending) + len(picked) > WEEK_OFF_MAX_PER_MONTH:
+        raise HTTPException(status_code=400, detail=f"Maximum {WEEK_OFF_MAX_PER_MONTH} week-off days per month")
+    if today_iso in picked and await _rent_paid_for_date(did, today_iso):
+        raise HTTPException(status_code=400, detail="Today's rent is already paid, so today cannot be a week-off day")
+    # status filter guards against the admin approving at the same moment
+    res = await db.week_off_requests.update_one(
+        {"_id": req["_id"], "status": "pending"},
+        {"$set": {"dates": picked, "updated_at": now_iso()}})
+    if not res.matched_count:
+        raise HTTPException(status_code=400, detail="This request was just decided by the admin and can no longer be edited")
+    return {"ok": True}
+
+@api.post("/driver/week-off/ack")
+async def driver_week_off_ack(request: Request):
+    user = await get_user(request)
+    require_driver(user)
+    await db.week_off_requests.update_many(
+        {"driver_id": user["id"], "status": "approved"}, {"$set": {"acknowledged": True}})
+    return {"ok": True}
+
+
+@api.post("/admin/drivers/{did}/week-off/{rid}/approve")
+async def admin_approve_week_off(did: str, rid: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    req = await db.week_off_requests.find_one({"_id": oid(rid), "driver_id": did})
+    if not req or req.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="This request is no longer pending")
+    today_iso = _today_ist().isoformat()
+    dates = [x for x in req.get("dates", []) if x >= today_iso]
+    if not dates:
+        raise HTTPException(status_code=400, detail="All requested dates have already passed. Reject this request.")
+    if today_iso in dates:
+        if await _rent_paid_for_date(did, today_iso):
+            raise HTTPException(status_code=400, detail="Today's rent is already paid, so today cannot be a week-off day")
+        if drv.get("active_trip_id"):
+            raise HTTPException(status_code=400, detail="Driver has a trip in progress. The driver must end it first.")
+    # approved week-off days are rent-free, but stay separate from Paid Leave
+    await db.drivers.update_one({"_id": oid(did)}, {"$set": {
+        "week_off_dates": sorted(set(drv.get("week_off_dates") or []) | set(dates)),
+    }})
+    await db.week_off_requests.update_one({"_id": req["_id"]}, {"$set": {
+        "status": "approved", "dates": dates, "decided_at": now_iso(), "acknowledged": False}})
+    # remove any rent already accrued for these days
+    rental = await _active_rental(drv.get("organization_id"), did)
+    if rental:
+        await _rental_account(rental)
+    await log_audit(user, "driver_week_off_approved", "driver", did, f"Week-off approved: {', '.join(dates)}")
+    return {"ok": True}
+
+
+@api.post("/admin/drivers/{did}/week-off/{rid}/reject")
+async def admin_reject_week_off(did: str, rid: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    req = await db.week_off_requests.find_one({"_id": oid(rid), "driver_id": did})
+    if not req or req.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="This request is no longer pending")
+    await db.week_off_requests.update_one({"_id": req["_id"]}, {"$set": {"status": "rejected", "decided_at": now_iso()}})
+    await log_audit(user, "driver_week_off_rejected", "driver", did, f"Week-off rejected: {', '.join(req.get('dates', []))}")
+    return {"ok": True}
 
 
 # ===== ADMIN BLOCK =====
@@ -1348,8 +1880,17 @@ async def list_referrals(request: Request, referrer_id: str = None, city: str = 
         q["city"] = city
     items = await db.referrals.find(org_filter(user, q)).sort("referred_at", -1).to_list(None)
     out = []
-    milestones = _referral_milestones(await _referral_config(user.get("organization_id")))
+    current_cfg = await _referral_config(user.get("organization_id"))
+    snap_keys = ("batch1_days", "batch1_amount", "batch2_days", "batch2_amount")
     for i in items:
+        # Older referrals (created before this change) have no snapshot yet:
+        # lock them once to the settings currently active, so they never change again.
+        if not all(k in i for k in snap_keys):
+            snap = {k: i.get(k, current_cfg[k]) for k in snap_keys}
+            await db.referrals.update_one({"_id": i["_id"]}, {"$set": snap})
+            i.update(snap)
+        row_cfg = {k: i[k] for k in snap_keys}
+        milestones = _referral_milestones(row_cfg)
         r = ser(i)
         r.update(await _referral_progress(i.get("referred_driver_id"), milestones))
         out.append(r)
@@ -1401,6 +1942,8 @@ async def create_referral(request: Request):
         "referred_at": b.get("referred_at") or _today_ist().isoformat(),
         "joined_at": b.get("joined_at") or None,
         "created_at": datetime.now().isoformat(),
+        # Lock the Referral Amount settings that are active right now for this referral
+        **(await _referral_config(user.get("organization_id"))),
     }
     res = await db.referrals.insert_one(doc)
     await log_audit(user, "referral_added", "driver", b["referrer_driver_id"], f"Referred {doc['referred_name']}")
@@ -1734,9 +2277,18 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             deposit_txn_id = ""
             deposit_paid_date = ""
         
+        # Dates on which a split-deposit part was paid (partial amount / remaining amount):
+        # each of these dates must have a Daily Collection row so the Deposit column shows it.
+        dep_event_dates = set()
+        if sec_dep and sec_dep.get("status") in ("partial", "paid") and sec_dep.get("first_paid_at"):
+            dep_event_dates.add(str(sec_dep["first_paid_at"])[:10])
+            if sec_dep.get("status") == "paid" and sec_dep.get("second_paid_at"):
+                dep_event_dates.add(str(sec_dep["second_paid_at"])[:10])
+
         drv_doc = await db.drivers.find_one({"_id": ObjectId(r["driver_id"])}) if r.get("driver_id") else None
         driver_avatar = drv_doc.get("avatar") if drv_doc else None
-        paid_leave_set = set((drv_doc or {}).get("paid_leave_dates") or [])
+        week_off_set = set((drv_doc or {}).get("week_off_dates") or [])
+        paid_leave_set = set((drv_doc or {}).get("paid_leave_dates") or []) | week_off_set  # week-off days carry no rent either
         
         acct = await _rental_account(r)
         outstanding_amount = float(acct["outstanding_amount"]) if acct else 0
@@ -1955,6 +2507,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 rent_status = "paid" if daily_rate > 0 and rent_paid_amt >= daily_rate - 0.01 else ("paid" if second_trip_same_day else "not_paid")
                 if is_paid_leave:
                     rent_status = "paid_leave"
+                if d_str in week_off_set:
+                    rent_status = "week_off"
                 
                 # Consume extra-KM payments for this row until the extra-km charge is covered.
                 extra_km_paid_amt = 0.0
@@ -1973,8 +2527,25 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 start_meter = odo_log.get("start_reading", 0) if odo_log else 0
                 end_meter = odo_log.get("end_reading", 0) if odo_log else 0
                 total_km = odo_log.get("driven_today", 0) if odo_log else 0
+                # A week-off day always gets a row (Daily Rent column shows "Week-off"), even with no trip / payment.
+                # (pending_rent_here is only used by the row-creation condition below, after the rent was already worked out.)
+                # only for today / past week-off days; future week-off days must not create rows yet
+                if d_str in week_off_set and idx == 0 and not odo_log and d <= _today_ist():
+                    pending_rent_here = True
                 
-                if d == _today_ist() or odo_log or row_paid > 0 or pending_rent_here or d_str in (acct or {}).get("unpaid_dates", []):
+                # A date on which a split-deposit part was paid always gets its own row, even when
+                # there was no trip / rent that day. Such a row carries no rent charge (only the
+                # Deposit column has details), so revenue and pending-rent totals are unaffected.
+                deposit_only_row = (
+                    idx == 0 and not odo_log and d_str in dep_event_dates
+                    and not (d == _today_ist() or row_paid > 0 or pending_rent_here or d_str in (acct or {}).get("unpaid_dates", []))
+                )
+                if deposit_only_row:
+                    daily_rate = 0.0
+                    total_charge = 0.0
+                    daily_status = "paid"
+                    rent_status = "paid"  # shows "_" in the Daily Rent status column
+                if d == _today_ist() or odo_log or row_paid > 0 or pending_rent_here or d_str in (acct or {}).get("unpaid_dates", []) or deposit_only_row:
                     out.append({
                         "id": f"{rid}_{d_str}_{idx}",
                         "driver_name": r.get("driver_name", "Unknown"),
@@ -3231,8 +3802,8 @@ async def _end_trip_rent_charge(org, did, rate):
         return 0.0
     if today_iso in ((acct or {}).get("rent_by_date") or {}):
         return 0.0
-    drv = await db.drivers.find_one({"_id": ObjectId(did)}, {"paid_leaves": 1, "paid_leave_dates": 1})
-    leave = set((drv or {}).get("paid_leave_dates") or []) | set((drv or {}).get("paid_leaves") or [])
+    drv = await db.drivers.find_one({"_id": ObjectId(did)}, {"paid_leaves": 1, "paid_leave_dates": 1, "week_off_dates": 1})
+    leave = set((drv or {}).get("paid_leave_dates") or []) | set((drv or {}).get("paid_leaves") or []) | set((drv or {}).get("week_off_dates") or [])
     if today_iso in leave:
         return 0.0
     return round(float(rate or 0), 2)
@@ -3291,8 +3862,8 @@ async def _rental_account(rental):
     # Dates the admin / city manager marked as paid leave never carry daily rent.
     # If rent was already accrued for such a date (e.g. leave granted for today),
     # take it off rent_due / outstanding / unpaid_dates right here.
-    _drv_leave = await db.drivers.find_one({"_id": ObjectId(did)}, {"paid_leave_dates": 1})
-    paid_leave = set((_drv_leave or {}).get("paid_leave_dates") or [])
+    _drv_leave = await db.drivers.find_one({"_id": ObjectId(did)}, {"paid_leave_dates": 1, "week_off_dates": 1})
+    paid_leave = set((_drv_leave or {}).get("paid_leave_dates") or []) | set((_drv_leave or {}).get("week_off_dates") or [])
     _leave_hit = [k for k in rent_by_date if k in paid_leave]
     _leave_unpaid = [k for k in unpaid if k in paid_leave]
     if _leave_hit or _leave_unpaid:
@@ -4103,6 +4674,7 @@ async def driver_me(request: Request):
     )
     payload["admin_block"] = (blocked or {}).get("admin_block")
     payload["admin_block_reason"] = (blocked or {}).get("admin_block_reason")
+    payload["week_off"] = await _week_off_state(user["id"])
     return payload
 
 import shutil
@@ -4478,8 +5050,7 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
 async def submit_odometer(
     request: Request,
     reading: int = Form(...),
-    # image: UploadFile = File(...)
-    image: Optional[UploadFile] = File(None)  # odometer image is optional
+    image: UploadFile = File(...)  # odometer image is required
 ):
     user = await get_user(request)
     require_driver(user)
@@ -4807,8 +5378,7 @@ async def driver_catchup_quote(reading: int, request: Request):
 
 
 @api.post("/driver/catchup/photo")
-# async def driver_catchup_photo(request: Request, image: UploadFile = File(...)):
-async def driver_catchup_photo(request: Request, image: Optional[UploadFile] = File(None)):  # image optional
+async def driver_catchup_photo(request: Request, image: UploadFile = File(...)):  # image required
     user = await get_user(request)
     require_driver(user)
     org = user.get("organization_id")
@@ -4918,10 +5488,17 @@ async def driver_packages(request: Request):
 async def driver_payment_history(request: Request):
     user = await get_user(request)
     require_driver(user)
+    # Security-deposit amounts the admin recorded by QR (partial or full) are not driver-app payments,
+    # so they are not listed on the driver's Payments page. Rent / extra-KM payments (including the
+    # ones the admin marks via "Rent Paid") are still listed. Nothing is deleted; only this list is filtered.
     recs = await db.rental_payments.find({
-        "organization_id": user.get("organization_id"), 
+        "organization_id": user.get("organization_id"),
         "driver_id": user["id"],
-        "payment_status": {"$ne": "pending"}
+        "payment_status": {"$ne": "pending"},
+        "$nor": [
+            {"kind": "deposit", "gateway": "manual_qr"},
+            {"kind": "deposit", "transaction_id": {"$regex": "^QR_"}},
+        ],
     }).sort("created_at", -1).to_list(500)
     
     rental = await _active_rental(user.get("organization_id"), user["id"])
