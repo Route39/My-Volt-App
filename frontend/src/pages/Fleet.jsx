@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, LayoutGrid, List, Plus, Car, MapPin, User, Battery, Loader2 } from "lucide-react";
+import { Search, LayoutGrid, List, Plus, Car, MapPin, User, Battery, Loader2, Upload, Download } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
@@ -29,6 +29,7 @@ export default function Fleet() {
   const [status, setStatus] = useState(params.get("status") || "all");
   const [city, setCity] = useState(lockedCity || params.get("city") || gCity);
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setDq(q), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => { setCity(lockedCity || params.get("city") || gCity); }, [gCity, lockedCity]);
@@ -54,7 +55,12 @@ export default function Fleet() {
   return (
     <div>
       <PageHeader title="Vehicles" subtitle="Vehicle control system for your fleet">
-        {canEdit && <PrimaryBtn onClick={() => setShowAdd(true)} data-testid="add-vehicle-btn"><Plus className="w-4 h-4" /> Add Vehicle</PrimaryBtn>}
+        {canEdit && (
+          <div className="flex gap-2">
+            <GhostBtn onClick={() => setShowImport(true)}><Upload className="w-4 h-4" /> Import</GhostBtn>
+            <PrimaryBtn onClick={() => setShowAdd(true)} data-testid="add-vehicle-btn"><Plus className="w-4 h-4" /> Add Vehicle</PrimaryBtn>
+          </div>
+        )}
       </PageHeader>
 
       {/* Controls */}
@@ -166,6 +172,7 @@ export default function Fleet() {
       )}
 
       <AddVehicleDialog open={showAdd} setOpen={setShowAdd} onDone={() => { setShowAdd(false); load(); }} />
+      <ImportVehiclesDialog open={showImport} setOpen={setShowImport} onDone={load} />
 
       {items && items.length > 0 && items.length < total && (
         <div className="flex justify-center mt-6">
@@ -175,6 +182,62 @@ export default function Fleet() {
         </div>
       )}
     </div>
+  );
+}
+
+function ImportVehiclesDialog({ open, setOpen, onDone }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  useEffect(() => { if (open) { setFile(null); setResult(null); } }, [open]);
+
+  const downloadTemplate = () => {
+    const csv = "City,Registration Number,VIN Number\nTiruppur,TN39 AB 1234,MD9ABCDE1F2345678\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "vehicles_import_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const upload = async () => {
+    if (!file) return toast.error("Choose an Excel or CSV file");
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post("/vehicles/import", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setResult(data);
+      if (data.created) { toast.success(`${data.created} vehicle(s) imported`); onDone(); }
+      if (data.errors?.length) toast.error(`${data.errors.length} row(s) skipped`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Import failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="font-display">Import Vehicles</DialogTitle></DialogHeader>
+        <p className="text-sm text-mv-muted">Columns: <b>City, Registration Number, VIN Number</b> (VIN = 17 letters/numbers). Vehicle code is auto-generated. City must be Tiruppur, Coimbatore, Chennai or Bangalore.</p>
+        <button onClick={downloadTemplate} className="w-max text-sm text-mv-primary flex items-center gap-1.5 hover:underline"><Download className="w-4 h-4" /> Download template</button>
+        <input type="file" accept=".xlsx,.csv" onChange={(e) => { setFile(e.target.files?.[0] || null); setResult(null); }}
+          className="block w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-mv-elevated file:text-mv-text" />
+        {result && (
+          <div className="space-y-2">
+            <p className="text-sm"><b className="text-emerald-600">{result.created} created</b>{result.errors?.length ? <>, <b className="text-red-500">{result.errors.length} skipped</b></> : null}</p>
+            {result.errors?.length > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 max-h-48 overflow-y-auto text-xs space-y-1">
+                {result.errors.map((er) => <div key={er.row}>Row {er.row}{er.name ? ` (${er.name})` : ""}: {er.error}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 mt-2">
+          <GhostBtn onClick={() => setOpen(false)}>Close</GhostBtn>
+          <PrimaryBtn onClick={upload} disabled={busy || !file}>{busy ? "Importing..." : "Import"}</PrimaryBtn>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

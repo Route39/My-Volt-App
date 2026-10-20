@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, Plus, Users, Car, MapPin, Phone, KeyRound, LayoutGrid, List } from "lucide-react";
+import { Search, Plus, Users, Car, MapPin, Phone, KeyRound, LayoutGrid, List, Upload, Download } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
 import { useAuth } from "../context/AuthContext";
 import { StatusChip, Skeleton, EmptyState, KycStatusChip } from "../components/common/Primitives";
-import { PageHeader, FilterChip, PrimaryBtn, Field, TextInput } from "../components/common/Page";
+import { PageHeader, FilterChip, PrimaryBtn, GhostBtn, Field, TextInput } from "../components/common/Page";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -22,16 +22,17 @@ export default function Drivers() {
   const [city, setCity] = useState(gCity);
   const [view, setView] = useState("cards");
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
+  const [showImport, setShowImport] = useState(false);
 
   const load = useCallback(async () => {
     setItems(null);
     const p = {};
-    if (status !== "all") p.status = status;
+    if (status === "active" || status === "inactive") p.status = status;
     if (city !== "all") p.city = city;
     if (q) p.q = q;
     try {
       const { data } = await api.get("/drivers", { params: p });
-      setItems(data);
+      setItems(status === "temporary" || status === "permanent" ? data.filter((d) => d.admin_block === status) : data);
     } catch (e) {
       console.error(e);
       setItems([]);
@@ -45,7 +46,12 @@ export default function Drivers() {
   return (
     <div>
       <PageHeader title="Drivers" subtitle="Driver roster and assignments">
-        {canEdit && <PrimaryBtn onClick={() => setShowAdd(true)} data-testid="add-driver-btn"><Plus className="w-4 h-4" /> Add Driver</PrimaryBtn>}
+        {canEdit && (
+          <div className="flex gap-2">
+            <GhostBtn onClick={() => setShowImport(true)}><Upload className="w-4 h-4" /> Import</GhostBtn>
+            <PrimaryBtn onClick={() => setShowAdd(true)} data-testid="add-driver-btn"><Plus className="w-4 h-4" /> Add Driver</PrimaryBtn>
+          </div>
+        )}
       </PageHeader>
 
       <div className="flex flex-col lg:flex-row gap-3 mb-5">
@@ -66,12 +72,17 @@ export default function Drivers() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-5">
-        {["all", "active", "inactive"].map((s) => <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>{s === "all" ? "All" : s[0].toUpperCase() + s.slice(1)}</FilterChip>)}
+      <div className="flex flex-wrap gap-2 mb-5">
+        {[["all", "All"], ["active", "Active"], ["inactive", "Inactive"], ["temporary", "Temporarily Blocked"], ["permanent", "Permanently Blocked"]].map(([s, label]) => <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>{label}</FilterChip>)}
       </div>
 
       {!items && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-2xl" />)}</div>}
-      {items && items.length === 0 && <EmptyState icon={Users} title="No drivers found" subtitle="Add drivers to start assigning vehicles and rentals." action={canEdit && <PrimaryBtn onClick={() => setShowAdd(true)}><Plus className="w-4 h-4" /> Add Driver</PrimaryBtn>} />}
+      {items && items.length === 0 && (status !== "all" || q ? (
+        <EmptyState icon={Users} title="Nothing found"
+          subtitle={q ? `No drivers match "${q}"${status !== "all" ? " in this filter" : ""}.` : `No ${{ active: "active", inactive: "inactive", temporary: "temporarily blocked", permanent: "permanently blocked" }[status]} drivers right now.`} />
+      ) : (
+        <EmptyState icon={Users} title="No drivers found" subtitle="Add drivers to start assigning vehicles and rentals." action={canEdit && <PrimaryBtn onClick={() => setShowAdd(true)}><Plus className="w-4 h-4" /> Add Driver</PrimaryBtn>} />
+      ))}
 
       {items && items.length > 0 && view === "cards" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -181,7 +192,64 @@ export default function Drivers() {
       )}
 
       <AddDriverDialog open={showAdd} setOpen={setShowAdd} onDone={() => { setShowAdd(false); load(); }} />
+      <ImportDriversDialog open={showImport} setOpen={setShowImport} onDone={load} />
     </div>
+  );
+}
+
+function ImportDriversDialog({ open, setOpen, onDone }) {
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  useEffect(() => { if (open) { setFile(null); setResult(null); } }, [open]);
+
+  const downloadTemplate = () => {
+    const csv = "Name,Phone,City,Address,Emergency Contact,Licence No\nRavi Kumar,9876543210,Tiruppur,12 Main Road,9876500000,TN3920230001234\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "drivers_import_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const upload = async () => {
+    if (!file) return toast.error("Choose an Excel or CSV file");
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post("/drivers/import", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setResult(data);
+      if (data.created) { toast.success(`${data.created} driver(s) imported`); onDone(); }
+      if (data.errors?.length) toast.error(`${data.errors.length} row(s) skipped`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Import failed");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
+      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="font-display">Import Drivers</DialogTitle></DialogHeader>
+        <p className="text-sm text-mv-muted">Columns: <b>Name, Phone, City, Address, Emergency Contact, Licence No</b>. City must be Tiruppur, Coimbatore, Chennai or Bangalore.</p>
+        <button onClick={downloadTemplate} className="w-max text-sm text-mv-primary flex items-center gap-1.5 hover:underline"><Download className="w-4 h-4" /> Download template</button>
+        <input type="file" accept=".xlsx,.csv" onChange={(e) => { setFile(e.target.files?.[0] || null); setResult(null); }}
+          className="block w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-mv-elevated file:text-mv-text" />
+        {result && (
+          <div className="space-y-2">
+            <p className="text-sm"><b className="text-emerald-600">{result.created} created</b>{result.errors?.length ? <>, <b className="text-red-500">{result.errors.length} skipped</b></> : null}</p>
+            {result.errors?.length > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3 max-h-48 overflow-y-auto text-xs space-y-1">
+                {result.errors.map((er) => <div key={er.row}>Row {er.row}{er.name ? ` (${er.name})` : ""}: {er.error}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex justify-end gap-2 mt-2">
+          <GhostBtn onClick={() => setOpen(false)}>Close</GhostBtn>
+          <PrimaryBtn onClick={upload} disabled={busy || !file}>{busy ? "Importing..." : "Import"}</PrimaryBtn>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
