@@ -1315,6 +1315,39 @@ async def import_drivers(request: Request, file: UploadFile = File(...)):
     return {"created": len(created), "drivers": created, "errors": errors}
 
 
+async def _swap_driver_vehicle(user, org, did, driver, open_rental, new_vehicle):
+    """Moves a driver who already has a rental onto another available vehicle.
+    Package, dates and payments stay as they are; only the vehicle changes."""
+    nvid = str(new_vehicle["_id"])
+    old_vid = (open_rental or {}).get("vehicle_id") or driver.get("current_vehicle_id")
+    state = (open_rental or {}).get("status") or driver.get("rental_status")
+    holds_vehicle = state in ("active", "suspended")   # same rule as when a rental is created
+    if holds_vehicle and old_vid:
+        # free the old vehicle (only if it was held by this driver)
+        await db.vehicles.update_one(
+            {"_id": oid(old_vid), "current_driver_id": {"$in": [did, None, ""]}},
+            {"$set": {"status": "available", "current_driver_id": None, "current_driver_name": None,
+                      "current_rental_id": None, "current_rental_code": None, "rental_end": None}})
+    if open_rental:
+        await db.rentals.update_one({"_id": open_rental["_id"]}, {"$set": {
+            "vehicle_id": nvid, "vehicle_number": new_vehicle["vehicle_number"]}})
+    if holds_vehicle:
+        await db.vehicles.update_one({"_id": new_vehicle["_id"]}, {"$set": {
+            "status": "rented", "current_driver_id": did, "current_driver_name": driver.get("name"),
+            "current_rental_id": str(open_rental["_id"]) if open_rental else None,
+            "current_rental_code": (open_rental or {}).get("rental_code"),
+            "rental_end": (open_rental or {}).get("end")}})
+    await db.drivers.update_one({"_id": oid(did)}, {"$set": {
+        "current_vehicle_id": nvid, "current_vehicle_number": new_vehicle["vehicle_number"]}})
+    await db.driver_vehicle_assignments.update_many({"driver_id": did, "end": None}, {"$set": {"end": now_iso()}})
+    await db.driver_vehicle_assignments.insert_one({
+        "organization_id": org, "driver_id": did, "driver_name": driver.get("name"),
+        "vehicle_id": nvid, "vehicle_number": new_vehicle["vehicle_number"], "city": new_vehicle.get("city"),
+        "start": now_iso(), "end": None, "notes": "Vehicle changed from Edit Driver", "created_at": now_iso()})
+    await log_audit(user, "driver_vehicle_changed", "driver", did,
+                    f"{driver.get('name')} moved to {new_vehicle['vehicle_number']}")
+
+
 @api.put("/drivers/{did}")
 async def update_driver(did: str, body: dict, request: Request):
     user = await get_user(request)
@@ -1345,6 +1378,16 @@ async def update_driver(did: str, body: dict, request: Request):
         raise HTTPException(status_code=400, detail="Invalid rental status")
     if extra["vehicle_id"] and not has_active and not new_state:
         raise HTTPException(status_code=400, detail="Select the rental status")
+    # driver already has a rental and a different vehicle was picked -> validate it before saving anything
+    new_vehicle = None
+    if extra["vehicle_id"] and has_active and extra["vehicle_id"] != ((open_rental or {}).get("vehicle_id") or cur.get("current_vehicle_id")):
+        new_vehicle = await db.vehicles.find_one({"_id": oid(extra["vehicle_id"]), "organization_id": org_})
+        if not new_vehicle:
+            raise HTTPException(status_code=404, detail="Vehicle not found")
+        if new_vehicle.get("city") != city_:
+            raise HTTPException(status_code=400, detail="Vehicle does not belong to the driver's city")
+        if new_vehicle.get("status") != "available":
+            raise HTTPException(status_code=400, detail="Selected vehicle is not available")
     vehicle = plan = None
     if extra["vehicle_id"] and not has_active:
         vehicle, plan = await _validate_driver_assignment(
@@ -1360,6 +1403,10 @@ async def update_driver(did: str, body: dict, request: Request):
             upd["$unset"] = {"supervisor_id": "", "supervisor_name": ""}
     if upd:
         await db.drivers.update_one({"_id": oid(did)}, upd)
+    if new_vehicle:
+        await _swap_driver_vehicle(user, org_, did, cur, open_rental, new_vehicle)
+        if open_rental:   # reload so a status change in the same save acts on the new vehicle
+            open_rental = await db.rentals.find_one({"_id": open_rental["_id"]})
     if vehicle and plan:
         await _create_driver_rental(user, org_, did, {**cur, **body}, vehicle, plan,
                                     extra["rental_start"], extra["rental_end"], new_state)

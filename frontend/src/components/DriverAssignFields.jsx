@@ -67,15 +67,20 @@ export default function DriverAssignFields({ city, form, set, assigned }) {
     <>
       {assigned ? (
         <div className="col-span-2 rounded-xl border border-mv-border p-3">
-          <div className="text-sm font-semibold">
+          <div className="text-sm font-semibold mb-3">
             Current Rental{assigned.code ? ` · ${assigned.code}` : ""}
           </div>
-          <p className="text-xs text-mv-muted mb-3">
-            Vehicle, package and dates are read-only (use <b>Change Vehicle</b> or the Rentals page). Rental status can be changed here.
-          </p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Vehicle">
-              <TextInput value={assigned.vehicle || "—"} readOnly disabled />
+              <Select value={form.vehicle_id || NONE} onValueChange={(v) => set("vehicle_id", v === NONE ? "" : v)} disabled={!city}>
+                <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select vehicle" /></SelectTrigger>
+                <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">
+                  <SelectItem value={NONE}>{assigned.vehicle || "—"} (current)</SelectItem>
+                  {vehicles.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>{v.vehicle_number}{v.registration_number ? ` · ${v.registration_number}` : ""}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
             <Field label="Package">
               <TextInput value={assigned.package || "—"} readOnly disabled />

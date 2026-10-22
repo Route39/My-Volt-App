@@ -6,6 +6,7 @@ import { useDriver } from "../../context/DriverAuthContext";
 import { inr } from "../../lib/format";
 import dapi from "../../lib/driverApi";
 import imgUrl from "../../lib/imgUrl";
+import { useNativeCamera } from "../../hooks/useNativeCamera";
 
 const STATUS_UI = {
   active: "text-emerald-600", overdue: "text-amber-600", blocked: "text-red-600",
@@ -59,6 +60,13 @@ function OdometerImageUpload() {
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState([]); // [{ file, preview }] chosen but not submitted yet
   const inputRef = useRef(null);
+  const { captureImage, loading: camLoading } = useNativeCamera();
+
+  // same camera / gallery chooser as the KYC upload: the phone asks "Take photo" or "From gallery"
+  const onTakeOrChoose = async () => {
+    const f = await captureImage();
+    if (f) setSelected((prev) => [...prev, { file: f, preview: URL.createObjectURL(f) }]);
+  };
 
   const loadImages = async () => {
     try {
@@ -106,7 +114,7 @@ function OdometerImageUpload() {
     <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm" data-testid="driver-odometer-images">
       <div className="text-sm font-bold text-slate-900">Upload odometer image</div>
       <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={onPick} />
-      <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
+      <button type="button" onClick={onTakeOrChoose} disabled={uploading || camLoading}
         className="mt-3 w-full h-12 rounded-2xl border-2 border-dashed border-slate-200 hover:border-emerald-400 bg-slate-50 text-slate-600 font-semibold flex items-center justify-center gap-2 disabled:opacity-60 transition-colors">
         <Camera className="w-4 h-4" />
         Choose / take photo
