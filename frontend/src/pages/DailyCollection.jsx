@@ -85,7 +85,15 @@ export default function DailyCollection() {
     const remIds = new Set();
 
     for (const it of items) {
-      revenue += (it.total_charge ?? it.daily_rate) || 0;
+      // today's rent is paid by the driver tomorrow, so it is not counted (as pending) in the cards today;
+      // only if it has already been paid is it counted. Extra-KM charges are unchanged.
+      const _todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      if (it.is_today_row || it.date === _todayIST) {
+        const todayRentPaid = it.rent_status === "paid" && it.daily_rate > 0 ? it.daily_rate : 0;
+        revenue += ((it.total_charge ?? it.daily_rate) || 0) - (it.daily_rate || 0) + todayRentPaid;
+      } else {
+        revenue += (it.total_charge ?? it.daily_rate) || 0;
+      }
       settled += it.today_paid || 0;
 
       if (!(it.deposit > 0)) continue;
@@ -354,7 +362,7 @@ export default function DailyCollection() {
                         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">
                           PAID LEAVE
                         </div>
-                      ) : it.is_today_row ? (
+                      ) : (it.is_today_row || it.prev_rent_row) ? (
                         it.prev_rent ? (
                           <div className="flex flex-col gap-1 mt-1 mb-1">
                             <span className={`font-display font-bold text-sm ${it.prev_rent.status === "paid" ? "text-emerald-600" : "text-red-500/80"}`}>{inr(it.prev_rent.amount)}</span>
@@ -389,6 +397,7 @@ export default function DailyCollection() {
                           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
                           </div>
+                          {it.rent_for_date && <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.rent_for_date}</span>}
                           <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.rent_amount)}</span>
                           {it.rent_transaction_id && (
                             <>
@@ -404,6 +413,7 @@ export default function DailyCollection() {
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
                             NOT PAID
                           </div>
+                          {it.rent_for_date && <span className="text-[11px] text-mv-muted whitespace-nowrap ml-1">{it.rent_for_date}</span>}
                           <span className="text-xs font-bold text-red-500/80 ml-1">{inr(it.rent_amount)}</span>
                         </div>
                       )}

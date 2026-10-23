@@ -2953,7 +2953,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 # day was a week-off / paid-leave day, or when no rent exists for it (e.g. the driver
                 # was onboarded today) -> the column shows "-".
                 prev_rent = None
-                if is_today and idx == 0 and rent_status not in ("week_off", "paid_leave"):
+                if idx == 0 and not deposit_only_row and rent_status not in ("week_off", "paid_leave"):
                     _y_str = (d - timedelta(days=1)).strftime("%Y-%m-%d")
                     if _y_str not in paid_leave_set:
                         if float(rbd_map.get(_y_str, 0) or 0) > 0 and float((acct or {}).get("rent_due", 0) or 0) > 0:
@@ -2998,7 +2998,12 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "rent_transaction_id": rent_txn_id,
                         "rent_manual": rent_manual,
                         "is_today_row": bool(is_today and idx == 0),
+                        "prev_rent_row": bool(idx == 0 and not deposit_only_row),
                         "prev_rent": prev_rent,
+                        # date shown under PAID / NOT PAID in the Rent column: the previous day (rent is paid a day later),
+                        # hidden when that previous day was a paid-leave / week-off day
+                        "rent_for_date": (None if (d - timedelta(days=1)).strftime("%Y-%m-%d") in paid_leave_set
+                                          else (d - timedelta(days=1)).strftime("%Y-%m-%d")),
                         "extra_km_status": extra_km_status,
                         "extra_km_amount": extra_km_charge,
                         "extra_km_transaction_id": extra_km_txn_id,
@@ -6743,6 +6748,190 @@ async def external_summary(request: Request):
                              "status": "active", "drivers": lst, "drivers_count": len(lst)})
     packages.sort(key=lambda x: -x["drivers_count"])
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "summary": summary, "packages": packages}
+
+
+# ---------- Team Documents (admin / city-manager uploads, city based) ----------
+TEAM_DOC_ROLES = ["admin", "company_admin", "city_manager"]
+TEAM_DOC_MAX_BYTES = 10 * 1024 * 1024  # file itself is stored in MongoDB (16 MB doc limit)
+
+
+def _team_doc_scope(user: dict) -> dict:
+    """Admin sees every city of the org; a city manager only sees his/her own city."""
+    f = {"organization_id": user.get("organization_id") or "route39-org"}
+    if user.get("role") == "city_manager":
+        f["city"] = user.get("city")
+    return f
+
+
+@api.get("/team-documents")
+async def list_team_documents(request: Request):
+    user = await get_user(request)
+    require_role(user, TEAM_DOC_ROLES)
+    rows = await db.org_documents.find(_team_doc_scope(user), {"data": 0}).sort("created_at", -1).to_list(1000)
+    return [ser(r) for r in rows]
+
+
+@api.post("/team-documents")
+async def create_team_document(
+    request: Request,
+    name: str = Form(...),
+    city: str = Form(...),
+    file: UploadFile = File(...),
+):
+    user = await get_user(request)
+    require_role(user, TEAM_DOC_ROLES)
+    name = (name or "").strip()
+    city = (city or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Document name is required")
+    if not city:
+        raise HTTPException(status_code=400, detail="City is required")
+    if user.get("role") == "city_manager":
+        if city != user.get("city"):
+            raise HTTPException(status_code=403, detail="You can only upload documents for your own city")
+    elif city not in CITIES:
+        raise HTTPException(status_code=400, detail="Invalid city")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Document attachment is required")
+    if len(data) > TEAM_DOC_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File must be under 10 MB")
+    doc = {
+        "organization_id": user.get("organization_id") or "route39-org",
+        "name": name,
+        "city": city,
+        "filename": file.filename or "document",
+        "content_type": file.content_type or "application/octet-stream",
+        "size": len(data),
+        "data": Binary(data),
+        "uploaded_by": user.get("id"),
+        "uploaded_by_name": user.get("name", ""),
+        "created_at": now_iso(),
+    }
+    res = await db.org_documents.insert_one(doc)
+    await log_audit(user, "team_document_uploaded", "team_document", str(res.inserted_id), f"Document '{name}' uploaded for {city}")
+    return ser(await db.org_documents.find_one({"_id": res.inserted_id}, {"data": 0}))
+
+
+@api.get("/team-documents/{doc_id}/file")
+async def download_team_document(doc_id: str, request: Request):
+    user = await get_user(request)
+    require_role(user, TEAM_DOC_ROLES)
+    doc = await db.org_documents.find_one({"_id": oid(doc_id), **_team_doc_scope(user)})
+    if not doc or not doc.get("data"):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return Response(
+        content=bytes(doc["data"]),
+        media_type=doc.get("content_type") or "application/octet-stream",
+    )
+
+
+@api.delete("/team-documents/{doc_id}")
+async def delete_team_document(doc_id: str, request: Request):
+    user = await get_user(request)
+    require_role(user, TEAM_DOC_ROLES)
+    doc = await db.org_documents.find_one({"_id": oid(doc_id), **_team_doc_scope(user)}, {"data": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await db.org_documents.delete_one({"_id": doc["_id"]})
+    await log_audit(user, "team_document_deleted", "team_document", doc_id, f"Document '{doc.get('name')}' deleted")
+    return {"ok": True}
+
+
+# ---------- Pending Payments (every driver: pending daily rent + pending deposit) ----------
+PENDING_PAY_ROLES = ["admin", "company_admin", "city_manager", "staff"]
+
+
+@api.get("/pending-payments")
+async def list_pending_payments(request: Request, city: Optional[str] = None):
+    user = await get_user(request)
+    require_role(user, PENDING_PAY_ROLES)
+    org = user.get("organization_id") or "route39-org"
+    extra = {}
+    if city and city != "all":
+        extra["city"] = city
+    # org_filter also limits a city manager to drivers of their own city
+    drivers = await db.drivers.find(org_filter(user, extra)).sort("created_at", 1).to_list(None)
+    ids = [str(d["_id"]) for d in drivers]
+
+    rentals = {}
+    for r in await db.rentals.find({"organization_id": org, "driver_id": {"$in": ids}, "status": {"$ne": "closed"}}).sort("created_at", 1).to_list(None):
+        rentals[r["driver_id"]] = r  # latest open rental wins
+    deps = {x["driver_id"]: x for x in await db.security_deposits.find({"organization_id": org, "driver_id": {"$in": ids}}).to_list(None)}
+
+    veh_ids = []
+    for d in drivers:
+        try:
+            if d.get("current_vehicle_id"):
+                veh_ids.append(ObjectId(d["current_vehicle_id"]))
+        except Exception:
+            pass
+    vehs = {str(v["_id"]): v for v in await db.vehicles.find({"_id": {"$in": veh_ids}}, {"registration_number": 1, "vehicle_number": 1}).to_list(None)} if veh_ids else {}
+
+    rows = []
+    for d in drivers:
+        did = str(d["_id"])
+        r = rentals.get(did)
+
+        # total daily rent still unpaid (same account used by Daily Collection / driver app)
+        rent_pending = 0.0
+        if r:
+            acct = await _rental_account(r)
+            rent_pending = round(float(acct.get("rent_due", 0) or 0), 2)
+
+        # deposit still unpaid: full / first part if nothing paid yet, remaining part once its
+        # next payment date is today or has passed, nothing while the next date is still ahead
+        dep = dict(deps.get(did) or {})
+        if dep.get("status", "pending") == "pending":
+            dep["amount"] = await _deposit_amount_for(org, did, dep or None) or float(dep.get("amount") or 0)
+        dep = _deposit_decorate(dep)
+        deposit_pending = round(float(dep["pay_now"]), 2) if dep.get("action_required") else 0.0
+
+        v = vehs.get(d.get("current_vehicle_id") or "") or {}
+        rows.append({
+            "id": did,
+            "driver_name": d.get("name"),
+            "driver_code": d.get("driver_code"),
+            "phone": d.get("phone"),
+            "city": d.get("city"),
+            "vehicle_reg": v.get("registration_number"),
+            "vehicle_number": v.get("vehicle_number") or d.get("current_vehicle_number"),
+            "package_name": (r or {}).get("package_name") or d.get("package_name"),
+            "rent_pending": rent_pending,
+            "deposit_pending": deposit_pending,
+            "supervisor_name": d.get("supervisor_name"),
+        })
+    return rows
+
+
+@api.get("/pending-payments/signature")
+async def pending_payments_signature(request: Request):
+    """Cheap change-detector for the Pending Payments page: a fingerprint of the stored rent /
+    deposit totals. It changes whenever any payment, mark-paid or mark-unpaid happens, so the
+    page only reloads the full (expensive) list when something actually changed."""
+    import hashlib
+    user = await get_user(request)
+    require_role(user, PENDING_PAY_ROLES)
+    org = user.get("organization_id") or "route39-org"
+    acc = await db.rental_accounts.aggregate([
+        {"$match": {"organization_id": org}},
+        {"$group": {"_id": None, "n": {"$sum": 1},
+                    "rent": {"$sum": "$rent_due"}, "out": {"$sum": "$outstanding_amount"},
+                    "km": {"$sum": "$extra_km_due"}}},
+    ]).to_list(1)
+    dep = await db.security_deposits.aggregate([
+        {"$match": {"organization_id": org}},
+        {"$group": {"_id": {"s": "$status", "p": "$next_payment_date"}, "n": {"$sum": 1},
+                    "amt": {"$sum": "$amount"}, "paid": {"$sum": "$paid_amount"}}},
+        {"$sort": {"_id.s": 1, "_id.p": 1}},
+    ]).to_list(None)
+    rent = await db.rentals.aggregate([
+        {"$match": {"organization_id": org, "status": {"$ne": "closed"}}},
+        {"$group": {"_id": "$status", "n": {"$sum": 1}, "rate": {"$sum": "$daily_rate"}}},
+        {"$sort": {"_id": 1}},
+    ]).to_list(None)
+    raw = json.dumps([acc, dep, rent, _today_ist().isoformat()], default=str, sort_keys=True)
+    return {"sig": hashlib.md5(raw.encode()).hexdigest()}
 
 
 app.include_router(api)
