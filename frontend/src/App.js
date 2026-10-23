@@ -24,7 +24,7 @@ import Incidents from "@/pages/Incidents";
 import Packages from "@/pages/Packages";
 import Settings from "@/pages/Settings";
 import KycApprovals from "@/pages/KycApprovals";
-import OdometerApprovals from "@/pages/OdometerApprovals";
+// import OdometerApprovals from "@/pages/OdometerApprovals";
 import PlatformApp from "@/pages/platform/PlatformApp";
 import DriverApp from "@/pages/driver/DriverApp";
 import DailyCollection from "@/pages/DailyCollection";
@@ -68,7 +68,7 @@ function Shell() {
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
       <Route path="/kyc" element={<Protected><KycApprovals /></Protected>} />
-      <Route path="/odometer" element={<Protected><OdometerApprovals /></Protected>} />
+      {/* <Route path="/odometer" element={<Protected><OdometerApprovals /></Protected>} /> */}
 
       {/* Fleet (Route39) */}
       <Route path="/fleet" element={<Protected><Fleet /></Protected>} />

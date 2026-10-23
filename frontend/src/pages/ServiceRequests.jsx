@@ -6,7 +6,7 @@ import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
 import { useAuth } from "../context/AuthContext";
 import { StatusChip, Skeleton } from "../components/common/Primitives";
-import { PageHeader, PrimaryBtn, GhostBtn, Field, TextInput, TextArea } from "../components/common/Page";
+import { PageHeader, PrimaryBtn, GhostBtn, Field, TextInput, TextArea, FilterChip } from "../components/common/Page";
 import { timeAgo, inr } from "../lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -57,15 +57,16 @@ export default function ServiceRequests() {
         {canEdit && <PrimaryBtn onClick={() => setShowNew(true)} data-testid="create-sr-btn"><Plus className="w-4 h-4" /> New Job Card</PrimaryBtn>}
       </PageHeader>
 
-      <div className="mb-4">
-        <Select value={city} onValueChange={setCity}>
-          <SelectTrigger className="w-40 h-10 bg-mv-surface border-mv-border" data-testid="sr-city-filter"><SelectValue /></SelectTrigger>
-          <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-            {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
-            {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      {!lockedCity && (
+        <div className="mb-4" data-testid="sr-city-tabs">
+          <div className="mv-label mb-2">City Filter</div>
+          <div className="flex flex-wrap gap-2">
+            {["all", ...cities].map((c) => (
+              <FilterChip key={c} active={city === c} onClick={() => setCity(c)} data-testid={`sr-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!items && <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-64 rounded-2xl" />)}</div>}
 

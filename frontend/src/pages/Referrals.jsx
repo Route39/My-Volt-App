@@ -7,9 +7,9 @@ import { useAuth } from "../context/AuthContext";
 import { useApp } from "../context/AppContext";
 import { fmtDate } from "../lib/format";
 import { loadDriverCodes } from "../lib/driverCodes";
-import { Field, PrimaryBtn, GhostBtn, TextInput } from "../components/common/Page";
+import { Field, PrimaryBtn, GhostBtn, TextInput, FilterChip } from "../components/common/Page";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -48,15 +48,14 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
 
     return (
         <div>
-            {!referrerId && (
-                <div className="mb-3">
-                    <Select value={city} onValueChange={setCity}>
-                        <SelectTrigger className="w-44 h-10 bg-mv-surface border-mv-border" data-testid="referral-city-filter"><SelectValue /></SelectTrigger>
-                        <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-                            {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
-                            {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
+            {!referrerId && !lockedCity && (
+                <div className="mb-4" data-testid="referral-city-tabs">
+                    <div className="mv-label mb-2">City Filter</div>
+                    <div className="flex flex-wrap gap-2">
+                        {["all", ...cities].map((c) => (
+                            <FilterChip key={c} active={city === c} onClick={() => setCity(c)} data-testid={`referral-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+                        ))}
+                    </div>
                 </div>
             )}
             <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between mb-4">

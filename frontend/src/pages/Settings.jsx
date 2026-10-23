@@ -5,7 +5,7 @@ import api from "../lib/api";
 import { useAuth, roleLabel } from "../context/AuthContext";
 import { CITIES } from "../context/AppContext";
 import { Skeleton } from "../components/common/Primitives";
-import { PrimaryBtn, Field, TextInput } from "../components/common/Page";
+import { PrimaryBtn, Field, TextInput, FilterChip } from "../components/common/Page";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
@@ -19,9 +19,17 @@ export default function Settings() {
   const [users, setUsers] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
   
   const load = () => api.get("/users").then((r) => setUsers(r.data)).catch(() => setUsers([]));
   useEffect(() => { load(); }, []);
+
+  // Admin-only filters (role + city) applied on the already-loaded list
+  const filteredUsers = (users || []).filter((u) =>
+    (roleFilter === "all" || u.role === roleFilter) &&
+    (cityFilter === "all" || u.city === cityFilter)
+  );
 
   const getAvatarColor = (name) => {
     const colors = ["bg-amber-500", "bg-emerald-500", "bg-indigo-500", "bg-blue-500", "bg-rose-500", "bg-violet-500"];
@@ -59,15 +67,40 @@ export default function Settings() {
             )}
           </div>
 
+          {user?.role === "admin" && (
+            <div className="mb-6 space-y-4">
+              <div data-testid="team-role-tabs">
+                <div className="mv-label mb-2">Role Filter</div>
+                <div className="flex flex-wrap gap-2">
+                  {["all", ...ROLES].map((r) => (
+                    <FilterChip key={r} active={roleFilter === r} onClick={() => setRoleFilter(r)} data-testid={`team-role-tab-${r}`}>{r === "all" ? "All Roles" : roleLabel(r)}</FilterChip>
+                  ))}
+                </div>
+              </div>
+              <div data-testid="team-city-tabs">
+                <div className="mv-label mb-2">City Filter</div>
+                <div className="flex flex-wrap gap-2">
+                  {["all", ...CITIES].map((c) => (
+                    <FilterChip key={c} active={cityFilter === c} onClick={() => setCityFilter(c)} data-testid={`team-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {!users && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-3xl" />)}
             </div>
           )}
 
+          {users && filteredUsers.length === 0 && (
+            <div className="text-center text-slate-400 text-sm py-12">No team members found for the selected filters.</div>
+          )}
+
           {users && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {users.map((u) => (
+              {filteredUsers.map((u) => (
                 <div key={u.id} className="bg-white rounded-[1.5rem] p-6 shadow-[0_2px_12px_rgb(0,0,0,0.04)] border border-slate-100 flex flex-col justify-between relative group">
                   {user?.role === "admin" && (
                     <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">

@@ -12,7 +12,7 @@ export default function DailyCollection() {
   const { city: gCity, lockedCity, cities } = useApp();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [city, setCity] = useState(gCity === "all" ? "all" : gCity);
+  const [city, setCity] = useState(lockedCity ? (lockedCity === true ? gCity : lockedCity) : (gCity === "all" ? "all" : gCity));
   
   const [dateFilter, setDateFilter] = useState("today");
   const [fromDate, setFromDate] = useState("");
@@ -178,17 +178,17 @@ export default function DailyCollection() {
       {/* Controls */}
       <div className="flex flex-col xl:flex-row justify-between gap-3 mb-5">
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={city} onValueChange={setCity}>
-            <SelectTrigger className="w-40 h-10 rounded-xl bg-mv-surface border-mv-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-mv-surface rounded-xl border-mv-border text-mv-text">
-              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
-              {cities.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
+          {!lockedCity && (
+            <div className="w-full flex flex-wrap items-center gap-2 mb-1" data-testid="city-tabs">
+              {["all", ...cities].map((c) => (
+                <button key={c} type="button" onClick={() => setCity(c)}
+                  data-testid={`city-tab-${c}`}
+                  className={`h-9 px-4 rounded-full text-sm font-medium transition-colors ${city === c ? "bg-mv-primary text-white" : "border border-mv-border text-mv-muted hover:bg-mv-elevated"}`}>
+                  {c === "all" ? "All Cities" : c}
+                </button>
               ))}
-            </SelectContent>
-          </Select>
+            </div>
+          )}
           
           <Select value={dateFilter} onValueChange={setDateFilter}>
             <SelectTrigger className="w-40 h-10 rounded-xl bg-mv-surface border-mv-border">
@@ -285,20 +285,20 @@ export default function DailyCollection() {
               <th className="px-5 py-4">Driver</th>
               <th className="px-5 py-4">Date</th>
               <th className="px-5 py-4">Vehicle</th>
-              <th className="px-5 py-4">Start KM</th>
+              {/* <th className="px-5 py-4">Start KM</th>
               <th className="px-5 py-4">End KM</th>
-              <th className="px-5 py-4">Total KM</th>
+              <th className="px-5 py-4">Total KM</th> */}
               <th className="px-5 py-4 text-amber-500">Revenue</th>
-              <th className="px-5 py-4 text-red-500">Extra KM</th>
+              {/* <th className="px-5 py-4 text-red-500">Extra KM</th> */}
               <th className="px-5 py-4">Daily Rent</th>
-              <th className="px-5 py-4">Extra KM Charges</th>
+              {/* <th className="px-5 py-4">Extra KM Charges</th> */}
               <th className="px-5 py-4">Deposit</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="10" className="px-5 py-16 text-center text-mv-muted">
+                <td colSpan="6" className="px-5 py-16 text-center text-mv-muted">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                     Loading collection data...
@@ -307,7 +307,7 @@ export default function DailyCollection() {
               </tr>
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan="10" className="px-5 py-16 text-center">
+                <td colSpan="6" className="px-5 py-16 text-center">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                       <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -330,20 +330,20 @@ export default function DailyCollection() {
                       <div className="font-display font-semibold text-mv-text">{it.vehicle_code || "—"}</div>
                       {it.vehicle_reg && <div className="text-xs text-mv-muted font-mono">{it.vehicle_reg}</div>}
                     </td>
-                    <td className="px-5 py-4 text-mv-muted">{it.start_meter || "—"}</td>
+                    {/* <td className="px-5 py-4 text-mv-muted">{it.start_meter || "—"}</td>
                     <td className="px-5 py-4 text-mv-muted">{it.end_meter || "—"}</td>
                     <td className="px-5 py-4 font-medium">
                       {it.total_km ? `${it.total_km} km` : (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">No Trip</span>
                       )}
-                    </td>
+                    </td> */}
                     <td className="px-5 py-4 font-display font-bold">
                       <div className="text-amber-500/90">{inr(it.daily_rate)}</div>
                       {(it.extra_km_charge > 0) && (
                         <div className="text-[11px] text-red-500 font-semibold">+{inr(it.extra_km_charge)} extra</div>
                       )}
                     </td>
-                    <td className="px-5 py-4">
+                    {/* <td className="px-5 py-4">
                       {(it.extra_km > 0) ? (
                         <div className="flex flex-col gap-0.5">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 text-xs font-bold">+{it.extra_km} km</span>
@@ -352,7 +352,7 @@ export default function DailyCollection() {
                       ) : (
                         <span className="text-[11px] text-emerald-600 font-semibold">Within Limit</span>
                       )}
-                    </td>
+                    </td> */}
                     <td className="px-5 py-4">
                       {it.rent_status === "week_off" ? (
                         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">
@@ -418,7 +418,7 @@ export default function DailyCollection() {
                         </div>
                       )}
                     </td>
-                    <td className="px-5 py-4">
+                    {/* <td className="px-5 py-4">
                       {(it.start_meter && !it.end_meter) ? (
                         <span className="text-[11px] text-blue-500/80">Trip in progress</span>
                       ) : (it.extra_km_amount || 0) <= 0 ? (
@@ -443,7 +443,7 @@ export default function DailyCollection() {
                           <span className="text-xs font-bold text-red-500/80 ml-1">{inr(it.extra_km_amount)}</span>
                         </div>
                       )}
-                    </td>
+                    </td> */}
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
                       {depositMode(it) === "partial" ? (
                         <div className="flex flex-col gap-1">

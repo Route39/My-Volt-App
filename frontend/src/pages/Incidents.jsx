@@ -6,7 +6,7 @@ import api from "../lib/api";
 import { useApp } from "../context/AppContext";
 import { useAuth } from "../context/AuthContext";
 import { Skeleton, EmptyState, StatusChip } from "../components/common/Primitives";
-import { PageHeader, PrimaryBtn, Field, TextInput, TextArea } from "../components/common/Page";
+import { PageHeader, PrimaryBtn, Field, TextInput, TextArea, FilterChip } from "../components/common/Page";
 import { fmtDate, inr } from "../lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -15,7 +15,9 @@ import { DriverCode } from "../lib/driverCodes";
 const FLOW = ["reported", "investigation", "action", "resolved", "closed"];
 
 export default function Incidents() {
-  const { city } = useApp();
+  const { city: gCity, lockedCity, cities } = useApp();
+  const [city, setCity] = useState(lockedCity || gCity);
+  useEffect(() => { setCity(lockedCity || gCity); }, [gCity, lockedCity]);
   const { user } = useAuth();
   const [params] = useSearchParams();
   const [items, setItems] = useState(null);
@@ -34,6 +36,17 @@ export default function Incidents() {
       <PageHeader title="Incidents" subtitle="Accidents, damages, and safety reports">
         {canEdit && <PrimaryBtn onClick={() => setShowNew(true)} data-testid="report-incident-btn"><Plus className="w-4 h-4" /> Report Incident</PrimaryBtn>}
       </PageHeader>
+
+      {!lockedCity && (
+        <div className="mb-4" data-testid="incident-city-tabs">
+          <div className="mv-label mb-2">City Filter</div>
+          <div className="flex flex-wrap gap-2">
+            {["all", ...cities].map((c) => (
+              <FilterChip key={c} active={city === c} onClick={() => setCity(c)} data-testid={`incident-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!items && <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>}
       {items && items.length === 0 && <EmptyState icon={AlertTriangle} title="No incidents reported ✓" subtitle="A clean record. Report an incident if something happens." />}

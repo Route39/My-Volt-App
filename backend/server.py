@@ -1938,6 +1938,26 @@ async def override_deposit_unpaid(did: str, request: Request):
 PAID_LEAVE_MAX_PER_MONTH = 3
 
 
+async def _paid_leave_bounds(drv, did):
+    """Earliest day a paid leave can be set (driver joined / first rental start) and the
+    past days whose rent is already paid (those cannot become paid-leave days)."""
+    today_iso = _today_ist().isoformat()
+    cands = [str(drv.get("created_at") or "")[:10]]
+    for r_ in await db.rentals.find({"driver_id": did}, {"start": 1}).to_list(50):
+        cands.append(str(r_.get("start") or "")[:10])
+    min_date = min([c for c in cands if c] or [today_iso])
+    paid = set()
+    async for p in db.rental_payments.find(
+            {"driver_id": did, "payment_status": "paid", "kind": {"$in": ["daily", "outstanding", "catchup"]}},
+            {"covers_dates": 1}):
+        paid.update(p.get("covers_dates") or [])
+    async for l in db.driver_odometer_logs.find(
+            {"driver_id": did, "snapshot_rent_txn_id": {"$nin": [None, ""]}}, {"date": 1}):
+        if l.get("date"):
+            paid.add(l["date"])
+    return min_date, sorted(x for x in paid if x < today_iso)
+
+
 async def _rent_paid_for_date(did, d_str):
     """True if the daily rent for this date is already paid (or a trip was already started on it with paid rent)."""
     pay = await db.rental_payments.find_one({
@@ -1963,8 +1983,11 @@ async def get_paid_leave(did: str, request: Request):
         raise HTTPException(status_code=404, detail="Driver not found")
     today_iso = _today_ist().isoformat()
     month_prefix = today_iso[:7]
+    min_date, paid_dates = await _paid_leave_bounds(drv, did)
     return {
-        "dates": sorted(x for x in (drv.get("paid_leave_dates") or []) if x.startswith(month_prefix) or x >= today_iso),
+        "dates": sorted(drv.get("paid_leave_dates") or []),
+        "min_date": min_date,
+        "paid_dates": paid_dates,
         "today": today_iso,
         "today_rent_paid": await _rent_paid_for_date(did, today_iso),
         "max_days": PAID_LEAVE_MAX_PER_MONTH,
@@ -1986,13 +2009,18 @@ async def set_paid_leave(did: str, request: Request):
     month_prefix = today_iso[:7]
     old = drv.get("paid_leave_dates") or []
 
+    min_date, _paid_past = await _paid_leave_bounds(drv, did)
     for x in picked:
         try:
             date.fromisoformat(x)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date")
-        if x < today_iso:
-            raise HTTPException(status_code=400, detail="Paid leave can only be set for today or later days")
+        if x < today_iso and x not in old:
+            # a past day newly marked as paid leave
+            if x < min_date:
+                raise HTTPException(status_code=400, detail=f"Paid leave cannot be set before {min_date}")
+            if x in _paid_past:
+                raise HTTPException(status_code=400, detail=f"Rent for {x} is already paid, so it cannot be a paid leave day")
 
     # Leave days that already passed stay on record. No limit on the number of future leave days.
     keep = [x for x in old if x < today_iso]
@@ -2298,7 +2326,7 @@ def _batch_progress(days, milestones):
             {"done": min(days, b2), "total": b2}]
 
 
-async def _referral_progress(did, milestones=None):
+async def _referral_progress(did, milestones=None, joined_at=None):
     milestones = milestones or REFERRAL_MILESTONES
     total = sum(a for _, a in milestones)
     res = {"rental_start": None, "days_driven": 0, "reward_earned": 0, "reward_pending": total,
@@ -2321,6 +2349,9 @@ async def _referral_progress(did, milestones=None):
             count_from = datetime.fromisoformat(str(dep_iso).replace("Z", "+00:00")).astimezone(IST).date().isoformat()
         except Exception:
             count_from = str(dep_iso)[:10]
+    # If the driver joined after the deposit date, counting starts from the joined date
+    if count_from and joined_at and str(joined_at)[:10] > count_from:
+        count_from = str(joined_at)[:10]
     # A "driven day" = any day the driver submitted an odometer log (not required to be continuous)
     days = 0
     if count_from:
@@ -2361,7 +2392,7 @@ async def list_referrals(request: Request, referrer_id: str = None, city: str = 
         row_cfg = {k: i[k] for k in snap_keys}
         milestones = _referral_milestones(row_cfg)
         r = ser(i)
-        r.update(await _referral_progress(i.get("referred_driver_id"), milestones))
+        r.update(await _referral_progress(i.get("referred_driver_id"), milestones, i.get("joined_at")))
         out.append(r)
     return out
 
@@ -5433,22 +5464,44 @@ async def driver_upload_odometer_images(request: Request, images: List[UploadFil
 async def driver_list_odometer_images(request: Request):
     user = await get_user(request)
     require_driver(user)
-    docs = await db.driver_odometer_images.find({"driver_id": user["id"]}, {"data": 0}).sort("created_at", -1).to_list(200)
+    docs = await db.driver_odometer_images.find({"driver_id": user["id"], "driver_deleted": {"$ne": True}}, {"data": 0}).sort("created_at", -1).to_list(200)
     return {"images": [{"id": str(x["_id"]), "url": x.get("url") or f"/api/odometer-images/{x['token']}", "created_at": x.get("created_at")} for x in docs]}
 
 
 # Serves an image stored in MongoDB. No login on purpose: <img> tags cannot send the Bearer token,
 # and the 32-character random token in the URL cannot be guessed (same openness as /uploads files).
 @api.get("/odometer-images/{token}")
-async def serve_odometer_image(token: str):
-    doc = await db.driver_odometer_images.find_one({"token": token}, {"data": 1, "content_type": 1})
+async def serve_odometer_image(token: str, download: int = 0):
+    doc = await db.driver_odometer_images.find_one({"token": token}, {"data": 1, "content_type": 1, "filename": 1})
     if not doc or not doc.get("data"):
         raise HTTPException(status_code=404, detail="Image not found")
+    headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+    if download:
+        # ?download=1 makes the browser save the file instead of showing it
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", doc.get("filename") or "odometer.jpg")
+        headers["Content-Disposition"] = f'attachment; filename="{safe_name}"'
     return Response(
         content=bytes(doc["data"]),
         media_type=doc.get("content_type") or "image/jpeg",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        headers=headers,
     )
+
+
+# Driver deletes one of their own odometer images (works for already-submitted images too)
+@api.delete("/driver/odometer-images/{image_id}")
+async def driver_delete_odometer_image(image_id: str, request: Request):
+    user = await get_user(request)
+    require_driver(user)
+    # Only hides it from the driver's own list; the admin panel still shows it.
+    res = await db.driver_odometer_images.update_one(
+        {"_id": oid(image_id), "driver_id": user["id"], "driver_deleted": {"$ne": True}},
+        {"$set": {"driver_deleted": True}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # Remove the record for good only when the admin side has also deleted it
+    await db.driver_odometer_images.delete_one({"_id": oid(image_id), "driver_deleted": True, "admin_deleted": True})
+    return {"ok": True}
 
 
 @api.get("/admin/drivers/{driver_id}/odometer-images")
@@ -5459,8 +5512,28 @@ async def admin_list_driver_odometer_images(driver_id: str, request: Request):
     driver = await db.drivers.find_one(org_filter(user, {"_id": oid(driver_id)}))
     if not driver:
         raise HTTPException(status_code=404, detail="Driver not found")
-    docs = await db.driver_odometer_images.find({"driver_id": driver_id}, {"data": 0}).sort("created_at", -1).to_list(500)
+    docs = await db.driver_odometer_images.find({"driver_id": driver_id, "admin_deleted": {"$ne": True}}, {"data": 0}).sort("created_at", -1).to_list(500)
     return {"images": [{"id": str(x["_id"]), "url": x.get("url") or f"/api/odometer-images/{x['token']}", "created_at": x.get("created_at")} for x in docs]}
+
+
+@api.delete("/admin/drivers/{driver_id}/odometer-images/{image_id}")
+async def admin_delete_driver_odometer_image(driver_id: str, image_id: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager", "staff"])
+    # org_filter also limits a city manager to drivers of their own city
+    driver = await db.drivers.find_one(org_filter(user, {"_id": oid(driver_id)}))
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    # Only hides it from the admin panel; the driver app still shows it.
+    res = await db.driver_odometer_images.update_one(
+        {"_id": oid(image_id), "driver_id": driver_id, "admin_deleted": {"$ne": True}},
+        {"$set": {"admin_deleted": True}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Image not found")
+    # Remove the record for good only when the driver has also deleted it
+    await db.driver_odometer_images.delete_one({"_id": oid(image_id), "driver_deleted": True, "admin_deleted": True})
+    return {"ok": True}
 
 from datetime import datetime
 

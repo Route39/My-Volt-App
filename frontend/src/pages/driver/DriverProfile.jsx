@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { User, Bike, Package, Wallet, ShieldCheck, LogOut, Phone, MapPin, Camera, Loader2 } from "lucide-react";
+import { User, Bike, Package, Wallet, ShieldCheck, LogOut, Phone, MapPin, Camera, Loader2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useDriver } from "../../context/DriverAuthContext";
@@ -110,6 +110,22 @@ function OdometerImageUpload() {
     }
   };
 
+  // Delete an already-submitted image
+  const [deletingId, setDeletingId] = useState(null);
+  const onDelete = async (id) => {
+    if (!window.confirm("Delete this image?")) return;
+    setDeletingId(id);
+    try {
+      await dapi.delete(`/driver/odometer-images/${id}`);
+      setImages((prev) => prev.filter((x) => x.id !== id));
+      toast.success("Image deleted");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Could not delete the image.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm" data-testid="driver-odometer-images">
       <div className="text-sm font-bold text-slate-900">Upload odometer image</div>
@@ -142,9 +158,16 @@ function OdometerImageUpload() {
       {images.length > 0 && (
         <div className="mt-4 grid grid-cols-3 gap-2">
           {images.map((im) => (
-            <a key={im.id} href={imgUrl(im.url)} target="_blank" rel="noreferrer" className="block aspect-square rounded-xl overflow-hidden bg-slate-100">
-              <img src={imgUrl(im.url)} alt="Odometer" className="w-full h-full object-cover" />
-            </a>
+            <div key={im.id} className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
+              <a href={imgUrl(im.url)} target="_blank" rel="noreferrer" className="block w-full h-full">
+                <img src={imgUrl(im.url)} alt="Odometer" className="w-full h-full object-cover" />
+              </a>
+              <button type="button" onClick={() => onDelete(im.id)} disabled={deletingId === im.id}
+                aria-label="Delete image" data-testid="driver-odometer-delete-btn"
+                className="absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full bg-red-300 border-2 border-white shadow-md text-white flex items-center justify-center disabled:opacity-60">
+                {deletingId === im.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <X className="w-2 h-2" strokeWidth={3} />}
+              </button>
+            </div>
           ))}
         </div>
       )}

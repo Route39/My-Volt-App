@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Search, Plus, KeyRound, Car, User } from "lucide-react";
 import api from "../lib/api";
@@ -14,35 +14,66 @@ const TABS = [
 ];
 
 export default function Rentals() {
-  const { city } = useApp();
+  const { city, lockedCity, cities } = useApp();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
   const [items, setItems] = useState(null);
+  const [shown, setShown] = useState(null);      // filter + count of the list that is on screen
+  const [loading, setLoading] = useState(false);
+  const reqId = useRef(0);
   const [tab, setTab] = useState(params.get("status") || "active");
   const [q, setQ] = useState("");
+  const [cityTab, setCityTab] = useState(city);          // city tab filter (admin)
+  useEffect(() => { setCityTab(city); }, [city]);        // stay in sync with the top-bar city
 
   const load = useCallback(async () => {
-    setItems(null);
+    const id = ++reqId.current;
+    setLoading(true);                       // keep the old list + status line on screen while loading
     const p = { status: tab };
-    if (city !== "all") p.city = city;
+    if (cityTab !== "all") p.city = cityTab;
     if (q) p.q = q;
-    const { data } = await api.get("/rentals", { params: p });
-    setItems(data);
-  }, [tab, city, q]);
+    try {
+      const { data } = await api.get("/rentals", { params: p });
+      if (id !== reqId.current) return;     // a newer click already replaced this request
+      setItems(data);
+      setShown({ tab, cityTab, count: data.length });
+    } finally {
+      if (id === reqId.current) setLoading(false);
+    }
+  }, [tab, cityTab, q]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 
   const canCreate = ["admin", "city_manager"].includes(user?.role);
 
+  // line under the page subtitle: status (+ city for admins) and the number of rentals in this filter
+  const isAdmin = ["admin", "company_admin"].includes(user?.role);
+  const statusLabel = (TABS.find(([k]) => k === shown?.tab) || [])[1] || "";
+  const cityLabel = shown?.cityTab === "all" ? "All Cities" : shown?.cityTab;
+  const summary = shown
+    ? `Status: ${statusLabel}${(isAdmin || lockedCity) ? ` in ${cityLabel}` : ""} · ${shown.count} ${shown.count === 1 ? "rental" : "rentals"}`
+    : "";
+
   return (
     <div>
-      <PageHeader title="Rentals" subtitle="Modern prepaid rental platform">
+      <PageHeader title="Rentals" subtitle={<>Modern prepaid rental platform{summary && <span className="block mt-1 font-medium text-mv-text">{summary}</span>}</>}>
         {/* {canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")} data-testid="create-rental-btn"><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} */}
       </PageHeader>
 
       <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
         {TABS.map(([k, l]) => <FilterChip key={k} active={tab === k} onClick={() => { setTab(k); setParams({ status: k }); }} data-testid={`rental-tab-${k}`}>{l}</FilterChip>)}
       </div>
+
+      {isAdmin && (
+        <div className="mb-5">
+          <div className="mv-label mb-2">City filter</div>
+          <div className="flex gap-2 overflow-x-auto no-scrollbar">
+            {["all", ...cities].map((c) => (
+              <FilterChip key={c} active={cityTab === c} onClick={() => setCityTab(c)} data-testid={`rental-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="relative flex-1 max-w-md mb-5">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-mv-dim" />
@@ -54,7 +85,7 @@ export default function Rentals() {
       {items && items.length === 0 && <EmptyState icon={KeyRound} title="No rentals here yet." subtitle="Create a rental to activate a vehicle for a driver." /* action={canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")}><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} */ />}
 
       {items && items.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className={`grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 transition-opacity duration-200 ${loading ? "opacity-60" : "opacity-100"}`}>
           {items.map((r, i) => (
             <button key={r.id} onClick={() => nav(`/rentals/${r.id}`)} data-testid={`rental-card-${r.id}`}
                     className="mv-card mv-card-hover p-5 text-left mv-rise" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>

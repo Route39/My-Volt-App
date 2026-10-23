@@ -23,7 +23,7 @@ const NAV = [
   { to: "/rentals", label: "Rentals", icon: KeyRound, mod: "rentals" },
   { to: "/daily-collection", label: "Daily Collection", icon: Banknote, mod: "rentals" },
   { to: "/pending-payments", label: "Pending Payments", icon: Wallet, mod: "pending" },
-  { to: "/odometer", label: "Odometer Logs", icon: Car, mod: "drivers" },
+  // { to: "/odometer", label: "Odometer Logs", icon: Car, mod: "drivers" },
   { to: "/kyc", label: "KYC Approvals", icon: FileBadge, mod: "drivers" },
   { to: "/referrals", label: "Referral Drivers", icon: UserPlus, mod: "drivers" },
   { to: "/service-requests", label: "Service Requests", icon: Wrench, mod: "service" },

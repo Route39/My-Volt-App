@@ -3,8 +3,9 @@ import api from "../lib/api";
 import { Check, X, MapPin, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useApp, CITIES } from "../context/AppContext";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+//import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import imgUrl from "../lib/imgUrl";
+import { PageHeader, FilterChip } from "../components/common/Page";
 
 export default function KycApprovals() {
   const { city: gCity, lockedCity, cities } = useApp();
@@ -45,37 +46,31 @@ export default function KycApprovals() {
   if (loading) return <div className="flex justify-center p-20"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>;
 
   return (
-    <div className="p-8 max-w-6xl mx-auto space-y-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold text-slate-900">KYC Approvals</h1>
-          <p className="text-slate-500 mt-1">Review and approve driver KYC documents.</p>
+    <div>
+      <PageHeader title="KYC Approvals" subtitle="Review and approve driver KYC documents.">
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search driver..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-9 pr-4 h-10 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-48 transition-all"
+          />
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Select value={city} onValueChange={setCity}>
-            <SelectTrigger className="w-40 h-10 rounded-xl bg-white border-slate-200">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-white rounded-xl border-slate-200 text-slate-900">
-              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
-              {cities.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      </PageHeader>
 
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search driver..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="pl-9 pr-4 h-10 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-48 transition-all"
-            />
+      {/* City filter – admin only (city managers are locked to their own city) */}
+      {!lockedCity && (
+        <div className="mb-5" data-testid="kyc-city-tabs">
+          <div className="mv-label mb-2">City Filter</div>
+          <div className="flex flex-wrap gap-2">
+            {["all", ...cities].map((c) => (
+              <FilterChip key={c} active={city === c} onClick={() => setCity(c)} data-testid={`kyc-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+            ))}
           </div>
         </div>
-      </div>
+      )}
 
       {drivers.length === 0 ? (
         <div className="text-center py-32 bg-white rounded-3xl border border-slate-100 shadow-sm">
@@ -84,7 +79,7 @@ export default function KycApprovals() {
           <p className="text-slate-500 mt-1">No pending KYC approvals at the moment.</p>
         </div>
       ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {drivers.map(d => (
             <div key={d.id} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelected(d)}>
               <div className="flex items-center gap-3">

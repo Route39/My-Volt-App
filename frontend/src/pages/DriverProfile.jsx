@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search, Ban, Clock, ShieldCheck, CalendarDays, Check } from "lucide-react";
+import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search, Ban, Clock, ShieldCheck, CalendarDays, Check, Eye, Download } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -19,23 +19,73 @@ import DriverAssignFields, { validateAssign } from "../components/DriverAssignFi
 // Odometer images uploaded by the driver from the driver app (Profile page)
 function OdometerImagesTab({ driverId }) {
   const [images, setImages] = useState(null);
+  const [viewing, setViewing] = useState(null); // image shown in the View popup
+  const [deletingId, setDeletingId] = useState(null);
   useEffect(() => {
     api.get(`/admin/drivers/${driverId}/odometer-images`)
       .then(({ data }) => setImages(data.images || []))
       .catch(() => setImages([]));
   }, [driverId]);
 
+  const onDelete = async (im) => {
+    if (!window.confirm("Delete this odometer image? This cannot be undone.")) return;
+    setDeletingId(im.id);
+    try {
+      await api.delete(`/admin/drivers/${driverId}/odometer-images/${im.id}`);
+      setImages((prev) => prev.filter((x) => x.id !== im.id));
+      setViewing((v) => (v && v.id === im.id ? null : v));
+      toast.success("Image deleted");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Could not delete the image");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // ?download=1 -> backend sends Content-Disposition: attachment, so the file is saved
+  const downloadHref = (im) => `${imgUrl(im.url)}${imgUrl(im.url).includes("?") ? "&" : "?"}download=1`;
+
   if (images === null) return <Skeleton className="h-40 rounded-2xl" />;
   if (images.length === 0) return <div className="mv-card p-10 text-center text-mv-muted text-sm">No odometer images uploaded yet</div>;
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-      {images.map((im) => (
-        <a key={im.id} href={imgUrl(im.url)} target="_blank" rel="noreferrer" className="mv-card overflow-hidden block">
-          <img src={imgUrl(im.url)} alt="Odometer" className="w-full aspect-square object-cover" />
-          <div className="px-3 py-2 text-xs text-mv-dim">{fmtDate(im.created_at)}</div>
-        </a>
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        {images.map((im) => (
+          <div key={im.id} className="mv-card overflow-hidden" data-testid="odometer-image-card">
+            <button type="button" onClick={() => setViewing(im)} className="block w-full">
+              <img src={imgUrl(im.url)} alt="Odometer" className="w-full aspect-square object-cover" />
+            </button>
+            <div className="px-3 pt-2 text-xs text-mv-dim">{fmtDate(im.created_at)}</div>
+            <div className="px-2 py-2 flex items-center gap-1">
+              <button type="button" title="View" onClick={() => setViewing(im)}
+                className="flex-1 h-8 rounded-lg hover:bg-mv-elevated flex items-center justify-center"><Eye className="w-4 h-4" /></button>
+              <a title="Download" href={downloadHref(im)} download
+                className="flex-1 h-8 rounded-lg hover:bg-mv-elevated flex items-center justify-center"><Download className="w-4 h-4" /></a>
+              <button type="button" title="Delete" onClick={() => onDelete(im)} disabled={deletingId === im.id}
+                data-testid="odometer-image-delete-btn"
+                className="flex-1 h-8 rounded-lg text-red-500 hover:bg-red-50 flex items-center justify-center disabled:opacity-50"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Dialog open={!!viewing} onOpenChange={(o) => { if (!o) setViewing(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader><DialogTitle>Odometer image{viewing ? ` · ${fmtDate(viewing.created_at)}` : ""}</DialogTitle></DialogHeader>
+          {viewing && (
+            <>
+              <img src={imgUrl(viewing.url)} alt="Odometer" className="w-full max-h-[70vh] object-contain rounded-lg bg-black/5" />
+              <div className="flex justify-end gap-2">
+                <a href={downloadHref(viewing)} download
+                  className="h-9 px-4 rounded-lg border border-mv-border text-sm flex items-center gap-2 hover:bg-mv-elevated"><Download className="w-4 h-4" /> Download</a>
+                <button type="button" onClick={() => onDelete(viewing)} disabled={deletingId === viewing.id}
+                  className="h-9 px-4 rounded-lg text-sm text-red-500 border border-red-200 flex items-center gap-2 hover:bg-red-50 disabled:opacity-50"><Trash2 className="w-4 h-4" /> Delete</button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -883,7 +933,12 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
   const isDisabled = (day) => {
     if (!info || maxPick === 0) return true;
     const k = toKey(day);
-    if (k < todayStr) return true;
+    if (k < todayStr) {
+      if (pastUsed.includes(k)) return true;                  // already saved - stays on record
+      if (info.min_date && k < info.min_date) return true;    // before the driver joined
+      if ((info.paid_dates || []).includes(k)) return true;   // rent already paid for that day
+      return false;                                           // other past days can be selected
+    }
     if (k === todayStr && info.today_rent_paid && !savedToday) return true;
     return false;
   };
@@ -908,7 +963,7 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
         ) : (
           <>
             <p className="text-sm text-mv-muted">
-              Select any number of days from today onwards. No daily rent will be asked from {driver?.name} on these days.
+              Select any number of days, past days included. No daily rent will be asked from {driver?.name} on these days. Days whose rent is already paid cannot be selected.
               {info.today_rent_paid ? " Today's rent is already paid, so today cannot be selected." : ""}
             </p>
             <div className="flex justify-center">
@@ -918,13 +973,13 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
                 onSelect={(v) => setSel(v || [])}
                 disabled={isDisabled}
                 defaultMonth={toDate(todayStr)}
-                fromMonth={toDate(todayStr)}
+                fromMonth={toDate(info.min_date || todayStr)}
                 showOutsideDays={false}
                 modifiers={{ used: pastUsed.map(toDate) }}
                 modifiersClassNames={{ used: "bg-emerald-100 text-emerald-700 rounded-md" }}
               />
             </div>
-            {pastUsed.length > 0 && <p className="text-xs text-mv-muted">Already used this month: {pastUsed.join(", ")}</p>}
+            {pastUsed.length > 0 && <p className="text-xs text-mv-muted">Past paid leave days (locked): {pastUsed.join(", ")}</p>}
             <div className="flex justify-end gap-2 mt-2">
               <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
               <PrimaryBtn onClick={save} disabled={busy}>{busy ? "Please wait..." : "Save Paid Leave"}</PrimaryBtn>

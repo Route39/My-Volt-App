@@ -72,19 +72,24 @@ export default function Fleet() {
                  className="w-full h-10 pl-9 pr-3 rounded-xl bg-mv-surface border border-mv-border outline-none focus:border-mv-primary transition-colors text-sm" />
         </div>
         <div className="flex items-center gap-2">
-          <Select value={city} onValueChange={setCity}>
-            <SelectTrigger className="w-40 h-10 bg-mv-surface border-mv-border" data-testid="fleet-city-filter"><SelectValue /></SelectTrigger>
-            <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
-              {!lockedCity && <SelectItem value="all">All Cities</SelectItem>}
-              {cities.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-            </SelectContent>
-          </Select>
           <div className="flex rounded-xl border border-mv-border overflow-hidden">
             <button onClick={() => setView("grid")} className={`w-10 h-10 flex items-center justify-center ${view === "grid" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><LayoutGrid className="w-4 h-4" /></button>
             <button onClick={() => setView("list")} data-testid="fleet-list-view" className={`w-10 h-10 flex items-center justify-center ${view === "list" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><List className="w-4 h-4" /></button>
           </div>
         </div>
       </div>
+
+      {/* City filter – admin only (city managers are locked to their own city) */}
+      {!lockedCity && (
+        <div className="mb-5" data-testid="fleet-city-tabs">
+          <div className="mv-label mb-2">City Filter</div>
+          <div className="flex flex-wrap gap-2">
+            {["all", ...cities].map((c) => (
+              <FilterChip key={c} active={city === c} onClick={() => setCity(c)} data-testid={`fleet-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
         {STATUSES.map((s) => (
