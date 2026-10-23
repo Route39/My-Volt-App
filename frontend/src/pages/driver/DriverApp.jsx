@@ -136,7 +136,7 @@ function WeekOffLockScreen({ date }) {
         </div>
         <h1 className="text-xl font-extrabold text-slate-900">Your week-off on {prettyDate} has been approved</h1>
         <p className="text-sm text-slate-500 mt-2">
-          The app stays locked for the whole day and will be available again from midnight (12:00 AM). No daily rent is charged for this day.
+          The app stays locked for the whole day. No daily rent is charged for this day.
         </p>
       </div>
     </div>

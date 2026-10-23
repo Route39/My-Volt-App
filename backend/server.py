@@ -2461,6 +2461,10 @@ async def assign_vehicle(did: str, body: dict, request: Request):
     await db.driver_vehicle_assignments.insert_one(assignment)
     await db.drivers.update_one({"_id": oid(did)}, {"$set": {
         "current_vehicle_id": body["vehicle_id"], "current_vehicle_number": vehicle["vehicle_number"]}})
+    _open_r = await _active_rental(user.get("organization_id"), did)
+    if _open_r:   # keep the rental on the new vehicle so the Driver App shows it
+        await db.rentals.update_one({"_id": _open_r["_id"]}, {"$set": {
+            "vehicle_id": body["vehicle_id"], "vehicle_number": vehicle["vehicle_number"]}})
     await db.vehicles.update_one({"_id": oid(body["vehicle_id"])}, {"$set": {
         "current_driver_id": did, "current_driver_name": driver["name"]}})
     await log_audit(user, "driver_assigned", "driver", did, f"{driver['name']} assigned to {vehicle['vehicle_number']}")
@@ -2765,8 +2769,40 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             if veh_doc:
                 vehicle_reg_number = veh_doc.get("registration_number")
                 
+        # Vehicle history of this driver (oldest -> newest), so past rows keep the vehicle
+        # the driver actually had on that day instead of the vehicle assigned today.
+        _veh_hist = []
+        async for _a in db.driver_vehicle_assignments.find({"driver_id": r["driver_id"]}).sort("start", 1):
+            try:
+                _a_day = datetime.fromisoformat(str(_a.get("start")).replace("Z", "+00:00")).astimezone(IST).date()
+            except Exception:
+                continue
+            _veh_hist.append((_a_day, _a.get("vehicle_id"), _a.get("vehicle_number")))
+        _veh_reg_cache = {}
+
         for d in dates_to_check:
             d_str = d.strftime("%Y-%m-%d")
+            # default = current vehicle of the rental (unchanged behaviour)
+            row_vehicle_code = r.get("vehicle_number", r.get("vehicle_reg", "N/A"))
+            row_vehicle_reg = vehicle_reg_number
+            if len(_veh_hist) > 1:
+                _pick_i = 0   # dates before the first recorded assignment -> oldest vehicle
+                for _i, _h in enumerate(_veh_hist):
+                    if _h[0] <= d:
+                        _pick_i = _i
+                # the latest assignment is the current vehicle -> keep the default above;
+                # only older days (an earlier vehicle) are switched to that vehicle
+                if _pick_i < len(_veh_hist) - 1 and _veh_hist[_pick_i][2]:
+                    _pv_id = _veh_hist[_pick_i][1]
+                    row_vehicle_code = _veh_hist[_pick_i][2]
+                    if _pv_id not in _veh_reg_cache:
+                        _pv_doc = None
+                        try:
+                            _pv_doc = await db.vehicles.find_one({"_id": oid(_pv_id)}) if _pv_id else None
+                        except Exception:
+                            _pv_doc = None
+                        _veh_reg_cache[_pv_id] = (_pv_doc or {}).get("registration_number")
+                    row_vehicle_reg = _veh_reg_cache[_pv_id]
             d_start = datetime.combine(d, time.min).replace(tzinfo=timezone.utc)
             d_end = datetime.combine(d, time.max).replace(tzinfo=timezone.utc)
             
@@ -3024,8 +3060,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "id": f"{rid}_{d_str}_{idx}",
                         "driver_name": r.get("driver_name", "Unknown"),
                         "driver_avatar": driver_avatar,
-                        "vehicle_code": r.get("vehicle_number", r.get("vehicle_reg", "N/A")),
-                        "vehicle_reg": vehicle_reg_number,
+                        "vehicle_code": row_vehicle_code,
+                        "vehicle_reg": row_vehicle_reg,
                         "city": r.get("city", "Unknown"),
                         "status": r.get("status", "pending_payment"),
                         "daily_rate": daily_rate,
@@ -4861,7 +4897,7 @@ async def _driver_payload(user):
         
         out["rental"] = {"id": str(rental["_id"]), "package_id": rental.get("package_id"),
                          "package_name": rental["package_name"], "daily_rate": rental["daily_rate"],
-"start_date": start_str, "vehicle_reg": rental.get("vehicle_number", "")}
+"start_date": start_str, "vehicle_reg": user.get("current_vehicle_number") or rental.get("vehicle_number", "")}
 
         # Show the CURRENT package name only when the driver is free (no trip running, no dues);
         # otherwise keep the name they had, so a rename applies from their next trip.
@@ -4869,9 +4905,9 @@ async def _driver_payload(user):
             out["driver"]["package_name"] = plan["name"]
             out["rental"]["package_name"] = plan["name"]
                          
-        if rental.get("vehicle_id") and not out["driver"].get("vehicle_plate"):
+        if (user.get("current_vehicle_id") or rental.get("vehicle_id")) and not out["driver"].get("vehicle_plate"):
             try:
-                v_doc = await db.vehicles.find_one({"_id": oid(rental["vehicle_id"])})
+                v_doc = await db.vehicles.find_one({"_id": oid(user.get("current_vehicle_id") or rental["vehicle_id"])})
                 if v_doc:
                     out["driver"]["vehicle_plate"] = v_doc.get("registration_number")
             except:
