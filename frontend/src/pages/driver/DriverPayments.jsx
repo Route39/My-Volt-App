@@ -30,8 +30,12 @@ export default function DriverPayments() {
             <div key={p.id} className="rounded-3xl bg-white border border-slate-100 p-4 shadow-sm" data-testid={`payment-row-${p.id}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="font-semibold text-slate-900">{KIND_LABEL[p.kind] || p.kind}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{fmtDate(p.paid_at || p.created_at, true)}</div>
+                  <div className="font-semibold text-slate-900">
+                    {KIND_LABEL[p.kind] || p.kind}
+                    {p.kind === "deposit" && p.deposit_part === "first" && " (Partial)"}
+                    {p.kind === "deposit" && p.deposit_part === "second" && " (Remaining)"}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">{fmtDate(p.paid_at || p.created_at, p.payment_method !== "manual_qr")}</div>
                   {(p.kind === "daily" || p.kind === "outstanding") && (p.covers_dates || []).length > 0 && (
                     <div className="text-[11px] text-slate-500 mt-0.5">
                       Rent for: {p.covers_dates.slice().sort().join(", ")}

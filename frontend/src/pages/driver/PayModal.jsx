@@ -21,7 +21,7 @@ function loadRazorpay() {
 // Tomorrow's date in IST (YYYY-MM-DD) - earliest date allowed for the 2nd half payment
 const tomorrowIST = () => new Date(Date.now() + 5.5 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().slice(0, 10);
 
-export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {}, askNextDate = false }) {
+export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {}, askNextDate = false, dismissible = true }) {
   const [nextDate, setNextDate] = useState("");
   const [phase, setPhase] = useState("confirm"); // confirm | processing | success
   const [result, setResult] = useState(null);
@@ -117,9 +117,9 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center" data-testid="pay-modal">
-      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={phase !== "processing" && kind !== "deposit" ? close : undefined} />
+      <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={phase !== "processing" && kind !== "deposit" && (dismissible || phase === "success") ? close : undefined} />
       <div className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-[rise_.25s_ease]">
-        {phase !== "processing" && kind !== "deposit" && (
+        {phase !== "processing" && kind !== "deposit" && (dismissible || phase === "success") && (
           <button onClick={close} data-testid="pay-close" className="absolute top-4 right-4 text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
         )}
 

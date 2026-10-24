@@ -153,10 +153,14 @@ export default function DailyCollection() {
     }
     return null;
   };
-  const txnChip = (t) => t ? (
-    <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${t.startsWith('QR_') ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
-      {t.startsWith('QR_') ? 'Paid by QR' : `TXN ${t}`}
-    </div>
+  const qrBadgeCls = "text-[9px] px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold text-blue-600 bg-blue-50 border-blue-200";
+  const txnChip = (t, manual) => t ? (
+    <>
+      <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${t.startsWith('QR_') ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+        {t.startsWith('QR_') ? 'Paid by QR' : `TXN ${t}`}
+      </div>
+      {manual && !t.startsWith('QR_') && <div className={qrBadgeCls}>Paid by QR</div>}
+    </>
   ) : null;
 
   return (
@@ -350,6 +354,34 @@ export default function DailyCollection() {
                         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">
                           PAID LEAVE
                         </div>
+                      ) : it.is_today_row ? (
+                        it.prev_rent ? (
+                          <div className="flex flex-col gap-1 mt-1 mb-1">
+                            <span className={`font-display font-bold text-sm ${it.prev_rent.status === "paid" ? "text-emerald-600" : "text-red-500/80"}`}>{inr(it.prev_rent.amount)}</span>
+                            <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.prev_rent.date}</span>
+                            {it.prev_rent.status === "paid" ? (
+                              <>
+                                <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+                                  <Check className="w-3.5 h-3.5" /> PAID
+                                </div>
+                                {it.prev_rent.transaction_id && (
+                                  <>
+                                    <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
+                                      TXN {it.prev_rent.transaction_id}
+                                    </div>
+                                    {it.prev_rent.manual && <div className={qrBadgeCls}>Paid by QR</div>}
+                                  </>
+                                )}
+                              </>
+                            ) : (
+                              <div className="inline-flex items-center gap-1.5 w-max px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">
+                                NOT PAID
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-medium">-</span>
+                        )
                       ) : it.rent_status === "paid" && !(it.rent_amount > 0) ? (
                         <span className="text-slate-400 font-medium">_</span>
                       ) : it.rent_status === "paid" ? (
@@ -359,9 +391,12 @@ export default function DailyCollection() {
                           </div>
                           <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.rent_amount)}</span>
                           {it.rent_transaction_id && (
-                            <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
-                              TXN {it.rent_transaction_id}
-                            </div>
+                            <>
+                              <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
+                                TXN {it.rent_transaction_id}
+                              </div>
+                              {it.rent_manual && <div className={qrBadgeCls}>Paid by QR</div>}
+                            </>
                           )}
                         </div>
                       ) : (
@@ -403,13 +438,13 @@ export default function DailyCollection() {
                       {depositMode(it) === "partial" ? (
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">PARTIALLY PAID - {inr(it.deposit_first_amount)}</span>
-                          {txnChip(it.deposit_first_txn)}
+                          {txnChip(it.deposit_first_txn, it.deposit_first_manual)}
                           <span className="text-red-500 font-bold text-xs">Pending amount - {inr(it.deposit_second_amount)}</span>
                         </div>
                       ) : depositMode(it) === "remaining" ? (
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">REMAINING AMOUNT PAID - {inr(it.deposit_second_amount)}</span>
-                          {txnChip(it.deposit_transaction_id)}
+                          {txnChip(it.deposit_transaction_id, it.deposit_main_manual)}
                           <span className="text-emerald-600 font-bold text-xs">Total amount - {inr(it.deposit)}</span>
                         </div>
                       ) : it.deposit_status !== "paid" && it.deposit > 0 ? (
@@ -429,11 +464,7 @@ export default function DailyCollection() {
                             </div>
                           )}
                           <span className="text-emerald-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
-                          {it.deposit_transaction_id && depositRowIds.has(it.id) && (
-                            <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${it.deposit_transaction_id.startsWith('QR_') ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
-                              {it.deposit_transaction_id.startsWith('QR_') ? 'Paid by QR' : `TXN ${it.deposit_transaction_id}`}
-                            </div>
-                          )}
+                          {it.deposit_transaction_id && depositRowIds.has(it.id) && txnChip(it.deposit_transaction_id, it.deposit_main_manual)}
                         </div>
                       )}
                     </td>

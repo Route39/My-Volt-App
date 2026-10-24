@@ -10,6 +10,7 @@ import { PageHeader, FilterChip, PrimaryBtn, GhostBtn, Field, TextInput } from "
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import DriverAssignFields, { validateAssign } from "../components/DriverAssignFields";
 
 export default function Drivers() {
   const { city: gCity, lockedCity, cities } = useApp();
@@ -291,6 +292,8 @@ function AddDriverDialog({ open, setOpen, onDone }) {
       toast.error("Please fill in all details (Name, Phone, City, Licence No, Address, Emergency Contact)"); 
       return; 
     }
+    const aerr = validateAssign(form);
+    if (aerr) { toast.error(aerr); return; }
     setSaving(true);
     try { await api.post("/drivers", form); toast.success("Driver added ✓"); onDone(); } 
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); } 
@@ -299,7 +302,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-2xl">
+      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display">
             Add Driver Details
@@ -321,6 +324,8 @@ function AddDriverDialog({ open, setOpen, onDone }) {
           <Field label="Address"><TextInput value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
           <Field label="Emergency Contact"><TextInput value={form.emergency_contact} inputMode="numeric" maxLength={10} onChange={(e) => set("emergency_contact", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           
+          <DriverAssignFields city={form.city} form={form} set={set} assigned={null} />
+
           <div className="col-span-2 flex justify-end pt-4">
             <PrimaryBtn onClick={save} disabled={saving} data-testid="save-driver-btn">{saving ? "Saving..." : "Save Driver"}</PrimaryBtn>
           </div>

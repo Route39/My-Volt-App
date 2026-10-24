@@ -61,6 +61,7 @@ export default function DriverWeekOff() {
 
   // today (only if its rent is not paid) or a later day of the current month
   const isDisabled = (day) => {
+    if (info.rent_pending) return true;   // rent pending up to yesterday: calendar stays disabled
     if (maxPick === 0) return true;
     const k = toKey(day);
     if (k < info.today || k.slice(0, 7) !== info.today.slice(0, 7)) return true;
@@ -100,6 +101,11 @@ export default function DriverWeekOff() {
         You can pick up to {maxPick} more day{maxPick === 1 ? "" : "s"} this month (maximum {info.max_days} per month).
         {info.today_rent_paid ? " Today's rent is already paid, so today cannot be selected." : ""}
       </p>
+      {info.rent_pending && (
+        <div className="mt-3 rounded-xl bg-red-50 border border-red-100 px-3 py-2 text-xs font-semibold text-red-600" data-testid="week-off-rent-pending">
+          You have pending rent (up to yesterday). Please pay it to apply for a week-off.
+        </div>
+      )}
 
       <div className="mt-3 flex justify-center rounded-2xl bg-white border border-slate-100 py-2">
         <Calendar
@@ -121,7 +127,7 @@ export default function DriverWeekOff() {
         <div className={`text-xs font-semibold mt-3 text-center ${msg.type === "ok" ? "text-emerald-600" : "text-red-600"}`}>{msg.text}</div>
       )}
 
-      <button onClick={apply} disabled={busy || !sel.length} data-testid="apply-week-off-btn"
+      <button onClick={apply} disabled={busy || !sel.length || info.rent_pending} data-testid="apply-week-off-btn"
         className="mt-4 w-full h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : editId ? "Update Week-off" : "Apply Week-off"}
       </button>

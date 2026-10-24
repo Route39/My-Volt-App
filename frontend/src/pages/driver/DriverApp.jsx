@@ -34,46 +34,82 @@ function DriverShell() {
   const [touchStart, setTouchStart] = useState(null);
   const { data, refresh } = useDriver();
 
+  // Hide the KYC tab once the admin has approved the driver's KYC
+  const navItems = NAV.filter(n => !(n.to === "/driver/kyc" && data?.driver?.kyc_status === "approved"));
+
   // Check block status every 20 sec (block/unblock applies automatically)
   useEffect(() => {
     const t = setInterval(() => { if (!document.hidden) refresh(); }, 20000);
     return () => clearInterval(t);
   }, [refresh]);
 
+  // Re-check immediately when the driver comes back to the app (a week-off approved meanwhile locks it at once)
+  useEffect(() => {
+    const onResume = () => { if (!document.hidden) refresh(); };
+    document.addEventListener("visibilitychange", onResume);
+    window.addEventListener("focus", onResume);
+    return () => {
+      document.removeEventListener("visibilitychange", onResume);
+      window.removeEventListener("focus", onResume);
+    };
+  }, [refresh]);
+
+  // While the week-off lock screen is showing, re-check exactly at the next midnight (IST) so it disappears right when the day ends
+  const weekOffLocked = !!data?.week_off?.locked;
+  const adminBlocked = !!data?.admin_block;
+  const appLocked = weekOffLocked || adminBlocked;   // a lock popup is showing over the Home screen
+  useEffect(() => {
+    if (!weekOffLocked) return;
+    const ist = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const secsToMidnight = 86400 - (ist.getHours() * 3600 + ist.getMinutes() * 60 + ist.getSeconds());
+    const t = setTimeout(() => refresh(), secsToMidnight * 1000 + 1000);
+    return () => clearTimeout(t);
+  }, [weekOffLocked, refresh]);
+
   const handleTouchStart = (e) => setTouchStart({ x: e.targetTouches[0].clientX, y: e.targetTouches[0].clientY });
   const handleTouchEnd = (e) => {
-    if (!touchStart) return;
+    if (!touchStart || appLocked) return;   // no swiping between tabs while a lock popup is showing
     const dx = e.changedTouches[0].clientX - touchStart.x;
     const dy = e.changedTouches[0].clientY - touchStart.y;
     setTouchStart(null);
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 60) {
-      const idx = NAV.findIndex(n => n.to === loc.pathname || (n.to !== "/driver" && loc.pathname.startsWith(n.to)));
+      const idx = navItems.findIndex(n => n.to === loc.pathname || (n.to !== "/driver" && loc.pathname.startsWith(n.to)));
       if (idx !== -1) {
-        if (dx > 0 && idx > 0) nav(NAV[idx - 1].to);
-        if (dx < 0 && idx < NAV.length - 1) nav(NAV[idx + 1].to);
+        if (dx > 0 && idx > 0) nav(navItems[idx - 1].to);
+        if (dx < 0 && idx < navItems.length - 1) nav(navItems[idx + 1].to);
       }
     }
   };
 
-  if (data?.admin_block) return <AdminBlockedScreen type={data.admin_block} reason={data.admin_block_reason} />;
+  // Admin / auto block: the Home screen is rendered (blurred) behind the block popup, which is shown at the
+  // bottom of this component. Other tabs are not reachable: always send the driver to Home.
+  if (adminBlocked && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
 
-  // Approved week-off day: the app stays locked (no way to close this) until the day is over
-  // Only on an approved week-off day: full-screen, no close button, nothing behind it is rendered.
-  // It goes away by itself after midnight (the shell polls every 20s), and the app works as usual.
-  if (data?.week_off?.locked) return <WeekOffLockScreen date={data.week_off.date} />;
+  // Approved week-off day: the Home screen is rendered normally (blurred) behind the lock popup, which is
+  // shown at the bottom of this component. Other tabs are not reachable: always send the driver to Home.
+  if (weekOffLocked && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
 
   // Remaining half of the security deposit is due: keep the driver on Home, where the pay popup is shown
   if (data?.deposit?.remaining_due && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
 
+  // From 12:00 noon (IST) the unpaid-rent popup cannot be closed: keep the driver on Home (where it is shown) until it is paid
+  if (data?.account?.rent_popup_locked && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
+
+  // KYC approved: the KYC tab is hidden, so send anyone on /driver/kyc (old link, bookmark, or open page) to Home
+  if (data?.driver?.kyc_status === "approved" && loc.pathname.startsWith("/driver/kyc")) return <Navigate to="/driver" replace />;
+
   return (
     <div className="h-[100dvh] bg-slate-50 flex flex-col overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-      <div className="max-w-md w-full mx-auto flex flex-col h-full bg-slate-50 relative">
+      <div
+        className={`max-w-md w-full mx-auto flex flex-col h-full bg-slate-50 relative ${appLocked ? "pointer-events-none select-none" : ""}`}
+        aria-hidden={appLocked || undefined}
+        ref={(el) => { if (el) { if (appLocked) el.setAttribute("inert", ""); else el.removeAttribute("inert"); } }}>
         {/* {data?.week_off?.notice && <WeekOffApprovedNotice notice={data.week_off.notice} onClose={refresh} />} */}
         <div className="flex-1 overflow-y-auto pb-6">
           <Outlet />
         </div>
         <nav className="shrink-0 bg-white border-t border-slate-100 flex items-center justify-around h-16 z-40 px-2">
-          {NAV.map(({ to, label, icon: Icon, end }) => (
+          {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} data-testid={`dnav-${label.toLowerCase()}`}
               className={({ isActive }) => `flex flex-col items-center gap-1 text-[11px] font-medium transition-colors ${isActive ? "text-emerald-600" : "text-slate-400"}`}>
               <Icon className="w-5 h-5" /> {label}
@@ -81,20 +117,26 @@ function DriverShell() {
           ))}
         </nav>
       </div>
+      {/* Approved week-off day: popup over the (blurred, untouchable) app; no close button, goes away after midnight */}
+      {adminBlocked
+        ? <AdminBlockedScreen type={data.admin_block} reason={data.admin_block_reason} />
+        : weekOffLocked && <WeekOffLockScreen date={data.week_off.date} />}
     </div>
   );
 }
 
 function WeekOffLockScreen({ date }) {
+  const [y, m, d] = String(date || "").split("-").map(Number);
+  const prettyDate = y ? new Date(y, m - 1, d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : date;
   return (
     <div className="fixed inset-0 z-[100] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center px-6" data-testid="week-off-lock-screen">
       <div className="w-full max-w-sm bg-white rounded-3xl p-7 text-center shadow-xl">
         <div className="w-20 h-20 mx-auto rounded-full bg-emerald-100 flex items-center justify-center mb-5">
           <CalendarCheck className="w-10 h-10 text-emerald-600" />
         </div>
-        <h1 className="text-xl font-extrabold text-slate-900">Your week-off has been approved</h1>
+        <h1 className="text-xl font-extrabold text-slate-900">Your week-off on {prettyDate} has been approved</h1>
         <p className="text-sm text-slate-500 mt-2">
-          Today ({date}) is your week-off. The app will be available again once the day is over.
+          The app stays locked for the whole day and will be available again from midnight (12:00 AM). No daily rent is charged for this day.
         </p>
       </div>
     </div>
@@ -110,7 +152,7 @@ function AdminBlockedScreen({ type, reason }) {
   const { logout, refresh } = useDriver();
   const permanent = type === "permanent";
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center px-6" data-testid="admin-blocked-screen">
+    <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center px-6" data-testid="admin-blocked-screen">
       <div className="w-full max-w-sm bg-white rounded-3xl p-7 text-center shadow-xl">
         <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-5 ${permanent ? "bg-red-100" : "bg-amber-100"}`}>
           {permanent ? <Ban className="w-10 h-10 text-red-600" /> : <Clock className="w-10 h-10 text-amber-600" />}

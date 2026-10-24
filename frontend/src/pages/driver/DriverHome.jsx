@@ -15,6 +15,9 @@ const STATUS_UI = {
   blocked: { dot: "bg-red-500", label: "Blocked", text: "text-red-600" },
 };
 
+// Current hour (0-23) in IST (IST = UTC+5:30, no DST)
+const istHour = () => Math.floor(((Date.now() + 5.5 * 3600 * 1000) % (24 * 3600 * 1000)) / 3600000);
+
 const greeting = () => {
   const h = new Date().getHours();
   return h < 12 ? "Good Morning" : h < 17 ? "Good Afternoon" : "Good Evening";
@@ -60,6 +63,17 @@ export default function DriverHome() {
   // popup. It only re-opens automatically again if the charge itself changes
   // (e.g. a new due amount, or a different kind becomes due).
   const dismissedRef = useRef({ kind: null, rentDue: null, extraKmDue: null });
+
+  // 12:00 noon (IST) rule: from noon until midnight an unpaid-rent popup cannot be closed and
+  // re-opens by itself. (afterNoon is re-checked every few seconds, so it flips exactly at 12:00 / 00:00.)
+  const [afterNoon, setAfterNoon] = useState(() => istHour() >= 12);
+  useEffect(() => {
+    const t = setInterval(() => setAfterNoon(istHour() >= 12), 5000);
+    return () => clearInterval(t);
+  }, []);
+  const hasPastRent = Object.keys(data?.account?.rent_by_date || {}).some((k) => k < (data?.account?.today_date || ""));
+  const rentMandatory = afterNoon && hasPastRent && (data?.account?.rent_due || 0) > 0 && data?.account?.status !== "blocked";
+
   useEffect(() => {
     if (!data) return;
     if (data.driver?.active_trip_id) return;
@@ -75,8 +89,9 @@ export default function DriverHome() {
     if (pay) return;
     const d = dismissedRef.current;
     const alreadyDismissedThisExactCharge = d.kind === kind && d.rentDue === rentDue && d.extraKmDue === extraKmDue;
-    if (!alreadyDismissedThisExactCharge) setPay(kind);
-  }, [data, pay, showKycModal]);
+    // After 12:00 noon (IST) an unpaid rent popup is mandatory: it re-opens even if it was closed earlier
+    if (!alreadyDismissedThisExactCharge || rentMandatory) setPay(kind);
+  }, [data, pay, showKycModal, rentMandatory]);
 
   // Wraps setPay so that closing a popup ("X") is remembered as a dismissal of
   // that exact charge, so the effect above won't instantly reopen it.
@@ -226,7 +241,7 @@ export default function DriverHome() {
     <div className="px-5 pt-6 space-y-5 pb-20" data-testid="driver-home">
       
       {/* Floating Action Buttons - Constrained to Mobile Viewport */}
-      {(isTripActiveToday || isTripCompletedToday || canShowStartBtn) && (
+      {false && (isTripActiveToday || isTripCompletedToday || canShowStartBtn) && (
         <div className="fixed inset-0 z-50 pointer-events-none flex justify-center">
           <div className="w-full max-w-md relative">
             
@@ -623,7 +638,7 @@ export default function DriverHome() {
         </div>
       )}
 
-      <PayModals pay={pay} setPay={handleSetPay} data={data} refresh={refresh} />
+      <PayModals pay={pay} setPay={handleSetPay} data={data} refresh={refresh} lockRent={rentMandatory} />
       {/* Leave Modal */}
       {showLeaveModal && (
         <div className="fixed inset-0 z-[100] flex flex-col justify-end">
@@ -678,17 +693,28 @@ export default function DriverHome() {
 }
 
 // Shared modal launcher reused across pages
-export function PayModals({ pay, setPay, data, refresh }) {
+export function PayModals({ pay, setPay, data, refresh, lockRent = false }) {
   const { rental, account, deposit, driver } = data;
+  // Daily rent popup: a day's rent is asked on the NEXT day ("yesterday's rent"); unpaid days pile up.
+  const rentDates = Object.keys(account?.rent_by_date || {}).sort();
+  const fmtRentDate = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); };
+  const yesterdayKey = (() => {
+    const [y, m, d] = String(account?.today_date || "").split("-").map(Number);
+    if (!y) return "";
+    const t = new Date(y, m - 1, d - 1);
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  })();
+  const rentIsYesterday = rentDates.length === 1 && rentDates[0] === yesterdayKey;
   const common = { driverName: driver?.name, driverPhone: driver?.phone, onClose: () => setPay(null), onDone: () => refresh() };
   return (
     <>
-      <PayModal open={pay === "daily"} kind="daily" title="Pay Daily Rent" amount={account?.rent_due || 0}
+      <PayModal open={pay === "daily"} kind="daily" title={rentIsYesterday ? "Pay yesterday's rent amount" : "Pay pending rent amount"} amount={account?.rent_due || 0}
+        dismissible={!lockRent}
         lines={[
-          ...(Object.keys(account?.rent_by_date || {}).length > 1
-            ? Object.entries(account.rent_by_date).sort(([a], [b]) => a.localeCompare(b)).map(([d, amt]) => ({ label: `Rent · ${d}`, value: inr(amt) }))
+          ...(rentDates.length > 0
+            ? rentDates.map((d) => ({ label: fmtRentDate(d), value: inr(account.rent_by_date[d]) }))
             : [{ label: `Daily Rent · ${rental?.package_name}`, value: inr(account?.rent_due || 0) }]),
-          { label: "Total Payable", value: inr(account?.rent_due || 0), strong: true },
+          ...(rentDates.length > 1 ? [{ label: "Total Payable", value: inr(account?.rent_due || 0), strong: true }] : []),
         ]} {...common} />
       <PayModal open={pay === "extra_km"} kind="extra_km" title="Pay Extra KM Charges" amount={account?.extra_km_due || 0}
         lines={[
@@ -712,7 +738,7 @@ export function PayModals({ pay, setPay, data, refresh }) {
           { label: "Refundable Security Deposit", value: inr(deposit?.amount ?? 0) },
           { label: "Total Payable", value: inr(deposit?.amount ?? 0), strong: true },
         ]} {...common} />
-      <PayModal open={pay === "outstanding"} kind="outstanding" title={(account?.rent_due || 0) > 0 && (account?.extra_km_due || 0) > 0 ? "Daily Rent + Extra KM" : "Outstanding Balance"} amount={account?.outstanding_amount || 0}
+      <PayModal open={pay === "outstanding"} kind="outstanding" dismissible={!lockRent} title={(account?.rent_due || 0) > 0 && (account?.extra_km_due || 0) > 0 ? "Daily Rent + Extra KM" : "Outstanding Balance"} amount={account?.outstanding_amount || 0}
         lines={[
           { label: `Daily Rent · ${rental?.package_name}`, value: inr(account?.rent_due || 0) },
           ...((account?.extra_km_due || 0) > 0 ? [
