@@ -2255,8 +2255,8 @@ async def _referral_config(org):
 
 
 def _referral_milestones(cfg):
-    # 2nd batch is the "next N days", so its target is cumulative: batch1 days + batch2 days.
-    return [(cfg["batch1_days"], cfg["batch1_amount"]), (cfg["batch1_days"] + cfg["batch2_days"], cfg["batch2_amount"])]
+    # Both batches count from the same start day, each with its own number of days and reward.
+    return [(cfg["batch1_days"], cfg["batch1_amount"]), (cfg["batch2_days"], cfg["batch2_amount"])]
 
 
 @api.get("/referral-settings")
@@ -2290,11 +2290,21 @@ async def set_referral_settings(request: Request):
     return await _referral_config(org)
 
 
+def _batch_progress(days, milestones):
+    """Split total counted days into 1st-batch and 2nd-batch progress (2nd batch = the next N days)."""
+    b1 = milestones[0][0]
+    b2 = milestones[1][0]
+    return [{"done": min(days, b1), "total": b1},
+            {"done": min(days, b2), "total": b2}]
+
+
 async def _referral_progress(did, milestones=None):
     milestones = milestones or REFERRAL_MILESTONES
     total = sum(a for _, a in milestones)
     res = {"rental_start": None, "days_driven": 0, "reward_earned": 0, "reward_pending": total,
-           "batches": [{"target": d, "amount": a} for d, a in milestones], "total_days": milestones[-1][0]}
+           "batches": [{"target": d, "amount": a} for d, a in milestones], "total_days": max(d for d, _ in milestones),
+           "count_from": None, "batch_progress": _batch_progress(0, milestones),
+           "week_off_days": [], "paid_leave_days": [], "batches_completed": False}
     if not did:
         return res
     first = await db.rentals.find({"driver_id": did}).sort("start", 1).to_list(1)
@@ -2302,11 +2312,31 @@ async def _referral_progress(did, milestones=None):
         return res
     start = str(first[0].get("start") or first[0].get("start_date") or "")[:10]
     res["rental_start"] = start
+    # Days are counted only from the day the driver paid the deposit (partial first amount or full).
+    sec = await db.security_deposits.find_one({"driver_id": did}) or {}
+    dep_iso = (sec.get("first_paid_at") or sec.get("paid_at")) if sec.get("status") in ("partial", "paid") else None
+    count_from = None
+    if dep_iso:
+        try:
+            count_from = datetime.fromisoformat(str(dep_iso).replace("Z", "+00:00")).astimezone(IST).date().isoformat()
+        except Exception:
+            count_from = str(dep_iso)[:10]
     # A "driven day" = any day the driver submitted an odometer log (not required to be continuous)
-    dates = await db.driver_odometer_logs.distinct("date", {"driver_id": did, "date": {"$gte": start}})
-    days = len(dates)
+    days = 0
+    if count_from:
+        _s = date.fromisoformat(count_from)
+        dates = [(_s + timedelta(days=i)).isoformat() for i in range((_today_ist() - _s).days)]
+        # Paid-leave and week-off days are not counted
+        _drv_off = await db.drivers.find_one({"_id": oid(did)}, {"paid_leave_dates": 1, "paid_leaves": 1, "week_off_dates": 1}) or {}
+        _off_days = set(_drv_off.get("paid_leave_dates") or []) | set(_drv_off.get("paid_leaves") or []) | set(_drv_off.get("week_off_dates") or [])
+        days = len([x for x in dates if x not in _off_days])
+        # Dates (from the deposit day) that are not counted - shown in the Edit Referral form
+        res["week_off_days"] = sorted(str(x) for x in set(_drv_off.get("week_off_dates") or []) if str(x) >= count_from)
+        res["paid_leave_days"] = sorted(str(x) for x in (set(_drv_off.get("paid_leave_dates") or []) | set(_drv_off.get("paid_leaves") or [])) if str(x) >= count_from)
     earned = sum(a for d, a in milestones if days >= d)
-    res.update(days_driven=days, reward_earned=earned, reward_pending=total - earned)
+    res.update(days_driven=days, reward_earned=earned, reward_pending=total - earned,
+               count_from=count_from, batch_progress=_batch_progress(days, milestones),
+               batches_completed=bool(count_from) and days >= max(d for d, _ in milestones))
     return res
 
 

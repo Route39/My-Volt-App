@@ -129,7 +129,14 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                     <div className="w-24 h-1.5 bg-mv-elevated rounded-full mt-1 overflow-hidden">
                       <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, ((r.days_driven || 0) / (r.total_days || 60)) * 100)}%` }} />
                     </div>
-                    <div className="text-[11px] text-mv-dim mt-1">{r.rental_start ? `Since ${fmtDate(r.rental_start)}` : "No rental yet"}</div>
+                    {(r.batch_progress || []).map((b, i) => (
+                      <div key={i} className="text-[11px] mt-1 whitespace-nowrap">
+                        <span className="text-mv-dim">Batch {i + 1}:</span>{" "}
+                        <span className={b.done >= b.total ? "text-emerald-600 font-semibold" : "font-semibold"}>{b.done} / {b.total}</span>
+                        <span className="text-mv-dim"> days</span>
+                      </div>
+                    ))}
+                    <div className="text-[11px] text-mv-dim mt-1">{r.count_from ? `Counting from ${fmtDate(r.count_from)}` : (r.rental_start ? "Deposit not paid yet" : "No rental yet")}</div>
                   </td>
                   <td className="p-4 text-xs space-y-1 whitespace-nowrap">
                     {(r.batches || [{ target: 30, amount: 1000 }, { target: 60, amount: 1500 }]).map((b, i) => (
@@ -212,7 +219,7 @@ function ReferralRewardDialog({ open, setOpen, onDone }) {
                             <Field label="Amount - 2nd batch (₹) *"><TextInput type="number" min="0" value={f.batch2_amount} onChange={(e) => set("batch2_amount", e.target.value)} /></Field>
                         </div>
                         <p className="text-xs text-mv-dim">
-                            The 2nd batch counts the days driven after the 1st batch. Total: {(Number(f.batch1_days) || 0) + (Number(f.batch2_days) || 0)} days, ₹{((Number(f.batch1_amount) || 0) + (Number(f.batch2_amount) || 0)).toLocaleString("en-IN")}.
+                            Both batches count the days driven from the deposit date, and each reward is earned when its own days are completed. Total reward: ₹{((Number(f.batch1_amount) || 0) + (Number(f.batch2_amount) || 0)).toLocaleString("en-IN")}.
                         </p>
                         <div className="flex justify-end gap-2 pt-2">
                             <GhostBtn onClick={() => setOpen(false)}>Cancel</GhostBtn>
@@ -287,6 +294,17 @@ function ReferralDialog({ value, setValue, fixedReferrerId, fixedReferrerName, f
                     <Field label="Referred On"><TextInput type="date" value={f.referred_at || ""} onChange={(e) => set("referred_at", e.target.value)} /></Field>
                     <Field label="Joined On (optional)"><TextInput type="date" value={f.joined_at || ""} onChange={(e) => set("joined_at", e.target.value)} /></Field>
                 </div>
+                {isEdit && !value?.batches_completed && ((value?.week_off_days || []).length > 0 || (value?.paid_leave_days || []).length > 0) && (
+                    <div className="rounded-lg border border-mv-border bg-mv-elevated p-3 text-xs space-y-1">
+                        <div className="text-mv-dim">These days are not counted in Batch 1 &amp; Batch 2:</div>
+                        {(value.week_off_days || []).length > 0 && (
+                            <div><span className="font-semibold">Week-off days:</span> {value.week_off_days.map((d) => fmtDate(d)).join(", ")}</div>
+                        )}
+                        {(value.paid_leave_days || []).length > 0 && (
+                            <div><span className="font-semibold">Paid leave:</span> {value.paid_leave_days.map((d) => fmtDate(d)).join(", ")}</div>
+                        )}
+                    </div>
+                )}
                 <div className="flex justify-end gap-2 pt-2">
                     <GhostBtn onClick={() => setValue(null)}>Cancel</GhostBtn>
                     <PrimaryBtn onClick={save} disabled={saving}>{saving ? "Saving..." : isEdit ? "Save Changes" : "Add Referral"}</PrimaryBtn>

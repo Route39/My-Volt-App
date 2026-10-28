@@ -37,7 +37,7 @@ export default function Rentals() {
   return (
     <div>
       <PageHeader title="Rentals" subtitle="Modern prepaid rental platform">
-        {canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")} data-testid="create-rental-btn"><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>}
+        {/* {canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")} data-testid="create-rental-btn"><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} */}
       </PageHeader>
 
       <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
@@ -51,7 +51,7 @@ export default function Rentals() {
       </div>
 
       {!items && <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}</div>}
-      {items && items.length === 0 && <EmptyState icon={KeyRound} title="No rentals here yet." subtitle="Create a rental to activate a vehicle for a driver." action={canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")}><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} />}
+      {items && items.length === 0 && <EmptyState icon={KeyRound} title="No rentals here yet." subtitle="Create a rental to activate a vehicle for a driver." /* action={canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")}><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} */ />}
 
       {items && items.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
