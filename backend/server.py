@@ -414,7 +414,10 @@ async def list_vehicles(request: Request, status: Optional[str] = None, city: Op
     user = await get_user(request)
     extra = {}
     if status:
-        extra["status"] = status
+        if status == "inactive":
+            extra["status"] = {"$in": ["inactive", "idle"]}
+        else:
+            extra["status"] = status
     if city and city != "all":
         extra["city"] = city
     filt = org_filter(user, extra)
@@ -438,14 +441,40 @@ async def get_next_vehicle_number(request: Request, city: str):
         "Coimbatore": "CBE",
         "Tiruppur": "TUP",
         "Chennai": "CHN",
-        "Bangalore": "BAN"
+        "Bangalore": "BLR"
     }
     prefix = prefix_map.get(city, city[:3].upper())
     
-    # Count how many vehicles start with this prefix in this org
-    count = await db.vehicles.count_documents(org_filter(user, {"vehicle_number": {"$regex": f"^{prefix}"}}))
-    next_num = count + 1
-    return {"vehicle_number": f"{prefix}{next_num:03d}"}
+    # Find all vehicle numbers starting with prefix to find the next unused number
+    vehs = await db.vehicles.find(
+        org_filter(user, {"vehicle_number": {"$regex": f"^{prefix}\\d+"}}),
+        {"vehicle_number": 1}
+    ).to_list(1000)
+    existing_nums = set()
+    for v in vehs:
+        vn = v.get("vehicle_number", "")
+        m = re.match(rf"^{prefix}(\d+)$", vn, re.IGNORECASE)
+        if m:
+            try:
+                existing_nums.add(int(m.group(1)))
+            except ValueError:
+                pass
+    next_num = 1
+    while next_num in existing_nums:
+        next_num += 1
+    return {"vehicle_number": f"{prefix}{next_num:03d}", "prefix": prefix}
+
+
+@api.get("/vehicles/check-number")
+async def check_vehicle_number(request: Request, vehicle_number: str):
+    user = await get_user(request)
+    vn = (vehicle_number or "").strip().upper()
+    if not vn:
+        return {"available": False, "vehicle_number": vn}
+    exists = await db.vehicles.find_one(org_filter(user, {
+        "vehicle_number": {"$regex": f"^{re.escape(vn)}$", "$options": "i"}
+    }))
+    return {"available": not bool(exists), "vehicle_number": vn}
 
 
 @api.get("/vehicles/{vid}")
@@ -471,6 +500,18 @@ async def create_vehicle(body: VehicleBody, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager", "staff"])
     doc = body.model_dump()
+    veh_num = (doc.get("vehicle_number") or "").strip().upper()
+    if not veh_num:
+        raise HTTPException(status_code=400, detail="Vehicle Code / ID is required")
+    doc["vehicle_number"] = veh_num
+
+    # Uniqueness check: ensure this Vehicle Code is not already entered
+    existing = await db.vehicles.find_one(org_filter(user, {
+        "vehicle_number": {"$regex": f"^{re.escape(veh_num)}$", "$options": "i"}
+    }))
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Vehicle Code '{veh_num}' already exists. Please choose a unique code.")
+
     doc["vin_number"] = (doc.get("vin_number") or "").strip().upper()
     if not doc["vin_number"]:
         raise HTTPException(status_code=400, detail="VIN Number is required")
@@ -481,14 +522,14 @@ async def create_vehicle(body: VehicleBody, request: Request):
         doc["city"] = user["city"]  # city managers can only add vehicles in their own city
     doc["created_at"] = now_iso()
     res = await db.vehicles.insert_one(doc)
-    await log_audit(user, "vehicle_created", "vehicle", str(res.inserted_id), f"Vehicle {body.vehicle_number} added")
+    await log_audit(user, "vehicle_created", "vehicle", str(res.inserted_id), f"Vehicle {veh_num} added")
     return ser(await db.vehicles.find_one({"_id": res.inserted_id}))
 
 VEH_IMPORT_COLS = {"city": "city", "registrationnumber": "registration_number", "registrationno": "registration_number",
                    "regno": "registration_number", "regnumber": "registration_number", "registration": "registration_number",
                    "vinnumber": "vin_number", "vinno": "vin_number", "vin": "vin_number",
                    "chassisnumber": "chassis_number", "chassisno": "chassis_number", "model": "model"}
-VEH_PREFIX = {"Coimbatore": "CBE", "Tiruppur": "TUP", "Chennai": "CHN", "Bangalore": "BAN"}
+VEH_PREFIX = {"Coimbatore": "CBE", "Tiruppur": "TUP", "Chennai": "CHN", "Bangalore": "BLR"}
 
 
 @api.post("/vehicles/import")
@@ -820,7 +861,7 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
     extra = {}
     if city and city != "all":
         extra["city"] = city
-    if status:
+    if status and status not in ("online", "offline"):
         extra["status"] = status
     if unassigned:
         extra["rental_status"] = {"$ne": "active"}
@@ -833,28 +874,53 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
             {"driver_code": {"$regex": q, "$options": "i"}},
         ]
     docs = await db.drivers.find(filt).sort("created_at", 1).to_list(None)
+    cv_ids = []
+    driver_ids = [str(d["_id"]) for d in docs]
     for d in docs:
         cv_id = d.get("current_vehicle_id")
         if cv_id:
             try:
-                v = await db.vehicles.find_one({"_id": oid(cv_id)})
-                if v:
-                    d["current_vehicle_reg"] = v.get("registration_number")
+                cv_ids.append(oid(cv_id))
             except Exception:
                 pass
-                
-        # Inject real-time rental block status
-        rent_acct = await db.rental_accounts.find_one({"driver_id": str(d["_id"])})
+
+    vehs_map = {}
+    if cv_ids:
+        vehs = await db.vehicles.find({"_id": {"$in": cv_ids}}, {"registration_number": 1}).to_list(None)
+        vehs_map = {str(v["_id"]): v.get("registration_number") for v in vehs}
+
+    rent_accts_map = {}
+    if driver_ids:
+        accts = await db.rental_accounts.find({"driver_id": {"$in": driver_ids}}).to_list(None)
+        rent_accts_map = {a["driver_id"]: a for a in accts}
+
+    today_str = _today_ist().isoformat()
+    for d in docs:
+        cv_id = d.get("current_vehicle_id")
+        if cv_id and str(cv_id) in vehs_map:
+            d["current_vehicle_reg"] = vehs_map[str(cv_id)]
+
+        rent_acct = rent_accts_map.get(str(d["_id"]))
         if rent_acct:
-            today_str = _today_ist().isoformat()
-            status = rent_acct.get("status", "active")
+            st = rent_acct.get("status", "active")
             grace = rent_acct.get("grace_period_until")
-            if status == "blocked" and grace and grace >= today_str:
-                status = "active"
-            d["rental_block_status"] = status
+            if st == "blocked" and grace and grace >= today_str:
+                st = "active"
+            d["rental_block_status"] = st
         else:
             d["rental_block_status"] = "active"
-            
+
+        is_online = bool(
+            d.get("is_online") or d.get("online") or d.get("active_trip_id") or
+            (d.get("rental_status") == "active" and not d.get("admin_block") and d.get("rental_block_status") != "blocked" and d.get("status", "active") != "inactive")
+        )
+        d["is_online"] = is_online
+
+    if status == "online":
+        docs = [d for d in docs if d.get("is_online")]
+    elif status == "offline":
+        docs = [d for d in docs if not d.get("is_online")]
+
     return [ser(d) for d in docs]
 
 
@@ -1004,7 +1070,7 @@ async def _sync_driver_code_counter():
 
 
 CITY_CODES = {
-    "bangalore": "BAN", "bengaluru": "BAN",
+    "bangalore": "BLR", "bengaluru": "BLR",
     "chennai": "CHN",
     "coimbatore": "CBE",
     "tiruppur": "TUP", "tirupur": "TUP",
@@ -2595,7 +2661,7 @@ class PlanBody(BaseModel):
     monthly_km_limit: int = 0
     overage_per_km: float = 0.0
     active: bool = True
-    # --- Commission / Salary packages (optional; unused by Silver/Gold/Platinum/In-Build) ---
+    # --- Commission / Salary packages (optional; unused by Economy/Premium/Executive/In-Build) ---
     commission_percent: Optional[float] = None
     salary_amount: Optional[float] = None
 
@@ -2834,8 +2900,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
     else:
         dates_to_check.append(_today_ist())
     
-    out = []
-    for r in rentals:
+    async def _process_single_rental(r):
+        r_out = []
         rid = str(r["_id"])
         
         sec_dep = await db.security_deposits.find_one({"driver_id": r["driver_id"], "organization_id": user.get("organization_id")})
@@ -3218,7 +3284,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                                     "manual": _yp.get("gateway") in ("manual_qr", "manual_admin"),
                                 }
                 if d == _today_ist() or odo_log or row_paid > 0 or pending_rent_here or d_str in (acct or {}).get("unpaid_dates", []) or deposit_only_row or (idx == 0 and d_str in _coll_by_date) or (idx == 0 and (d - timedelta(days=1)).strftime("%Y-%m-%d") in _coll_by_date) or (idx == 0 and _pkg_cat != "rental" and _rental_start_str and _rental_start_str <= d_str and d <= _today_ist()):
-                    out.append({
+                    r_out.append({
                         "id": f"{rid}_{d_str}_{idx}",
                         "driver_name": r.get("driver_name", "Unknown"),
                         "driver_avatar": driver_avatar,
@@ -3290,7 +3356,16 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "date": d_str,
                     })
 
-        
+        return r_out
+
+    _rental_batches = await asyncio.gather(*[_process_single_rental(r) for r in rentals], return_exceptions=True)
+    out = []
+    for _rb in _rental_batches:
+        if isinstance(_rb, list):
+            out.extend(_rb)
+        elif isinstance(_rb, Exception):
+            logger.error(f"Error in daily collection for rental: {_rb}")
+
     # settled / unsettled flag of every row (set with the button on the Daily Collection page)
     if out:
         _settled_ids = {s_["row_id"] async for s_ in db.collection_settlements.find(
@@ -3849,36 +3924,78 @@ async def dashboard_summary(request: Request, city: Optional[str] = None):
     if city and city != "all":
         base = {**base, "city": city}
 
-    async def count_v(status=None):
-        f = dict(base)
-        if status:
-            f["status"] = status
-        return await db.vehicles.count_documents(f)
+    user_org_filter = org_filter(user)
+    fleet_agg, cities_agg, all_rentals, crit, all_docs, all_drivers = await asyncio.gather(
+        db.vehicles.aggregate([{"$match": base}, {"$group": {"_id": "$status", "count": {"$sum": 1}}}]).to_list(None),
+        db.vehicles.aggregate([{"$match": user_org_filter}, {"$group": {"_id": {"city": "$city", "status": "$status"}, "count": {"$sum": 1}}}]).to_list(None),
+        db.rentals.find(base).to_list(5000),
+        db.service_requests.count_documents({**base, "priority": "critical", "status": {"$ne": "closed"}}),
+        db.documents.find(base).to_list(5000),
+        db.drivers.find(base).to_list(5000),
+    )
 
-    total = await count_v()
-    fleet = {
-        "total": total,
-        "rented": await count_v("rented"),
-        "available": await count_v("available"),
-        "service": await count_v("service"),
-        "inactive": await count_v("inactive"),
-        "idle": await count_v("idle"),
-        "accident": await count_v("accident"),
+    driver_ids = [str(d["_id"]) for d in all_drivers]
+    rent_accts = {a["driver_id"]: a for a in await db.rental_accounts.find({"driver_id": {"$in": driver_ids}}).to_list(None)} if driver_ids else {}
+    today_str = _today_ist().isoformat()
+
+    online_drivers_count = 0
+    for d in all_drivers:
+        acct = rent_accts.get(str(d["_id"]))
+        is_blocked = False
+        if acct:
+            st = acct.get("status", "active")
+            grace = acct.get("grace_period_until")
+            if st == "blocked" and not (grace and grace >= today_str):
+                is_blocked = True
+
+        is_online = bool(
+            d.get("is_online") or d.get("online") or d.get("active_trip_id") or
+            (d.get("rental_status") == "active" and not d.get("admin_block") and not is_blocked and d.get("status", "active") != "inactive")
+        )
+        if is_online:
+            online_drivers_count += 1
+    offline_drivers_count = len(all_drivers) - online_drivers_count
+
+    drivers_summary = {
+        "total": len(all_drivers),
+        "online": online_drivers_count,
+        "offline": offline_drivers_count,
     }
+
+    status_counts = {item["_id"]: item["count"] for item in fleet_agg if item.get("_id")}
+    fleet = {
+        "total": sum(status_counts.values()),
+        "rented": status_counts.get("rented", 0),
+        "available": status_counts.get("available", 0),
+        "service": status_counts.get("service", 0),
+        "inactive": status_counts.get("inactive", 0),
+        "idle": status_counts.get("idle", 0),
+        "accident": status_counts.get("accident", 0),
+    }
+
+    city_map = {}
+    for item in cities_agg:
+        c = (item.get("_id") or {}).get("city")
+        st = (item.get("_id") or {}).get("status")
+        cnt = item.get("count", 0)
+        if c:
+            if c not in city_map:
+                city_map[c] = {"total": 0, "rented": 0, "available": 0, "service": 0}
+            city_map[c]["total"] += cnt
+            if st in ("rented", "available", "service"):
+                city_map[c][st] = city_map[c].get(st, 0) + cnt
 
     city_list = [user["city"]] if user.get("role") == "city_manager" and user.get("city") else CITIES
     cities = []
     for c in city_list:
-        cf = {**org_filter(user), "city": c}
+        cmap = city_map.get(c, {})
         cities.append({
             "city": c,
-            "total": await db.vehicles.count_documents(cf),
-            "rented": await db.vehicles.count_documents({**cf, "status": "rented"}),
-            "available": await db.vehicles.count_documents({**cf, "status": "available"}),
-            "service": await db.vehicles.count_documents({**cf, "status": "service"}),
+            "total": cmap.get("total", 0),
+            "rented": cmap.get("rented", 0),
+            "available": cmap.get("available", 0),
+            "service": cmap.get("service", 0),
         })
-
-    all_rentals = await db.rentals.find(base).to_list(5000)
     active = expiring_today = expiring_soon = payment_pending = suspended = 0
     now = datetime.now(timezone.utc)
     for r in all_rentals:
@@ -3930,7 +4047,7 @@ async def dashboard_summary(request: Request, city: Optional[str] = None):
     if waiting:
         attention.append({"level": "amber", "label": f"{waiting} vehicle(s) waiting for service assignment", "link": "/service-requests"})
 
-    return {"fleet": fleet, "cities": cities, "rentals": rentals, "attention": attention, "cities_list": CITIES}
+    return {"fleet": fleet, "drivers": drivers_summary, "cities": cities, "rentals": rentals, "attention": attention, "cities_list": CITIES}
 
 
 @api.get("/dashboard/recent")
@@ -6797,10 +6914,10 @@ async def rental_admin_summary(request: Request):
     await _require_rental_admin(user)
     org = user.get("organization_id")
     rentals = await db.driver_rentals.find({"organization_id": org, "status": {"$ne": "ended"}}).to_list(2000)
+    accounts = await asyncio.gather(*[_rental_account(r) for r in rentals])
     active = overdue = blocked = 0
     today_expected = today_collected = outstanding_total = 0
-    for r in rentals:
-        acct = await _rental_account(r)
+    for r, acct in zip(rentals, accounts):
         if acct["status"] == "blocked":
             blocked += 1
         elif acct["status"] == "overdue":
@@ -6824,12 +6941,17 @@ async def rental_admin_drivers(request: Request, status: Optional[str] = None):
     await _require_rental_admin(user)
     org = user.get("organization_id")
     rentals = await db.driver_rentals.find({"organization_id": org, "status": {"$ne": "ended"}}).sort("created_at", -1).to_list(2000)
+    driver_ids = [r["driver_id"] for r in rentals]
+    accounts, deps_list = await asyncio.gather(
+        asyncio.gather(*[_rental_account(r) for r in rentals]),
+        db.security_deposits.find({"organization_id": org, "driver_id": {"$in": driver_ids}}).to_list(None)
+    )
+    deps_map = {d["driver_id"]: d for d in deps_list}
     rows = []
-    for r in rentals:
-        acct = await _rental_account(r)
+    for r, acct in zip(rentals, accounts):
         if status and status != "all" and acct["status"] != status:
             continue
-        dep = await db.security_deposits.find_one({"organization_id": org, "driver_id": r["driver_id"]})
+        dep = deps_map.get(r["driver_id"])
         rows.append({"driver_id": r["driver_id"], "driver_name": r["driver_name"], "phone": r.get("driver_phone"),
                      "vehicle_reg": r.get("vehicle_reg"), "package_name": r["package_name"], "daily_rate": r["daily_rate"],
                      "deposit_status": (dep or {}).get("status", "pending"), "deposit_amount": (dep or {}).get("amount", DEFAULT_DEPOSIT),
@@ -7382,8 +7504,7 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             pass
     vehs = {str(v["_id"]): v for v in await db.vehicles.find({"_id": {"$in": veh_ids}}, {"registration_number": 1, "vehicle_number": 1}).to_list(None)} if veh_ids else {}
 
-    rows = []
-    for d in drivers:
+    async def _process_driver_pending(d):
         did = str(d["_id"])
         r = rentals.get(did)
 
@@ -7428,7 +7549,7 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
                 _dd += timedelta(days=1)
 
         v = vehs.get(d.get("current_vehicle_id") or "") or {}
-        rows.append({
+        return {
             "id": did,
             "driver_name": d.get("name"),
             "driver_code": d.get("driver_code"),
@@ -7444,8 +7565,10 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             "pkg_pending_date": _pp_yesterday if pkg_pending else None,
             "pkg_pending_dates": pkg_pending_dates,
             "supervisor_name": d.get("supervisor_name"),
-        })
-    return rows
+        }
+
+    rows = await asyncio.gather(*[_process_driver_pending(d) for d in drivers])
+    return list(rows)
 
 
 @api.get("/pending-payments/signature")
@@ -7490,23 +7613,34 @@ async def startup():
         (db.users, "email", {"unique": True}),
         (db.vehicles, [("organization_id", 1), ("status", 1), ("city", 1)], {}),
         (db.vehicles, "registration_number", {}),
+        (db.vehicles, "vehicle_number", {}),
         (db.drivers, [("organization_id", 1), ("city", 1)], {}),
         (db.drivers, "phone", {}),
         (db.rentals, [("organization_id", 1), ("status", 1)], {}),
+        (db.rentals, "driver_id", {}),
+        (db.rentals, "vehicle_id", {}),
         (db.service_requests, [("organization_id", 1), ("status", 1)], {}),
         (db.audit_logs, [("organization_id", 1), ("created_at", -1)], {}),
         (db.orders, [("organization_id", 1), ("status", 1)], {}),
         (db.customers, [("organization_id", 1)], {}),
         (db.users, "phone", {}),
         (db.rental_packages, [("organization_id", 1)], {}),
+        (db.rental_plans, [("organization_id", 1), ("city", 1)], {}),
         (db.driver_rentals, [("organization_id", 1), ("driver_id", 1)], {}),
         (db.rental_payments, [("organization_id", 1), ("driver_id", 1)], {}),
+        (db.rental_payments, [("rental_id", 1), ("payment_status", 1)], {}),
+        (db.rental_payments, "transaction_id", {}),
         (db.security_deposits, [("organization_id", 1), ("driver_id", 1)], {}),
         (db.rental_accounts, [("organization_id", 1), ("driver_id", 1)], {}),
         (db.referrals, "referred_phone", {}),
         (db.referrals, [("organization_id", 1), ("referrer_driver_id", 1)], {}),
         (db.driver_odometer_images, "token", {}),
         (db.driver_odometer_images, "driver_id", {}),
+        (db.driver_odometer_logs, [("driver_id", 1), ("date", 1)], {}),
+        (db.driver_odometer_logs, [("driver_id", 1), ("snapshot_rent_txn_id", 1)], {}),
+        (db.driver_vehicle_assignments, [("driver_id", 1), ("start", 1)], {}),
+        (db.driver_vehicle_assignments, [("vehicle_id", 1), ("start", -1)], {}),
+        (db.package_collections, [("organization_id", 1), ("driver_id", 1), ("status", 1)], {}),
         (db.driver_kyc_files, "token", {}),
         (db.driver_kyc_files, "driver_id", {}),
     ]

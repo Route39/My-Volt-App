@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
   Car, KeyRound, CheckCircle2, Wrench, PowerOff, AlertTriangle, ArrowRight,
-  Activity, ChevronRight, TrendingUp,
+  Activity, ChevronRight, TrendingUp, Users, UserCheck, UserX,
 } from "lucide-react";
 import api from "../lib/api";
 import { useApp } from "../context/AppContext";
@@ -36,6 +36,7 @@ export default function Dashboard() {
   }, [city]);
 
   const f = data?.fleet;
+  const drv = data?.drivers;
   const donut = f ? [
     { name: "Rented", value: f.rented, key: "rented" },
     { name: "Available", value: f.available, key: "available" },
@@ -43,12 +44,53 @@ export default function Dashboard() {
     { name: "Inactive", value: f.inactive + f.idle, key: "inactive" },
   ].filter((d) => d.value > 0) : [];
 
+  const cityQuery = city && city !== "all" ? `city=${encodeURIComponent(city)}` : "";
+  const toUrl = (basePath, extraParam) => {
+    const parts = [extraParam, cityQuery].filter(Boolean);
+    return parts.length > 0 ? `${basePath}?${parts.join("&")}` : basePath;
+  };
+
   const kpis = f ? [
-    { label: "Total Fleet", value: f.total, icon: Car, color: "text-mv-primary", bg: "bg-blue-500/15", to: "/fleet" },
-    { label: "Rented", value: f.rented, icon: KeyRound, color: "text-blue-400", bg: "bg-blue-500/15", to: "/fleet?status=rented" },
-    { label: "Available", value: f.available, icon: CheckCircle2, color: "text-green-400", bg: "bg-green-500/15", to: "/fleet?status=available" },
-    { label: "Service", value: f.service, icon: Wrench, color: "text-amber-400", bg: "bg-amber-500/15", to: "/fleet?status=service" },
-    { label: "Inactive", value: f.inactive + f.idle, icon: PowerOff, color: "text-zinc-400", bg: "bg-zinc-500/15", to: "/fleet?status=inactive" },
+    {
+      label: "Total Vehicles",
+      value: f.total,
+      icon: Car,
+      color: "text-blue-400",
+      bg: "bg-blue-500/15",
+      to: toUrl("/fleet")
+    },
+    {
+      label: "Online Drivers",
+      value: drv?.online ?? 0,
+      icon: UserCheck,
+      color: "text-emerald-400",
+      bg: "bg-emerald-500/15",
+      to: toUrl("/drivers", "status=online")
+    },
+    {
+      label: "Offline Drivers",
+      value: drv?.offline ?? 0,
+      icon: UserX,
+      color: "text-slate-400",
+      bg: "bg-slate-500/15",
+      to: toUrl("/drivers", "status=offline")
+    },
+    {
+      label: "Inactive Vehicles",
+      value: f.inactive + f.idle,
+      icon: PowerOff,
+      color: "text-zinc-400",
+      bg: "bg-zinc-500/15",
+      to: toUrl("/fleet", "status=inactive")
+    },
+    {
+      label: "Vehicles Under Maintenance",
+      value: f.service,
+      icon: Wrench,
+      color: "text-amber-400",
+      bg: "bg-amber-500/15",
+      to: toUrl("/fleet", "status=service")
+    },
   ] : [];
 
   return (

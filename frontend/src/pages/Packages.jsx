@@ -7,7 +7,7 @@ import { PrimaryBtn, GhostBtn } from "../components/common/Page";
 import { useApp } from "../context/AppContext";
 import PackageLock from "../components/common/PackageLock";
 
-const PACKAGE_TYPES = ["Silver", "Gold", "Platinum", "In-Build Vehicles"];
+const PACKAGE_TYPES = ["Economy", "Premium", "Executive", "In-Build Vehicles"];
 // "In-Build Vehicles" is already a full name, so don't add " Package" after it
 const defaultPkgName = (type) => (type === "In-Build Vehicles" ? type : `${type} Package`);
 
@@ -79,7 +79,7 @@ export default function Packages() {
               ? "Manage the commission package per city."
               : tab === "salary"
               ? "Manage the salary package per city."
-              : "Manage strict Silver, Gold, Platinum, and In-Build Vehicles packages per city."}
+              : "Manage strict Economy, Premium, Executive, and In-Build Vehicles packages per city."}
           </p> */}
         </div>
       </div>

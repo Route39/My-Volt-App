@@ -19,21 +19,36 @@ export default function Drivers() {
   const nav = useNavigate();
   const [items, setItems] = useState(null);
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all");
-  const [city, setCity] = useState(gCity);
+  const [status, setStatus] = useState(params.get("status") || "all");
+  const [city, setCity] = useState(lockedCity || params.get("city") || gCity);
   const [view, setView] = useState("cards");
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
   const [showImport, setShowImport] = useState(false);
 
+  useEffect(() => {
+    const s = params.get("status");
+    if (s) setStatus(s);
+    const c = params.get("city");
+    if (c) setCity(c);
+  }, [params]);
+
   const load = useCallback(async () => {
     setItems(null);
     const p = {};
-    if (status === "active" || status === "inactive") p.status = status;
+    if (status !== "all" && status !== "temporary" && status !== "permanent") p.status = status;
     if (city !== "all") p.city = city;
     if (q) p.q = q;
     try {
       const { data } = await api.get("/drivers", { params: p });
-      setItems(status === "temporary" || status === "permanent" ? data.filter((d) => d.admin_block === status) : data);
+      let filtered = data;
+      if (status === "temporary" || status === "permanent") {
+        filtered = data.filter((d) => d.admin_block === status);
+      } else if (status === "online") {
+        filtered = data.filter((d) => d.is_online);
+      } else if (status === "offline") {
+        filtered = data.filter((d) => !d.is_online);
+      }
+      setItems(filtered);
     } catch (e) {
       console.error(e);
       setItems([]);
@@ -82,13 +97,21 @@ export default function Drivers() {
       )}
 
       <div className="flex flex-wrap gap-2 mb-5">
-        {[["all", "All"], ["active", "Active"], ["inactive", "Inactive"], ["temporary", "Temporarily Blocked"], ["permanent", "Permanently Blocked"]].map(([s, label]) => <FilterChip key={s} active={status === s} onClick={() => setStatus(s)}>{label}</FilterChip>)}
+        {[
+          ["all", "All"],
+          ["online", "Online"],
+          ["offline", "Offline"],
+          ["active", "Active"],
+          ["inactive", "Inactive"],
+          ["temporary", "Temporarily Blocked"],
+          ["permanent", "Permanently Blocked"],
+        ].map(([s, label]) => <FilterChip key={s} active={status === s} onClick={() => setStatus(s)} data-testid={`driver-filter-${s}`}>{label}</FilterChip>)}
       </div>
 
       {!items && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-2xl" />)}</div>}
       {items && items.length === 0 && (status !== "all" || q ? (
         <EmptyState icon={Users} title="Nothing found"
-          subtitle={q ? `No drivers match "${q}"${status !== "all" ? " in this filter" : ""}.` : `No ${{ active: "active", inactive: "inactive", temporary: "temporarily blocked", permanent: "permanently blocked" }[status]} drivers right now.`} />
+          subtitle={q ? `No drivers match "${q}"${status !== "all" ? " in this filter" : ""}.` : `No ${{ online: "online", offline: "offline", active: "active", inactive: "inactive", temporary: "temporarily blocked", permanent: "permanently blocked" }[status]} drivers right now.`} />
       ) : (
         <EmptyState icon={Users} title="No drivers found" subtitle="Add drivers to start assigning vehicles and rentals." action={canEdit && <PrimaryBtn onClick={() => setShowAdd(true)}><Plus className="w-4 h-4" /> Add Driver</PrimaryBtn>} />
       ))}
@@ -103,10 +126,18 @@ export default function Drivers() {
                 <div className="min-w-0">
                   <div className="font-display font-semibold truncate">{d.name}</div>
                   {d.driver_code && <div className="text-[11px] font-mono font-semibold text-mv-primary">{d.driver_code}</div>}
-                  <div className="flex gap-2 mt-1">
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {d.is_online ? (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Online
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-500/10 text-slate-500 border border-slate-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" /> Offline
+                      </span>
+                    )}
                     <StatusChip status={d.status} />
                     <KycStatusChip status={d.kyc_status || "pending"} />
-                    
                   </div>
                 </div>
               </div>
@@ -268,28 +299,28 @@ function AddDriverDialog({ open, setOpen, onDone }) {
   const [form, setForm] = useState({ 
     name: "", phone: "", city: lockedCity || "Chennai", address: "", 
     emergency_contact: "", license_number: "", status: "active",
-    package_name: "", package_rate: 0
+    package_name: "", package_rate: 0, vehicle_id: "", supervisor_id: ""
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Reset step and package when modal opens/closes or city changes
+  const resetForm = useCallback(() => {
+    setStep(1);
+    setForm({
+      name: "", phone: "", city: lockedCity || "Chennai", address: "", 
+      emergency_contact: "", license_number: "", status: "active",
+      package_name: "", package_rate: 0, vehicle_id: "", supervisor_id: ""
+    });
+  }, [lockedCity]);
+
+  // Reset form to completely empty whenever modal opens or closes
   useEffect(() => {
-    if (!open) { 
-      setStep(1); 
-      setForm({
-        name: "", phone: "", city: lockedCity || "Chennai", address: "", 
-        emergency_contact: "", license_number: "", status: "active",
-        package_name: "", package_rate: 0
-      }); 
-    }
-  }, [open]);
+    resetForm();
+  }, [open, resetForm]);
 
   useEffect(() => {
     setForm(f => ({ ...f, package_name: "", package_rate: 0 }));
   }, [form.city]);
-
-
 
   const save = async () => {
     if (!/^\d{10}$/.test(form.phone) || !/^\d{10}$/.test(form.emergency_contact)) {
@@ -303,7 +334,12 @@ function AddDriverDialog({ open, setOpen, onDone }) {
     const aerr = validateAssign(form);
     if (aerr) { toast.error(aerr); return; }
     setSaving(true);
-    try { await api.post("/drivers", form); toast.success("Driver added ✓"); onDone(); } 
+    try {
+      await api.post("/drivers", form);
+      toast.success("Driver added ✓");
+      resetForm();
+      onDone();
+    } 
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); } 
     finally { setSaving(false); }
   };

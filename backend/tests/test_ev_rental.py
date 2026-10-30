@@ -10,8 +10,8 @@ import pytest
 import requests
 from dotenv import dotenv_values
 
-fe = dotenv_values("/app/frontend/.env")
-BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or fe.get("REACT_APP_BACKEND_URL")).rstrip("/")
+fe = dotenv_values(os.path.join(os.path.dirname(__file__), "../../frontend/.env"))
+BASE_URL = (os.environ.get("REACT_APP_BACKEND_URL") or (fe.get("REACT_APP_BACKEND_URL") if fe else None) or "http://localhost:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 
 DRIVERS = {

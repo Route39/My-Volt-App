@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, LayoutGrid, List, Plus, Car, MapPin, User, Battery, Loader2, Upload, Download } from "lucide-react";
+import { Search, LayoutGrid, List, Plus, Car, MapPin, User, Battery, Loader2, Upload, Download, Sparkles, AlertCircle, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
@@ -32,7 +32,12 @@ export default function Fleet() {
   const [showImport, setShowImport] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setDq(q), 300); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { setCity(lockedCity || params.get("city") || gCity); }, [gCity, lockedCity]);
+  useEffect(() => {
+    const s = params.get("status");
+    if (s) setStatus(s);
+    const c = lockedCity || params.get("city") || gCity;
+    if (c) setCity(c);
+  }, [params, lockedCity, gCity]);
 
   const fetchPage = useCallback(async (pg, replace) => {
     const p = { page_size: 60, page: pg };
@@ -248,16 +253,65 @@ function ImportVehiclesDialog({ open, setOpen, onDone }) {
 
 function AddVehicleDialog({ open, setOpen, onDone }) {
   const { city: appCity, lockedCity, cities } = useApp();
-  const [form, setForm] = useState({ vehicle_number: "", registration_number: "", vin_number: "", city: lockedCity || (appCity === "all" ? "Bangalore" : appCity) });
+  const defaultCity = lockedCity || (appCity === "all" ? "Bangalore" : appCity);
+
+  const [form, setForm] = useState({
+    vehicle_number: "",
+    registration_number: "",
+    vin_number: "",
+    city: defaultCity
+  });
   const [saving, setSaving] = useState(false);
   const [fetchingId, setFetchingId] = useState(false);
+  const [suggestedCode, setSuggestedCode] = useState("");
+  const [codeError, setCodeError] = useState("");
+  const [checkingCode, setCheckingCode] = useState(false);
+  const [isUnique, setIsUnique] = useState(false);
+
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const resetForm = useCallback((targetCity) => {
+    const c = targetCity || lockedCity || (appCity === "all" ? "Bangalore" : appCity);
+    setForm({
+      vehicle_number: "",
+      registration_number: "",
+      vin_number: "",
+      city: c
+    });
+    setCodeError("");
+    setIsUnique(false);
+  }, [appCity, lockedCity]);
+
+  const checkUniqueness = useCallback(async (code) => {
+    const clean = (code || "").trim().toUpperCase();
+    if (!clean) {
+      setCodeError("Vehicle Code / ID is required");
+      setIsUnique(false);
+      return;
+    }
+    setCheckingCode(true);
+    try {
+      const { data } = await api.get("/vehicles/check-number", { params: { vehicle_number: clean } });
+      if (!data.available) {
+        setCodeError(`Vehicle Code "${clean}" is already in use. Please enter a unique code.`);
+        setIsUnique(false);
+      } else {
+        setCodeError("");
+        setIsUnique(true);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCheckingCode(false);
+    }
+  }, []);
 
   const fetchNextNumber = useCallback(async (c) => {
     setFetchingId(true);
     try {
       const { data } = await api.get("/vehicles/next-number", { params: { city: c } });
-      set("vehicle_number", data.vehicle_number);
+      const nextCode = data.vehicle_number;
+      setSuggestedCode(nextCode);
     } catch (e) {
       console.error(e);
     } finally {
@@ -265,19 +319,56 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
     }
   }, []);
 
+  // When dialog opens or closes, reset all inputs completely to empty
   useEffect(() => {
     if (open) {
-      fetchNextNumber(form.city);
+      resetForm();
+      fetchNextNumber(defaultCity);
     }
-  }, [open, form.city, fetchNextNumber]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!form.vehicle_number) {
+      setCodeError("");
+      setIsUnique(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      checkUniqueness(form.vehicle_number);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [form.vehicle_number, checkUniqueness]);
+
+  const handleManualCodeChange = (e) => {
+    const val = e.target.value.toUpperCase().replace(/\s+/g, "");
+    set("vehicle_number", val);
+  };
+
+  const handleUseSuggestion = () => {
+    if (suggestedCode) {
+      set("vehicle_number", suggestedCode);
+      checkUniqueness(suggestedCode);
+    }
+  };
 
   const save = async () => {
-    if (!form.vehicle_number || !form.registration_number) { toast.error("Vehicle Code and Registration Number required"); return; }
+    const cleanVehNum = (form.vehicle_number || "").trim().toUpperCase();
+    if (!cleanVehNum) { toast.error("Vehicle Code / ID is required"); return; }
+    if (codeError || !isUnique) { toast.error(codeError || "Please enter a unique Vehicle Code"); return; }
+    if (!form.registration_number.trim()) { toast.error("Registration Number required"); return; }
     if (!form.vin_number.trim()) { toast.error("VIN Number required"); return; }
     if (!/^[A-Z0-9]{17}$/.test(form.vin_number.trim())) { toast.error("VIN Number must be exactly 17 characters (letters A-Z and numbers 0-9 only)"); return; }
     setSaving(true);
-    try { await api.post("/vehicles", form); toast.success("Vehicle added ✓"); onDone(); }
-    catch (e) { toast.error(e.response?.data?.detail || "Failed to add"); } finally { setSaving(false); }
+    try {
+      await api.post("/vehicles", { ...form, vehicle_number: cleanVehNum });
+      toast.success("Vehicle added ✓");
+      resetForm();
+      onDone();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to add");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -297,15 +388,65 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
           <Field label="VIN Number">
             <TextInput data-testid="veh-vin-number" value={form.vin_number} onChange={(e) => set("vin_number", e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 17))} maxLength={17} className="bg-mv-surface text-mv-text uppercase" />
           </Field>
-          <Field label="Vehicle Code / ID (Auto Generated)">
-            <div className="relative cursor-not-allowed opacity-80">
-              <TextInput data-testid="veh-number" value={form.vehicle_number} readOnly disabled className="bg-mv-surface2 text-mv-dim font-bold tracking-wider cursor-not-allowed" />
-              {fetchingId && <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-mv-dim" />}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="mv-label">Vehicle Code / ID</label>
+              {suggestedCode && (
+                <button
+                  type="button"
+                  onClick={handleUseSuggestion}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm"
+                  title="Auto-fill the next recommended code"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  Suggest Next: <span className="font-mono font-bold">{suggestedCode}</span>
+                </button>
+              )}
             </div>
-          </Field>
+            <div className="relative">
+              <TextInput
+                data-testid="veh-number"
+                value={form.vehicle_number}
+                onChange={handleManualCodeChange}
+                placeholder="e.g. BLR006"
+                className={`bg-mv-surface text-mv-text uppercase font-mono font-bold tracking-wider pr-10 transition-colors ${
+                  codeError
+                    ? "border-red-500 focus:border-red-500 bg-red-50/10 text-red-600"
+                    : isUnique && form.vehicle_number
+                    ? "border-emerald-500 focus:border-emerald-500"
+                    : ""
+                }`}
+              />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
+                {(fetchingId || checkingCode) && <Loader2 className="w-4 h-4 animate-spin text-mv-dim" />}
+                {!fetchingId && !checkingCode && codeError && <AlertCircle className="w-4 h-4 text-red-500" />}
+                {!fetchingId && !checkingCode && isUnique && form.vehicle_number && <CheckCircle className="w-4 h-4 text-emerald-500" />}
+              </div>
+            </div>
+            {codeError ? (
+              <p className="text-xs text-red-500 mt-1 flex items-center gap-1 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                {codeError}
+              </p>
+            ) : isUnique && form.vehicle_number ? (
+              <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1 font-medium">
+                <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                Vehicle Code is available
+              </p>
+            ) : (
+              <p className="text-[11px] text-mv-muted mt-1">
+                Enter any unique vehicle code manually or click the suggestion button.
+              </p>
+            )}
+          </div>
         </div>
         <div className="flex justify-end gap-2 pt-4">
-          <PrimaryBtn onClick={save} disabled={saving || fetchingId} data-testid="save-vehicle-btn" className="w-full">
+          <PrimaryBtn
+            onClick={save}
+            disabled={saving || fetchingId || checkingCode || Boolean(codeError) || !isUnique || !form.vehicle_number.trim()}
+            data-testid="save-vehicle-btn"
+            className="w-full"
+          >
             {saving ? "Adding..." : "Add Vehicle"}
           </PrimaryBtn>
         </div>

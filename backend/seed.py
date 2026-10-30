@@ -52,7 +52,7 @@ async def _seed_ev_rental(db, authlib):
     if await db.rental_packages.count_documents({"organization_id": ORG_ID}) > 0:
         return
     ist_today = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
-    pkg_defs = [("Silver", 800), ("Gold", 900), ("Platinum", 1000)]
+    pkg_defs = [("Economy", 800), ("Premium", 900), ("Executive", 1000)]
     pkg_ids = {}
     for name, rate in pkg_defs:
         pid = ObjectId()
@@ -94,14 +94,14 @@ async def _seed_ev_rental(db, authlib):
         if today_paid:
             await db.rental_payments.insert_one(_pay(did, rid, rate, ist_today.isoformat()))
 
-    # 1) Silver — today's rent paid, deposit paid → ACTIVE
-    await mk("Raj Kumar", "+919000000001", "TN 07 AB 1001", "Silver", 5, "paid", 0, True)
-    # 2) Gold — one overdue day, deposit paid → OVERDUE
-    await mk("Suresh Menon", "+919000000002", "TN 07 CD 1002", "Gold", 3, "paid", 1, False)
-    # 3) Platinum — two overdue days, deposit paid → BLOCKED
-    await mk("Arjun Nair", "+919000000003", "TN 07 EF 1003", "Platinum", 4, "paid", 2, False)
+    # 1) Economy — today's rent paid, deposit paid → ACTIVE
+    await mk("Raj Kumar", "+919000000001", "TN 07 AB 1001", "Economy", 5, "paid", 0, True)
+    # 2) Premium — one overdue day, deposit paid → OVERDUE
+    await mk("Suresh Menon", "+919000000002", "TN 07 CD 1002", "Premium", 3, "paid", 1, False)
+    # 3) Executive — two overdue days, deposit paid → BLOCKED
+    await mk("Arjun Nair", "+919000000003", "TN 07 EF 1003", "Executive", 4, "paid", 2, False)
     # 4) Deposit pending, fresh start → ACTIVE with deposit pending
-    await mk("Vikram Reddy", "+919000000004", "TN 07 GH 1004", "Gold", 0, "pending", 0, False)
+    await mk("Vikram Reddy", "+919000000004", "TN 07 GH 1004", "Premium", 0, "pending", 0, False)
 
 
 
