@@ -24,6 +24,8 @@ export default function DailyCollection() {
   const [pickMonth, setPickMonth] = useState(todayIST.slice(0, 7));
   const [search, setSearch] = useState("");
   const [pkgTab, setPkgTab] = useState("all");   // all | rental | commission | salary
+  const [pendMap, setPendMap] = useState({});     // driver_id -> row from /pending-payments
+  const [pendRows, setPendRows] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +79,18 @@ export default function DailyCollection() {
   }, [city, dateFilter, fromDate, toDate, pickDate, pickMonth, search]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Same data the Pending Payments page shows: each driver's TOTAL pending rent + deposit
+  useEffect(() => {
+    let live = true;
+    api.get("/pending-payments").then(({ data }) => {
+      if (!live) return;
+      const m = {};
+      (data || []).forEach((r) => { m[String(r.id)] = r; if (r.driver_id) m[String(r.driver_id)] = r; });
+      setPendMap(m); setPendRows(data || []);
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [items]);
 
   // Deposit is a ONE-TIME payment per driver, so it is counted once, on the row of the
   // day it was paid. Paid deposits are de-duplicated by transaction id; pending deposits
@@ -216,6 +230,38 @@ export default function DailyCollection() {
     );
   };
 
+  // ---- pending rent / deposit helpers (merged from Pending Payments) ----
+  const _special = (it) => it.package_category === "commission" || it.package_category === "salary";
+  const pendOf = (it) => pendMap[String(it.driver_id)] || null;
+  const pendingRentOf = (it) => (pendOf(it) ? Number(pendOf(it).rent_pending) || 0 : 0);
+  const depositOf = (it) => {
+    const total = Number(it.deposit) || 0;
+    if (pendOf(it) && pendOf(it).deposit_pending != null) {
+      const pend = Number(pendOf(it).deposit_pending) || 0;
+      return { total, paid: Math.max(0, total - pend), pending: pend };
+    }
+    let paid = 0;
+    if (it.deposit_status === "paid") paid = Number(it.deposit_paid || it.deposit) || 0;
+    else if (it.deposit_split && it.deposit_status === "partial") paid = Number(it.deposit_first_amount) || 0;
+    else paid = Number(it.deposit_paid) || 0;
+    return { total, paid, pending: Math.max(0, total - paid) };
+  };
+  const stats = (() => {
+    const vehicles = new Set(), weekOff = new Set(), depSeen = new Set();
+    let pendRent = 0, pendDep = 0;
+    for (const it of rows) {
+      if (it.rent_status === "week_off") weekOff.add(it.driver_id);
+      else if (it.rent_status !== "paid_leave" && (it.vehicle_code || it.vehicle_reg)) vehicles.add(it.vehicle_code || it.vehicle_reg);
+      pendRent += pendingRentOf(it);
+      if (!_special(it) && !depSeen.has(it.driver_id)) { depSeen.add(it.driver_id); pendDep += depositOf(it).pending; }
+    }
+    const seenDrv = new Set(rows.map((x) => String(x.driver_id)));
+    const matched = pendRows.filter((r) => seenDrv.has(String(r.id)) || seenDrv.has(String(r.driver_id)));
+    const dueRent = pendRows.length ? matched.reduce((a, r) => a + (Number(r.rent_pending) || 0), 0) : pendRent;
+    const dueDep = pendRows.length ? matched.reduce((a, r) => a + (Number(r.deposit_pending) || 0), 0) : pendDep;
+    return { running: vehicles.size, weekOff: weekOff.size, netDue: dueRent + dueDep, dueRent, dueDep };
+  })();
+
   // Commission / Salary package drivers pay no daily rent and no deposit
   const isSpecialPkg = (it) => it.package_category === "commission" || it.package_category === "salary";
   const pkgPill = (it) => (
@@ -323,6 +369,34 @@ export default function DailyCollection() {
           />
         </div>
       </div>
+
+      {!isPkgTab && (
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6" data-testid="dc-summary">
+        <div className="mv-card p-5">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Running Vehicles</div>
+          <div className="text-3xl font-display font-bold text-mv-text">{stats.running}</div>
+        </div>
+        <div className="mv-card p-5">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Revenue</div>
+          <div className="text-3xl font-display font-bold text-emerald-500">{inr(totalSettled)}</div>
+          <div className="text-xs text-mv-dim mt-1">Collected</div>
+        </div>
+        <div className="mv-card p-5">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Week Off</div>
+          <div className="text-3xl font-display font-bold text-violet-500">{stats.weekOff}</div>
+          <div className="text-xs text-mv-dim mt-1">Drivers</div>
+        </div>
+        <div className="mv-card p-5">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Net Due</div>
+          <div className="text-3xl font-display font-bold text-rose-500">{inr(stats.netDue)}</div>
+          <div className="text-xs text-mv-dim mt-1">Pending rent + deposit</div>
+          <div className="mt-2 pt-2 border-t border-mv-border/60 text-xs flex justify-between gap-2">
+            <span className="text-mv-muted">Rent <b className="text-red-500">{inr(stats.dueRent)}</b></span>
+            <span className="text-mv-muted">Deposit <b className="text-red-500">{inr(stats.dueDep)}</b></span>
+          </div>
+        </div>
+      </div>
+      )}
 
       {/* Summary Cards (hidden on the Commission / Salary tabs) */}
       {pkgTab === "rental" && (
@@ -461,7 +535,11 @@ export default function DailyCollection() {
               {/* <th className="px-5 py-4 text-red-500">Extra KM</th> */}
               <th className="px-5 py-4">Daily Rent</th>
               {/* <th className="px-5 py-4">Extra KM Charges</th> */}
-              <th className="px-5 py-4">Deposit</th>
+              <th className="px-5 py-4">Pending Rent</th>
+              <th className="px-5 py-4">Deposit Amount</th>
+              <th className="px-5 py-4">Deposit Paid</th>
+              <th className="px-5 py-4">Deposit Pending</th>
+              <th className="px-5 py-4">Deposit Status</th>
               <th className="px-5 py-4">Trip Screenshot</th>
               {pkgTab !== "rental" && <th className="px-5 py-4">Settled / Unsettled</th>}
             </tr>
@@ -469,7 +547,7 @@ export default function DailyCollection() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={pkgTab === "rental" ? 7 : 8} className="px-5 py-16 text-center text-mv-muted">
+                <td colSpan={pkgTab === "rental" ? 11 : 12} className="px-5 py-16 text-center text-mv-muted">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                     Loading collection data...
@@ -478,7 +556,7 @@ export default function DailyCollection() {
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={pkgTab === "rental" ? 7 : 8} className="px-5 py-16 text-center">
+                <td colSpan={pkgTab === "rental" ? 11 : 12} className="px-5 py-16 text-center">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                       <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -617,6 +695,20 @@ export default function DailyCollection() {
                         </div>
                       )}
                     </td> */}
+                    <td className="px-5 py-4 font-display font-bold">
+                      {pendingRentOf(it) > 0 ? <span className="text-red-500">{inr(pendingRentOf(it))}</span> : <span className="text-slate-400 font-medium">—</span>}
+                    </td>
+                    <td className="px-5 py-4 font-display font-bold">
+                      {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span> : inr(depositOf(it).total)}
+                    </td>
+                    <td className="px-5 py-4 font-display font-bold">
+                      {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span> : <span className="text-emerald-600">{inr(depositOf(it).paid)}</span>}
+                    </td>
+                    <td className="px-5 py-4 font-display font-bold">
+                      {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span>
+                        : depositOf(it).pending > 0 ? <span className="text-red-500">{inr(depositOf(it).pending)}</span>
+                        : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">PAID</span>}
+                    </td>
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
                       {isSpecialPkg(it) ? (
                         pkgPill(it)
