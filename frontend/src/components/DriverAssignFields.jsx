@@ -208,6 +208,9 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
             </SelectContent>
           </Select>
         </Field>
+        <Field label="Manager (optional)">
+          <TextInput data-testid="driver-manager" value={form.manager_name || ""} onChange={(e) => set("manager_name", e.target.value)} placeholder="Type manager name" />
+        </Field>
       </div>
     </>
   );

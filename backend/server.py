@@ -38,6 +38,10 @@ app.add_middleware(
         "http://localhost",
         "capacitor://localhost",
         "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
+        "http://127.0.0.1:3001",
         "http://127.0.0.1:3000",
         "http://0.0.0.0:3000",
         "https://localhost:3000",
@@ -686,6 +690,7 @@ class DriverBody(BaseModel):
     rental_start: Optional[str] = None
     rental_end: Optional[str] = None
     supervisor_id: Optional[str] = None
+    manager_name: Optional[str] = None   # free-text manager
     rental_state: Optional[str] = None   # active | suspended | pending_payment | closed
     package_category: Optional[str] = None   # rental | commission | salary
 
@@ -856,7 +861,7 @@ async def review_kyc(driver_id: str, action: str, request: Request):
 
 
 @api.get("/drivers")
-async def list_drivers(request: Request, city: Optional[str] = None, status: Optional[str] = None, unassigned: Optional[bool] = None, q: Optional[str] = None):
+async def list_drivers(request: Request, city: Optional[str] = None, status: Optional[str] = None, unassigned: Optional[bool] = None, q: Optional[str] = None, package_category: Optional[str] = None):
     user = await get_user(request)
     extra = {}
     if city and city != "all":
@@ -920,6 +925,9 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
         docs = [d for d in docs if d.get("is_online")]
     elif status == "offline":
         docs = [d for d in docs if not d.get("is_online")]
+
+    if package_category in ("rental", "commission", "salary"):
+        docs = [d for d in docs if (d.get("package_category") or "rental") == package_category]
 
     return [ser(d) for d in docs]
 
@@ -4600,6 +4608,34 @@ async def _day_km_before(driver_id, date_str, exclude_log_id=None):
     return total
 
 
+MONTHLY_KM_FROM = __import__("os").environ.get("MONTHLY_KM_FROM", "2026-10-01")
+
+
+def _use_monthly_km(date_str):
+    """Extra-KM is billed against the calendar-month limit from MONTHLY_KM_FROM onwards."""
+    return bool(MONTHLY_KM_FROM) and (date_str or "") >= MONTHLY_KM_FROM
+
+
+def _effective_monthly_limit(monthly_limit, daily_limit=0):
+    monthly_limit = int(monthly_limit or 0)
+    if monthly_limit > 0:
+        return monthly_limit
+    daily_limit = int(daily_limit or 0)
+    return daily_limit * 30 if daily_limit > 0 else 0
+
+
+async def _month_km_before(driver_id, date_str, exclude_log_id=None):
+    """KM this driver already drove earlier in the same calendar month (completed trips)."""
+    q = {"driver_id": driver_id, "status": "completed", "type": {"$ne": "catchup_rent"},
+         "date": {"$regex": "^" + (date_str or "")[:7]}}
+    if exclude_log_id:
+        q["_id"] = {"$ne": ObjectId(str(exclude_log_id))}
+    total = 0
+    async for l in db.driver_odometer_logs.find(q, {"driven_today": 1}):
+        total += l.get("driven_today", 0) or 0
+    return total
+
+
 def _daily_overage(km_before_today, driven, daily_limit):
     """Extra KM added by this trip = (day total after trip over limit) - (day total before trip over limit)."""
     if not daily_limit or daily_limit <= 0:
@@ -4628,6 +4664,10 @@ async def _catchup_overage(org, did, rental, baseline_reading, reading):
         pass
     allowed_km = daily_limit * gap_days
     overage_km = max(0, diff_km - allowed_km) if daily_limit > 0 else 0
+    _today_iso = _today_ist().isoformat()
+    if _use_monthly_km(_today_iso):
+        overage_km = _daily_overage(await _month_km_before(did, _today_iso), diff_km,
+                                    _effective_monthly_limit(snap["monthly_km_limit"] if snap else 0, daily_limit))
     overage_charge = round(overage_km * overage_per_km, 2)
     return diff_km, overage_km, overage_charge
 
@@ -4914,7 +4954,7 @@ async def _rental_account(rental):
         rent_day_no = (today - date.fromisoformat(_oldest_unpaid)).days if _oldest_unpaid else 0
     except ValueError:
         rent_day_no = 0
-    _after_noon = datetime.now(IST).hour >= RENT_NOON_HOUR
+    _after_noon = datetime.now(IST).hour >= RENT_NOON_HOUR  # block threshold
     if rate > 0 and (rent_day_no > RENT_BLOCK_DAY or (rent_day_no == RENT_BLOCK_DAY and _after_noon)):
         status = "blocked"
     elif overdue >= 1 and rate > 0:
@@ -4992,7 +5032,7 @@ async def _rental_account(rental):
         # for the "3 days unpaid" breakdown and total on that screen.
         "blocked_dates": blocked_dates,
         # From 12:00 noon (IST) the unpaid-rent popup in the driver app cannot be closed.
-        "rent_popup_locked": bool(_after_noon and float(rent_due) > 0 and status != "blocked" and any(k < today_iso for k in rent_by_date)),
+        "rent_popup_locked": bool(float(rent_due) > 0 and status != "blocked"),
         "rent_day_no": rent_day_no,
         "blocked_rent_amount": blocked_rent_amount,
         "blocked_total_amount": blocked_total_amount,
@@ -5207,6 +5247,11 @@ async def _driver_payload(user):
         today_km_used = await _day_km_before(did, _today_ist().isoformat())
         out["driver"]["today_km_used"] = today_km_used
         out["driver"]["today_extra_km"] = _daily_overage(0, today_km_used, daily_limit_km)
+        _ti = _today_ist().isoformat()
+        _mk = await _month_km_before(did, _ti)
+        out["driver"]["month_km_used"] = _mk
+        out["driver"]["month_extra_km"] = _daily_overage(0, _mk, _effective_monthly_limit(monthly_km_limit, daily_limit_km))
+        out["driver"]["km_limit_mode"] = "monthly" if _use_monthly_km(_ti) else "daily"
         
         if plan and rental.get("package_category") not in ("commission", "salary"):
             if out["deposit"] and out["deposit"].get("status", "pending") == "pending":
@@ -6105,6 +6150,8 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
         daily_limit_km = _effective_daily_limit(daily_limit_km, monthly_limit_km)
         day_km_before = await _day_km_before(driver_id, log.get("date") or today, active_trip_id)
         overage_km = _daily_overage(day_km_before, driven, daily_limit_km)
+        if _use_monthly_km(log.get("date") or today):
+            overage_km = _daily_overage(await _month_km_before(driver_id, log.get("date") or today, active_trip_id), driven, _effective_monthly_limit(monthly_limit_km, daily_limit_km))
         overage_charge = round(overage_km * overage_per_km, 2)
         
         # UPDATED: today's rent is billed here, once per day, together with any extra KM.
@@ -6397,6 +6444,8 @@ async def submit_odometer(
         daily_limit_km = _effective_daily_limit(daily_limit_km, monthly_limit_km)
         day_km_before = await _day_km_before(user["id"], log.get("date") or today, active_trip_id)
         overage_km = _daily_overage(day_km_before, driven, daily_limit_km)
+        if _use_monthly_km(log.get("date") or today):
+            overage_km = _daily_overage(await _month_km_before(user["id"], log.get("date") or today, active_trip_id), driven, _effective_monthly_limit(monthly_limit_km, daily_limit_km))
         overage_charge = round(overage_km * overage_per_km, 2)
         
         # ALL driven KMs (including extra/overage) reduce the monthly total
@@ -7607,6 +7656,38 @@ async def pending_payments_signature(request: Request):
 
 app.include_router(api)
 
+# ─── MIDNIGHT RENT JOB ────────────────────────────────────────────────────
+# At 12:00 AM IST every day, roll every active rental account forward so the day
+# that just ended shows up as rent due, without anyone having to open the page.
+# _rental_account() is idempotent (a day already in rent_by_date is never added
+# twice), so a restart or a second run is harmless. OFF unless RENT_MIDNIGHT_JOB=1.
+async def _midnight_rent_job():
+    import os as _os
+    from datetime import datetime as _dt, timedelta as _td
+    while True:
+        try:
+            now = _dt.now(IST)
+            nxt = (now + _td(days=1)).replace(hour=0, minute=0, second=5, microsecond=0)
+            await asyncio.sleep(max(1, (nxt - now).total_seconds()))
+            if _os.environ.get("RENT_MIDNIGHT_JOB") != "1":
+                continue
+            rentals = await db.rentals.find({"status": "active"}).to_list(None)
+            ok = bad = 0
+            for r in rentals:
+                try:
+                    await _rental_account(r)
+                    ok += 1
+                except Exception as e:
+                    bad += 1
+                    logger.warning(f"midnight rent failed for rental {r.get('_id')}: {str(e)[:120]}")
+            logger.info(f"midnight rent job done: {ok} ok, {bad} failed")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"midnight rent job error: {str(e)[:150]}")
+            await asyncio.sleep(60)
+
+
 @app.on_event("startup")
 async def startup():
     indexes = [
@@ -7665,8 +7746,12 @@ async def startup():
     except Exception as e:
         logger.warning(f"driver_code backfill failed: {e}")
     # await seedlib.seed(db, authlib)  # disabled - do not reseed
+    app.state.midnight_rent_task = asyncio.create_task(_midnight_rent_job())
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    _t = getattr(app.state, "midnight_rent_task", None)
+    if _t:
+        _t.cancel()
     client.close()

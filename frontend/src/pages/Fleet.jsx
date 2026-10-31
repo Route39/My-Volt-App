@@ -23,7 +23,7 @@ export default function Fleet() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [view, setView] = useState("grid");
+  const [view, setView] = useState("list");
   const [q, setQ] = useState("");
   const [dq, setDq] = useState("");
   const [status, setStatus] = useState(params.get("status") || "all");
@@ -159,6 +159,7 @@ export default function Fleet() {
                 <th className="px-4 py-3 font-semibold">Vehicle</th>
                 <th className="px-4 py-3 font-semibold">Status</th><th className="px-4 py-3 font-semibold">Driver</th>
                 <th className="px-4 py-3 font-semibold">City</th>
+                <th className="px-4 py-3 font-semibold">VIN</th><th className="px-4 py-3 font-semibold">Rental Ends</th>
               </tr></thead>
               <tbody>
                 {items.map((v) => (
@@ -173,6 +174,8 @@ export default function Fleet() {
                       )}
                     </td>
                     <td className="px-4 py-3">{v.city}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-mv-muted">{v.vin_number || "—"}</td>
+                    <td className="px-4 py-3 text-amber-400">{(v.status === "rented" && v.rental_end) ? relativeEnd(v.rental_end) : <span className="text-mv-dim">—</span>}</td>
                   </tr>
                 ))}
               </tbody>

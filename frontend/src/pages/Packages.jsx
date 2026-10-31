@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Package, MapPin, Check, ArrowLeft, Edit2 } from "lucide-react";
+import { Package, MapPin, Check, ArrowLeft, Edit2, LayoutGrid, List as ListIcon } from "lucide-react";
 import api from "../lib/api";
 import { inr } from "../lib/format";
 import { toast } from "sonner";
@@ -30,6 +30,7 @@ export default function Packages() {
   const [editData, setEditData] = useState(null); // { city, type, pkg? }
   const [unlocked, setUnlocked] = useState(false);
   const [tab, setTab] = useState("rental"); // "rental" | "commission" | "salary"
+  const [layout, setLayout] = useState("cards"); // "cards" | "table"
 
   const fetchPackages = async () => {
     try {
@@ -108,12 +109,18 @@ export default function Packages() {
         </div>
       ) : (
         <div className="space-y-12">
-          {cities.map(city => {
+          <div className="flex justify-end">
+          <div className="inline-flex rounded-xl border border-mv-border overflow-hidden">
+            <button onClick={() => setLayout("cards")} data-testid="packages-cards-view" className={`w-10 h-10 flex items-center justify-center ${layout === "cards" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><LayoutGrid className="w-4 h-4" /></button>
+            <button onClick={() => setLayout("table")} data-testid="packages-table-view" className={`w-10 h-10 flex items-center justify-center ${layout === "table" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><ListIcon className="w-4 h-4" /></button>
+          </div>
+        </div>
+        {cities.map(city => {
             return (
               <div key={city}>
                 <h2 className="text-2xl font-bold text-mv-text mb-6 flex items-center gap-2"><MapPin className="w-6 h-6 text-mv-primary" /> {city}</h2>
                 {tab === "rental" && (
-                <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${typesForCity(city).length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
+                <div className={`${layout === "table" ? "hidden" : ""} grid grid-cols-1 md:grid-cols-2 gap-6 ${typesForCity(city).length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
                   {typesForCity(city).map(type => {
                     const pkg = packages.find(p => p.city === city && p.package_type === type);
                     const isActive = pkg && pkg.active;
@@ -151,8 +158,8 @@ export default function Packages() {
                             <span className="font-extrabold text-mv-primary text-xl">{isActive ? inr(pkg.amount) : "—"}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm">
-                            <span className="text-mv-muted">Daily Limit</span>
-                            <span className="font-semibold text-mv-text">{isActive ? `${pkg.daily_limit_km || Math.round((pkg.monthly_km_limit || 0) / 30)} km/day` : "—"}</span>
+                            <span className="text-mv-muted">Monthly Limit</span>
+                            <span className="font-semibold text-mv-text">{isActive ? `${pkg.monthly_km_limit || (pkg.daily_limit_km || 0) * 30} km/month` : "—"}</span>
                           </div>
                           <div className="flex justify-between items-center text-sm">
                             <span className="text-mv-muted">Extra KM Fee</span>
@@ -169,9 +176,58 @@ export default function Packages() {
                 </div>
                 )}
 
+                {layout === "table" && (
+                <div className="mv-card overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-mv-border text-left mv-label">
+                        <th className="px-4 py-3">Package</th>
+                        <th className="px-4 py-3">Type</th>
+                        {tab === "rental" && (<>
+                          <th className="px-4 py-3">Daily Rate</th>
+                          <th className="px-4 py-3">Monthly Limit</th>
+                          <th className="px-4 py-3">Extra KM Fee</th>
+                          <th className="px-4 py-3">Security Deposit</th>
+                        </>)}
+                        {tab === "commission" && <th className="px-4 py-3">Commission</th>}
+                        {tab === "salary" && <th className="px-4 py-3">Salary</th>}
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right">Edit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(tab === "rental" ? typesForCity(city) : [tab === "commission" ? COMMISSION_TYPE : SALARY_TYPE]).map(type => {
+                        const pkg = packages.find(p => p.city === city && p.package_type === type);
+                        const isActive = pkg && pkg.active;
+                        const isConfigured = !!pkg;
+                        return (
+                          <tr key={type} onDoubleClick={() => isConfigured ? toggleActive(pkg) : null}
+                            className={`border-b border-mv-border/50 select-none ${isConfigured ? "cursor-pointer hover:bg-mv-surface2" : "opacity-60"}`}>
+                            <td className="px-4 py-3 font-semibold text-mv-text">{pkg?.name || defaultPkgName(type)}</td>
+                            <td className="px-4 py-3 text-mv-muted">{type}</td>
+                            {tab === "rental" && (<>
+                              <td className="px-4 py-3 font-bold text-mv-primary">{isActive ? inr(pkg.amount) : "—"}</td>
+                              <td className="px-4 py-3">{isActive ? `${pkg.monthly_km_limit || (pkg.daily_limit_km || 0) * 30} km/month` : "—"}</td>
+                              <td className="px-4 py-3">{isActive ? `${inr(pkg.overage_per_km)}/km` : "—"}</td>
+                              <td className="px-4 py-3">{isActive ? inr(pkg.deposit || 5000) : "—"}</td>
+                            </>)}
+                            {tab === "commission" && <td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.commission_percent != null ? `${pkg.commission_percent}%` : "—"}</td>}
+                            {tab === "salary" && <td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.salary_amount != null ? inr(pkg.salary_amount) : "—"}</td>}
+                            <td className="px-4 py-3">{isActive ? <span className="text-emerald-600 font-semibold">Active</span> : <span className="text-amber-500 font-semibold">Coming Soon</span>}</td>
+                            <td className="px-4 py-3 text-right">
+                              <button onClick={(e) => { e.stopPropagation(); handleEdit(city, type, pkg); }} className="p-2 text-mv-muted hover:text-mv-primary bg-mv-surface2 rounded-full"><Edit2 className="w-4 h-4" /></button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                )}
+
                 {/* Commission OR Salary package (1 per city), chosen by the tab */}
                 {tab !== "rental" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <div className={`${layout === "table" ? "hidden " : ""}grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6`}>
                   {[tab === "commission" ? COMMISSION_TYPE : SALARY_TYPE].map(type => {
                     const pkg = packages.find(p => p.city === city && p.package_type === type);
                     const isActive = pkg && pkg.active;
@@ -238,7 +294,7 @@ function PackageForm({ editData, onBack, onSaved }) {
     city: city,
     amount: pkg?.amount || "",
     deposit: pkg?.deposit || 5000,
-    daily_limit_km: pkg?.daily_limit_km || (pkg?.monthly_km_limit ? Math.round(pkg.monthly_km_limit / 30) : ""),
+    monthly_km_limit: pkg?.monthly_km_limit || (pkg?.daily_limit_km ? pkg.daily_limit_km * 30 : ""),
     overage_per_km: pkg?.overage_per_km || "",
     active: pkg?.active ?? true,
     commission_percent: pkg?.commission_percent ?? "",
@@ -248,7 +304,7 @@ function PackageForm({ editData, onBack, onSaved }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleLimitChange = (e) => set("daily_limit_km", e.target.value);
+  const handleLimitChange = (e) => set("monthly_km_limit", e.target.value);
 
   const isCommission = form.package_type === COMMISSION_TYPE;
   const isSalary = form.package_type === SALARY_TYPE;
@@ -259,7 +315,7 @@ function PackageForm({ editData, onBack, onSaved }) {
       if (!form.name || (isCommission && form.commission_percent === "") || (isSalary && form.salary_amount === "")) {
         return toast.error("Please fill all fields accurately");
       }
-    } else if (!form.name || form.amount === "" || form.daily_limit_km === "" || form.overage_per_km === "" || form.deposit === "") {
+    } else if (!form.name || form.amount === "" || form.monthly_km_limit === "" || form.overage_per_km === "" || form.deposit === "") {
       return toast.error("Please fill all fields accurately");
     }
     setSaving(true);
@@ -277,8 +333,8 @@ function PackageForm({ editData, onBack, onSaved }) {
         city: form.city,
         amount: Number(form.amount),
         deposit: Number(form.deposit),
-        daily_limit_km: Number(form.daily_limit_km),
-        monthly_km_limit: Number(form.daily_limit_km) * 30, // legacy field kept in sync
+        daily_limit_km: Math.round(Number(form.monthly_km_limit) / 30), // derived, used by daily checks
+        monthly_km_limit: Number(form.monthly_km_limit),
         overage_per_km: Number(form.overage_per_km),
         active: form.active
       };
@@ -421,10 +477,10 @@ function PackageForm({ editData, onBack, onSaved }) {
             </div>
             
             <div className="space-y-1">
-              <label className="block text-sm font-bold text-mv-text mb-1">Daily KM Limit</label>
+              <label className="block text-sm font-bold text-mv-text mb-1">Monthly KM Limit</label>
               <input 
                 type="number" 
-                value={form.daily_limit_km} 
+                value={form.monthly_km_limit} 
                 onChange={handleLimitChange} 
                 className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors"
                 placeholder="5000" 

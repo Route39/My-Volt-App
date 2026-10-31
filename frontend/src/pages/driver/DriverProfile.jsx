@@ -266,8 +266,8 @@ export default function DriverProfile() {
               <span className="text-slate-800 font-extrabold text-sm">{inr(rental.daily_rate || 0)} / day</span>
             </div>
             <div className="rounded-xl bg-slate-50 p-2.5 border border-slate-100">
-              <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Daily Limit</span>
-              <span className="text-slate-800 font-extrabold text-sm">{rental.daily_limit_km ? `${rental.daily_limit_km} km` : "Unlimited"}</span>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Monthly Limit</span>
+              <span className="text-slate-800 font-extrabold text-sm">{(rental.monthly_km_limit || rental.daily_limit_km) ? `${rental.monthly_km_limit || rental.daily_limit_km * 30} km` : "Unlimited"}</span>
             </div>
           </div>
         )}

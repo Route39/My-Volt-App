@@ -20,14 +20,17 @@ export default function Drivers() {
   const [items, setItems] = useState(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState(params.get("status") || "all");
+  const [pkgCat, setPkgCat] = useState(params.get("package_category") || "all");
   const [city, setCity] = useState(lockedCity || params.get("city") || gCity);
-  const [view, setView] = useState("cards");
+  const [view, setView] = useState("list");
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
   const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     const s = params.get("status");
     if (s) setStatus(s);
+    const pc = params.get("package_category");
+    if (pc) setPkgCat(pc);
     const c = params.get("city");
     if (c) setCity(c);
   }, [params]);
@@ -37,6 +40,7 @@ export default function Drivers() {
     const p = {};
     if (status !== "all" && status !== "temporary" && status !== "permanent") p.status = status;
     if (city !== "all") p.city = city;
+    if (pkgCat !== "all") p.package_category = pkgCat;
     if (q) p.q = q;
     try {
       const { data } = await api.get("/drivers", { params: p });
@@ -53,7 +57,7 @@ export default function Drivers() {
       console.error(e);
       setItems([]);
     }
-  }, [status, city, q]);
+  }, [status, city, q, pkgCat]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
   useEffect(() => setCity(gCity), [gCity]);
 
@@ -106,6 +110,13 @@ export default function Drivers() {
           ["temporary", "Temporarily Blocked"],
           ["permanent", "Permanently Blocked"],
         ].map(([s, label]) => <FilterChip key={s} active={status === s} onClick={() => setStatus(s)} data-testid={`driver-filter-${s}`}>{label}</FilterChip>)}
+        <span className="w-px h-6 bg-mv-border self-center mx-1" />
+        {[
+          ["all", "All Types"],
+          ["rental", "Rental"],
+          ["commission", "Commission"],
+          ["salary", "Salary"],
+        ].map(([c, label]) => <FilterChip key={c} active={pkgCat === c} onClick={() => setPkgCat(c)} data-testid={`driver-pkg-${c}`}>{label}</FilterChip>)}
       </div>
 
       {!items && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-40 rounded-2xl" />)}</div>}
@@ -181,7 +192,7 @@ export default function Drivers() {
       {items && items.length > 0 && view === "list" && (
         <div className="mv-card overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="border-b border-mv-border text-left mv-label"><th className="px-4 py-3">Driver</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Package</th><th className="px-4 py-3">City</th><th className="px-4 py-3">KYC</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
+            <thead><tr className="border-b border-mv-border text-left mv-label"><th className="px-4 py-3">Driver</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Vehicle</th><th className="px-4 py-3">Package</th><th className="px-4 py-3">City</th><th className="px-4 py-3">Supervisor</th><th className="px-4 py-3">Manager</th><th className="px-4 py-3">KYC</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
             <tbody>{items.map((d) => (
               <tr key={d.id} onClick={() => nav(`/drivers/${d.id}`)} className="border-b border-mv-border/50 hover:bg-mv-elevated cursor-pointer transition-colors">
                 <td className="px-4 py-3 font-medium flex items-center gap-2"><Avatar className="w-7 h-7"><AvatarImage src={d.avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{d.name[0]}</AvatarFallback></Avatar><div>{d.name}{d.driver_code && <div className="text-[11px] font-mono text-mv-primary">{d.driver_code}</div>}</div></td>
@@ -195,6 +206,8 @@ export default function Drivers() {
                 </td>
                 <td className="px-4 py-3 text-mv-muted">{d.package_name || "N/A"}</td>
                 <td className="px-4 py-3">{d.city}</td>
+                <td className="px-4 py-3 text-mv-muted">{d.supervisor_name || "—"}</td>
+                <td className="px-4 py-3 text-mv-muted">{d.manager_name || "—"}</td>
                 <td className="px-4 py-3"><KycStatusChip status={d.kyc_status || "pending"} /></td>
                 <td className="px-4 py-3">
                   <StatusChip status={d.status} />
@@ -299,7 +312,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
   const [form, setForm] = useState({ 
     name: "", phone: "", city: lockedCity || "Chennai", address: "", 
     emergency_contact: "", license_number: "", status: "active",
-    package_name: "", package_rate: 0, vehicle_id: "", supervisor_id: ""
+    package_name: "", package_rate: 0, vehicle_id: "", supervisor_id: "", manager_name: ""
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -309,7 +322,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
     setForm({
       name: "", phone: "", city: lockedCity || "Chennai", address: "", 
       emergency_contact: "", license_number: "", status: "active",
-      package_name: "", package_rate: 0, vehicle_id: "", supervisor_id: ""
+      package_name: "", package_rate: 0, vehicle_id: "", supervisor_id: "", manager_name: ""
     });
   }, [lockedCity]);
 
