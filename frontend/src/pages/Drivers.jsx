@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, Plus, Users, Car, MapPin, Phone, KeyRound, LayoutGrid, List, Upload, Download } from "lucide-react";
+import { Search, Plus, Users, Car, MapPin, Phone, KeyRound, LayoutGrid, List, Upload, Download, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
@@ -25,6 +25,9 @@ export default function Drivers() {
   const [view, setView] = useState("list");
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
   const [showImport, setShowImport] = useState(false);
+  const [delTarget, setDelTarget] = useState(null);   // driver selected for deletion (popup open when set)
+  const [delUnpaid, setDelUnpaid] = useState(null);   // unpaid-balance message from backend (409)
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const s = params.get("status");
@@ -62,6 +65,26 @@ export default function Drivers() {
   useEffect(() => setCity(gCity), [gCity]);
 
   const canEdit = ["admin", "city_manager"].includes(user?.role);
+
+  const openDelete = (d) => { setDelUnpaid(null); setDelTarget(d); };
+  const closeDelete = () => { if (deleting) return; setDelTarget(null); setDelUnpaid(null); };
+  const runDelete = async (force = false) => {
+    if (!delTarget) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/drivers/${delTarget.id}?force=${force}`);
+      toast.success("Driver deleted successfully");
+      setDelTarget(null);
+      setDelUnpaid(null);
+      load();
+    } catch (err) {
+      const detail = err.response?.data?.detail || "Failed to delete driver";
+      if (err.response?.status === 409) setDelUnpaid(detail);
+      else toast.error(detail);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div>
@@ -131,7 +154,18 @@ export default function Drivers() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {items.map((d, i) => (
             <button key={d.id} onClick={() => nav(`/drivers/${d.id}`)} data-testid={`driver-card-${d.id}`}
-                    className="mv-card mv-card-hover p-5 text-left mv-rise" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>
+                    className="mv-card mv-card-hover p-5 text-left mv-rise relative" style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}>
+              <span
+                role="button"
+                tabIndex={0}
+                title="Delete driver"
+                data-testid={`card-delete-driver-${d.id}`}
+                onClick={(e) => { e.stopPropagation(); openDelete(d); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); openDelete(d); } }}
+                className="absolute bottom-3 right-3 p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </span>
               <div className="flex items-center gap-3">
                 <Avatar className="w-12 h-12"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-sm">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
                 <div className="min-w-0">
@@ -227,22 +261,51 @@ export default function Drivers() {
                       Unblock
                     </button>
                   )}
-                  {/* Delete driver button removed (drivers can no longer be deleted from the list)
-                  <button onClick={async () => {
-                    if(window.confirm("Delete driver completely?")) {
-                      await api.delete(`/drivers/${d.id}`);
-                      load();
-                    }
-                  }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                  
+                  <button title="Delete driver" data-testid="list-delete-driver-btn" onClick={() => openDelete(d)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
-                  */}
+
                 </td>
               </tr>
             ))}</tbody>
           </table>
         </div>
       )}
+
+      <Dialog open={!!delTarget} onOpenChange={(o) => { if (!o) closeDelete(); }}>
+        <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-red-600">Delete Driver</DialogTitle>
+          </DialogHeader>
+          {delUnpaid ? (
+            <div className="space-y-4">
+              <p className="text-sm text-mv-muted">{delUnpaid}</p>
+              <p className="text-sm text-mv-muted">
+                You can still force delete <strong>{delTarget?.name}</strong>. All their data, including unpaid dues, will be permanently removed.
+              </p>
+              <div className="flex justify-end gap-2">
+                <GhostBtn onClick={closeDelete} disabled={deleting}>Cancel</GhostBtn>
+                <PrimaryBtn onClick={() => runDelete(true)} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">
+                  {deleting ? "Deleting..." : "Force Delete"}
+                </PrimaryBtn>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-mv-muted">
+                Are you sure you want to delete this driver <strong>{delTarget?.name}</strong>? All their rentals, payments and records will be deleted. This cannot be undone.
+              </p>
+              <div className="flex justify-end gap-2">
+                <GhostBtn onClick={closeDelete} disabled={deleting}>Cancel</GhostBtn>
+                <PrimaryBtn onClick={() => runDelete(false)} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white">
+                  {deleting ? "Deleting..." : "Delete"}
+                </PrimaryBtn>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <AddDriverDialog open={showAdd} setOpen={setShowAdd} onDone={() => { setShowAdd(false); load(); }} />
       <ImportDriversDialog open={showImport} setOpen={setShowImport} onDone={load} />
