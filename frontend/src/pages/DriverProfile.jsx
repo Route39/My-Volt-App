@@ -679,6 +679,7 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
     package: openR?.package_name || openR?.plan_name || driver?.package_name,
     start: openR?.start, end: openR?.end, code: openR?.rental_code,
     hasRental: !!openR, state: openR?.status || driver?.rental_status,
+    category: openR?.package_category || driver?.package_category,
   } : null;
 
   useEffect(() => {
@@ -697,7 +698,7 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
       return;
     }
     setSaving(true);
-    try { await api.put(`/drivers/${driver.id}`, form); toast.success("Driver updated ✓"); onDone(); } catch (e) { toast.error(e.response?.data?.detail || "Failed to update"); } finally { setSaving(false); }
+    try { const { package_category, ...payload } = form; await api.put(`/drivers/${driver.id}`, payload); toast.success("Driver updated ✓"); onDone(); } catch (e) { toast.error(e.response?.data?.detail || "Failed to update"); } finally { setSaving(false); }
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -723,7 +724,7 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
           <div className="col-span-2"><Field label="Address"><TextInput value={form.address} onChange={(e) => set("address", e.target.value)} /></Field></div>
           <DriverAssignFields
             city={form.city} form={form} set={set}
-            assigned={assigned}
+            assigned={assigned} withPackageType
           />
         </div>
         <div className="flex justify-end pt-1"><PrimaryBtn onClick={save} disabled={saving}>Save Changes</PrimaryBtn></div>

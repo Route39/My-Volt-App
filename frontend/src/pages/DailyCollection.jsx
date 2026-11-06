@@ -362,7 +362,7 @@ export default function DailyCollection() {
                 <th className="px-5 py-4">Vehicle</th>
                 <th className="px-5 py-4">{pkgTab === "commission" ? "Commission %" : "Salary"}</th>
                 <th className="px-5 py-4">Total Collected</th>
-                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission Amount" : "Salary Paid"}</th>
+                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission Amount" : "Collection Amount Paid"}</th>
                 <th className="px-5 py-4">Trip Screenshot</th>
                 <th className="px-5 py-4">Settled / Unsettled</th>
               </tr>

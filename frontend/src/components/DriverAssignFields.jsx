@@ -94,6 +94,9 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
                 </SelectContent>
               </Select>
             </Field>
+            <Field label="Package Type">
+              <TextInput value={assigned.category === "commission" ? "Commission Package" : assigned.category === "salary" ? "Salary Package" : "Rental Package"} readOnly disabled />
+            </Field>
             <Field label="Package">
               <TextInput value={assigned.package || "—"} readOnly disabled />
             </Field>
@@ -103,7 +106,7 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
             <Field label="End Date">
               <TextInput value={assigned.end && assigned.end !== "Ongoing" ? String(assigned.end).slice(0, 10) : "Ongoing"} readOnly disabled />
             </Field>
-            <div className="col-span-2">
+            <div>
               <Field label="Rental Status">
                 {assigned.hasRental ? (
                   <Select value={form.rental_state || assigned.state || undefined} onValueChange={(v) => set("rental_state", v)}>

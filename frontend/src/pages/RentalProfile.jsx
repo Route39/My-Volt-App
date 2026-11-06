@@ -80,13 +80,28 @@ function EditRentalDialog({ open, setOpen, rental, onDone }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open && rental) setForm({ start: rental.start?.slice(0, 16), end: rental.end?.slice(0, 16), amount: rental.amount, deposit: rental.deposit, status: rental.status });
+    // end can be "Ongoing" and start can be date-only ("YYYY-MM-DD"): only real dates go into the datetime-local inputs
+    const toLocalInput = (v) => {
+      if (!v || v === "Ongoing") return "";
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`) : new Date(v);
+      if (isNaN(d.getTime())) return "";
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+    if (open && rental) setForm({ start: toLocalInput(rental.start), end: toLocalInput(rental.end), amount: rental.amount, deposit: rental.deposit, status: rental.status });
   }, [open, rental]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const save = async () => {
     setSaving(true);
-    try { await api.put(`/rentals/${rental.id}`, { ...form, start: new Date(form.start).toISOString(), end: form.end ? new Date(form.end).toISOString() : null, amount: Number(form.amount), deposit: Number(form.deposit) }); toast.success("Rental updated ✓"); onDone(); } catch (e) { toast.error("Failed to update"); } finally { setSaving(false); }
+    try {
+      const startD = form.start ? new Date(form.start) : null;
+      const endD = form.end ? new Date(form.end) : null;
+      if (!startD || isNaN(startD.getTime())) { toast.error("Enter a valid start time"); return; }
+      if (endD && isNaN(endD.getTime())) { toast.error("Enter a valid end time"); return; }
+      await api.put(`/rentals/${rental.id}`, { ...form, start: startD.toISOString(), end: endD ? endD.toISOString() : "Ongoing", amount: Number(form.amount), deposit: Number(form.deposit) });
+      toast.success("Rental updated ✓"); onDone();
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to update"); } finally { setSaving(false); }
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>

@@ -24,7 +24,7 @@ export default function Login() {
       <div className="hidden lg:flex flex-col justify-between w-1/2 relative overflow-hidden p-12 border-r border-mv-border bg-gradient-to-br from-white via-blue-50/50 to-white">
         <div className="absolute inset-0 bg-gradient-to-t from-white/70 via-transparent to-white/50" />
         <div className="relative flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
             <Zap className="w-6 h-6 text-white" fill="white" />
           </div>
           <div>
@@ -34,7 +34,7 @@ export default function Login() {
         </div>
         <div className="relative">
           <h1 className="font-display text-5xl font-bold leading-tight tracking-tight">
-            Manage your work.<br /><span className="text-mv-primary">All in one platform.</span>
+            Manage your work.<br /><span className="text-emerald-600">All in one platform.</span>
           </h1>
           <p className="text-mv-muted mt-6 max-w-md text-lg">
             One simple platform that adapts to the way your business works.
@@ -47,7 +47,7 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-sm mv-rise">
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
               <Zap className="w-6 h-6 text-white" fill="white" />
             </div>
             <div className="font-display font-extrabold text-2xl">MyVolt</div>
@@ -71,7 +71,7 @@ export default function Login() {
             </div>
             {error && <div data-testid="login-error" className="text-sm text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</div>}
             <button type="submit" disabled={loading} data-testid="login-submit"
-                    className="w-full h-11 rounded-xl bg-mv-primary hover:bg-blue-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+                    className="w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
               {loading && <Loader2 className="w-4 h-4 animate-spin" />} Sign In
             </button>
           </form>

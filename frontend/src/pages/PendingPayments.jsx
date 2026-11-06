@@ -95,6 +95,10 @@ export default function PendingPayments() {
     return { rent, deposit, total: rent + deposit };
   }, [filtered]);
 
+  // Commission / Salary tabs: the rent column becomes "Commission Pending" / "Collection Pending" and Deposit Pending is hidden
+  const isPkgOnly = pkgType === "commission" || pkgType === "salary";
+  const rentHeader = pkgType === "commission" ? "Commission Pending" : pkgType === "salary" ? "Collection Pending" : pkgType === "all" ? "Pending Payment" : "Daily Rent Pending";
+
   return (
     <div>
       <PageHeader
@@ -115,6 +119,16 @@ export default function PendingPayments() {
         ))}
       </div>
 
+      {/* Package tabs */}
+      <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="pp-package-tabs">
+        {[["all", "All Packages"], ["rental", "Rental Package"], ["commission", "Commission Package"], ["salary", "Salary Package"]].map(([k, l]) => (
+          <button key={k} type="button" onClick={() => { setPkgType(k); setPkg("all"); }} data-testid={`pp-tab-${k}`}
+            className={`h-9 px-4 rounded-full text-sm font-medium transition-colors ${pkgType === k ? "bg-mv-primary text-white" : "border border-mv-border text-mv-muted hover:bg-mv-elevated"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="flex flex-col lg:flex-row gap-3 mb-4">
         <div className="relative flex-1 max-w-md">
@@ -122,7 +136,7 @@ export default function PendingPayments() {
           <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone no. or driver ID…" className="pl-9" data-testid="pp-search" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={pkgType} onValueChange={(v) => { setPkgType(v); setPkg("all"); }}>
+          {/* <Select value={pkgType} onValueChange={(v) => { setPkgType(v); setPkg("all"); }}>
             <SelectTrigger className="w-48 h-10 rounded-xl bg-mv-surface border-mv-border" data-testid="pp-package-type">
               <SelectValue placeholder="Select package type" />
             </SelectTrigger>
@@ -132,7 +146,7 @@ export default function PendingPayments() {
               <SelectItem value="commission">Commission Package</SelectItem>
               <SelectItem value="salary">Salary Package</SelectItem>
             </SelectContent>
-          </Select>
+          </Select> */}
           <Select value={pkg} onValueChange={setPkg} disabled={pkgType === "all"}>
             <SelectTrigger className="w-48 h-10 rounded-xl bg-mv-surface border-mv-border" data-testid="pp-package">
               <SelectValue placeholder="Select package" />
@@ -185,8 +199,8 @@ export default function PendingPayments() {
                 <th className="px-4 py-3">Driver Name</th>
                 <th className="px-4 py-3">Vehicle No.</th>
                 <th className="px-4 py-3">Rental Package</th>
-                <th className="px-4 py-3">Daily Rent Pending</th>
-                <th className="px-4 py-3">Deposit Pending</th>
+                <th className="px-4 py-3">{rentHeader}</th>
+                {!isPkgOnly && <th className="px-4 py-3">Deposit Pending</th>}
                 <th className="px-4 py-3">Supervisor</th>
               </tr>
             </thead>
@@ -213,11 +227,24 @@ export default function PendingPayments() {
                     ) : "—"}
                   </td>
                   <td className="px-4 py-3">
-                    {r.rent_pending > 0 ? <span className="font-semibold text-red-500">{inr(r.rent_pending)}</span> : <span className="text-mv-dim">—</span>}
+                    {r.rent_pending > 0 ? (
+                      <div>
+                        <span className="font-semibold text-red-500">{inr(r.rent_pending)}</span>
+                        <div className="text-[11px] text-mv-dim">Pending Rent</div>
+                      </div>
+                    )
+                      : (r.pkg_pending_dates || []).length > 0 ? (
+                        <div>
+                          <span className="font-semibold text-red-500">{r.package_category === "commission" ? "Pending Commission" : "Pending Collection"}</span>
+                          {r.pkg_pending_dates.map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}
+                        </div>
+                      ) : <span className="text-mv-dim">—</span>}
                   </td>
-                  <td className="px-4 py-3">
-                    {r.deposit_pending > 0 ? <span className="font-semibold text-red-500">{inr(r.deposit_pending)} pending</span> : <span className="text-mv-dim">—</span>}
-                  </td>
+                  {!isPkgOnly && (
+                    <td className="px-4 py-3">
+                      {r.deposit_pending > 0 ? <span className="font-semibold text-red-500">{inr(r.deposit_pending)} pending</span> : <span className="text-mv-dim">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-mv-muted">{r.supervisor_name || "—"}</td>
                 </tr>
               ))}

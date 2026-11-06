@@ -1080,6 +1080,10 @@ async def _create_driver_rental(user, org, driver_id, driver, vehicle, plan, sta
     if state == "closed":
         doc["closed_at"] = now_iso()
     res = await db.rentals.insert_one(doc)
+    if state == "pending_payment":   # vehicle is assigned to the driver -> show it as rented with this rental's details
+        await db.vehicles.update_one({"_id": vehicle["_id"]}, {"$set": {
+            "status": "rented", "current_driver_id": driver_id, "current_driver_name": driver["name"],
+            "current_rental_id": str(res.inserted_id), "current_rental_code": code, "rental_end": doc["end"]}})
     await log_audit(user, "rental_created", "rental", str(res.inserted_id), f"Rental {code} created for {driver['name']} ({state})")
 
 
@@ -1108,7 +1112,7 @@ async def _set_rental_state(user, rental, state):
         await db.drivers.update_one({"_id": oid(did)}, {"$set": {"rental_status": "suspended"}})
     elif state == "closed":
         await db.rentals.update_one({"_id": rental["_id"]}, {"$set": {"status": "closed", "closed_at": now_iso()}})
-        await db.vehicles.update_one({"_id": oid(rental["vehicle_id"])}, {"$set": {
+        await db.vehicles.update_one({"_id": oid(rental["vehicle_id"]), "current_driver_id": {"$in": [did, None, ""]}}, {"$set": {
             "status": "available", "current_driver_id": None, "current_driver_name": None,
             "current_rental_id": None, "current_rental_code": None, "rental_end": None}})
         await db.drivers.update_one({"_id": oid(did)}, {"$set": {"rental_status": "none"}})
@@ -1346,9 +1350,7 @@ async def _swap_driver_vehicle(user, org, did, driver, open_rental, new_vehicle)
     Package, dates and payments stay as they are; only the vehicle changes."""
     nvid = str(new_vehicle["_id"])
     old_vid = (open_rental or {}).get("vehicle_id") or driver.get("current_vehicle_id")
-    state = (open_rental or {}).get("status") or driver.get("rental_status")
-    holds_vehicle = state in ("active", "suspended")   # same rule as when a rental is created
-    if holds_vehicle and old_vid:
+    if old_vid and old_vid != nvid:
         # free the old vehicle (only if it was held by this driver)
         await db.vehicles.update_one(
             {"_id": oid(old_vid), "current_driver_id": {"$in": [did, None, ""]}},
@@ -1357,12 +1359,11 @@ async def _swap_driver_vehicle(user, org, did, driver, open_rental, new_vehicle)
     if open_rental:
         await db.rentals.update_one({"_id": open_rental["_id"]}, {"$set": {
             "vehicle_id": nvid, "vehicle_number": new_vehicle["vehicle_number"]}})
-    if holds_vehicle:
-        await db.vehicles.update_one({"_id": new_vehicle["_id"]}, {"$set": {
-            "status": "rented", "current_driver_id": did, "current_driver_name": driver.get("name"),
-            "current_rental_id": str(open_rental["_id"]) if open_rental else None,
-            "current_rental_code": (open_rental or {}).get("rental_code"),
-            "rental_end": (open_rental or {}).get("end")}})
+    await db.vehicles.update_one({"_id": new_vehicle["_id"]}, {"$set": {
+        "status": "rented", "current_driver_id": did, "current_driver_name": driver.get("name"),
+        "current_rental_id": str(open_rental["_id"]) if open_rental else None,
+        "current_rental_code": (open_rental or {}).get("rental_code"),
+        "rental_end": (open_rental or {}).get("end")}})
     await db.drivers.update_one({"_id": oid(did)}, {"$set": {
         "current_vehicle_id": nvid, "current_vehicle_number": new_vehicle["vehicle_number"]}})
     await db.driver_vehicle_assignments.update_many({"driver_id": did, "end": None}, {"$set": {"end": now_iso()}})
@@ -2567,20 +2568,17 @@ async def assign_vehicle(did: str, body: dict, request: Request):
         await db.rentals.update_one({"_id": _open_r["_id"]}, {"$set": {
             "vehicle_id": body["vehicle_id"], "vehicle_number": vehicle["vehicle_number"]}})
     # A driver with an active / suspended rental holds the vehicle: the previous one becomes available, the new one rented
-    _state = (_open_r or {}).get("status") or driver.get("rental_status")
-    _holds = _state in ("active", "suspended")
     _old_vid = (_open_r or {}).get("vehicle_id") or driver.get("current_vehicle_id")
-    if _holds and _old_vid and _old_vid != body["vehicle_id"]:
+    if _old_vid and _old_vid != body["vehicle_id"]:
         await db.vehicles.update_one(
             {"_id": oid(_old_vid), "current_driver_id": {"$in": [did, None, ""]}},   # only if this driver was holding it
             {"$set": {"status": "available", "current_driver_id": None, "current_driver_name": None,
                       "current_rental_id": None, "current_rental_code": None, "rental_end": None}})
-    _veh_set = {"current_driver_id": did, "current_driver_name": driver["name"]}
-    if _holds:
-        _veh_set.update({"status": "rented",
-                         "current_rental_id": str(_open_r["_id"]) if _open_r else None,
-                         "current_rental_code": (_open_r or {}).get("rental_code"),
-                         "rental_end": (_open_r or {}).get("end")})
+    # Any vehicle assigned to a driver is "rented" and carries that driver's rental details
+    _veh_set = {"status": "rented", "current_driver_id": did, "current_driver_name": driver["name"],
+                "current_rental_id": str(_open_r["_id"]) if _open_r else None,
+                "current_rental_code": (_open_r or {}).get("rental_code"),
+                "rental_end": (_open_r or {}).get("end")}
     await db.vehicles.update_one({"_id": oid(body["vehicle_id"])}, {"$set": _veh_set})
     await log_audit(user, "driver_assigned", "driver", did, f"{driver['name']} assigned to {vehicle['vehicle_number']}")
     return {"ok": True}
@@ -2633,6 +2631,23 @@ async def update_plan(pid: str, body: dict, request: Request):
     if body.get("package_type") in ("Commission", "Salary"):
         body["deposit"] = 0   # commission / salary packages carry no security deposit
     old_plan = await db.rental_plans.find_one(org_filter(user, {"_id": oid(pid)}))
+    # Commission %: remember each change with the day it was made, so earlier / pending days keep the % they were earned at
+    if old_plan and body.get("commission_percent") is not None:
+        try:
+            _new_cp = float(body["commission_percent"])
+            _old_cp = old_plan.get("commission_percent")
+            if _old_cp is not None and float(_old_cp) != _new_cp:
+                _hist = list(old_plan.get("commission_history") or [])
+                if not _hist:
+                    _hist.append({"from": "0000-01-01", "percent": float(_old_cp)})
+                _today_iso = _today_ist().isoformat()
+                if _hist[-1].get("from") == _today_iso:
+                    _hist[-1]["percent"] = _new_cp        # changed again on the same day
+                else:
+                    _hist.append({"from": _today_iso, "percent": _new_cp})
+                body["commission_history"] = _hist
+        except (TypeError, ValueError):
+            pass
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
     
 # Sync new amount to every driver NOT currently on an active trip. Owing rent for
@@ -2845,11 +2860,17 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
         # Commission / Salary package: no deposit; their paid collections (trip screenshots) are shown per day
         _pkg_cat = r.get("package_category") or "rental"
         _coll_by_date = {}
+        _cp_plan = None
         if _pkg_cat != "rental":
             deposit = 0
             deposit_paid = 0
             async for _c in db.package_collections.find({"organization_id": user.get("organization_id"), "driver_id": r["driver_id"], "status": "paid"}):
                 _coll_by_date[_c.get("for_date")] = _c
+            if _pkg_cat == "commission" and r.get("plan_id"):   # package of this rental: its % history gives each day's %
+                try:
+                    _cp_plan = await db.rental_plans.find_one({"_id": oid(r["plan_id"])})
+                except Exception:
+                    _cp_plan = None
 
         # Dates on which a split-deposit part was paid (partial amount / remaining amount):
         # each of these dates must have a Daily Collection row so the Deposit column shows it.
@@ -3254,7 +3275,11 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "prev_day_status": ("week_off" if (d - timedelta(days=1)).strftime("%Y-%m-%d") in week_off_set
                                             else "paid_leave" if (d - timedelta(days=1)).strftime("%Y-%m-%d") in paid_leave_set
                                             else None),
-                        "commission_percent": r.get("commission_percent"),
+                        # commission rows: the % that applied on this day (a paid day keeps the % it was paid at)
+                        "commission_percent": (
+                            (_coll_by_date[d_str].get("commission_percent") if d_str in _coll_by_date and _coll_by_date[d_str].get("commission_percent") is not None
+                             else _commission_percent_on(_cp_plan, r.get("commission_percent"), d_str))
+                            if _pkg_cat == "commission" else r.get("commission_percent")),
                         "salary_amount": r.get("salary_amount"),
                         "collection": _coll_view(_coll_by_date.get(d_str)) if idx == 0 else None,
                         # yesterday's collection payment (settled on this day's row)
@@ -3489,7 +3514,7 @@ async def close_rental(rid: str, request: Request):
     if not r:
         raise HTTPException(status_code=404, detail="Rental not found")
     await db.rentals.update_one({"_id": oid(rid)}, {"$set": {"status": "closed", "closed_at": now_iso()}})
-    await db.vehicles.update_one({"_id": oid(r["vehicle_id"])}, {"$set": {
+    await db.vehicles.update_one({"_id": oid(r["vehicle_id"]), "current_driver_id": {"$in": [r["driver_id"], None, ""]}}, {"$set": {
         "status": "available", "current_driver_id": None, "current_driver_name": None,
         "current_rental_id": None, "current_rental_code": None, "rental_end": None}})
     await db.drivers.update_one({"_id": oid(r["driver_id"])}, {"$set": {"rental_status": "none"}})
@@ -5406,6 +5431,19 @@ def _coll_view(c):
             "pay_amount": c.get("pay_amount"), "transaction_id": c.get("transaction_id"), "for_date": c.get("for_date")}
 
 
+def _commission_percent_on(plan, fallback, day_iso):
+    """Commission % that applied on one working day. Every change of a package's % is saved with the day it was made
+    (plan["commission_history"]); a day uses the % of the latest change made on or before it, so past / pending days
+    keep their old % and the new % counts from the day of the change. No history -> the package's current %."""
+    val = None
+    for h in sorted((plan or {}).get("commission_history") or [], key=lambda x: x.get("from") or ""):
+        if (h.get("from") or "") <= day_iso:
+            val = h.get("percent")
+    if val is not None:
+        return float(val)
+    return float((plan or {}).get("commission_percent") or fallback or 0)
+
+
 async def _package_due_state(user):
     """Commission / Salary drivers pay for each working day on the NEXT day, before 12:00 noon (IST).
     Returns the oldest unpaid day (or None). locked=True once the noon deadline has passed
@@ -5447,7 +5485,7 @@ async def _package_due_state(user):
     after_noon = datetime.now(IST).hour >= PKG_NOON_HOUR
     return {
         "category": cat, "plan_name": rental.get("package_name"),
-        "commission_percent": percent if cat == "commission" else None,
+        "commission_percent": _commission_percent_on(plan, rental.get("commission_percent"), due_date.isoformat()) if cat == "commission" else None,
         "date": due_date.isoformat(),
         "locked": bool(after_noon or due_date < today - timedelta(days=1)),
     }
@@ -7324,6 +7362,17 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
         rentals[r["driver_id"]] = r  # latest open rental wins
     deps = {x["driver_id"]: x for x in await db.security_deposits.find({"organization_id": org, "driver_id": {"$in": ids}}).to_list(None)}
 
+    # Commission / Salary drivers pay each day's collection on the NEXT day: load every paid day of the last 30 days
+    _pp_today = _today_ist()
+    _pp_yesterday = (_pp_today - timedelta(days=1)).isoformat()
+    _pp_window = (_pp_today - timedelta(days=30)).isoformat()
+    _pp_paid = {}   # driver_id -> set of dates already paid
+    for _c in await db.package_collections.find(
+            {"organization_id": org, "driver_id": {"$in": ids}, "status": "paid", "for_date": {"$gte": _pp_window}},
+            {"driver_id": 1, "for_date": 1}).to_list(None):
+        _pp_paid.setdefault(_c["driver_id"], set()).add(_c.get("for_date"))
+    _pp_paid_yday = {k for k, v in _pp_paid.items() if _pp_yesterday in v}
+
     veh_ids = []
     for d in drivers:
         try:
@@ -7358,6 +7407,26 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             rent_pending = 0.0
             deposit_pending = 0.0
 
+        # Commission / Salary: yesterday's collection not paid -> "pending amount" (skips week-off / paid-leave
+        # days and the rental's first day, same rules as the driver app's payment popup)
+        pkg_pending = False
+        pkg_pending_dates = []
+        if _cat != "rental" and r:
+            _st_raw = str(r.get("start") or r.get("created_at") or "")[:10]
+            _skip = set(d.get("week_off_dates") or []) | set(d.get("paid_leave_dates") or []) | set(d.get("paid_leaves") or [])
+            pkg_pending = bool(_st_raw and _st_raw <= _pp_yesterday and _pp_yesterday not in _skip and did not in _pp_paid_yday)
+            # every unpaid working day since the rental started (last 30 days, oldest first) - same rule as the driver app's payment popup
+            try:
+                _dd = max(date.fromisoformat(_st_raw), _pp_today - timedelta(days=30))
+            except ValueError:
+                _dd = _pp_today
+            _paid_days = _pp_paid.get(did, set())
+            while _dd < _pp_today:
+                _iso = _dd.isoformat()
+                if _iso not in _paid_days and _iso not in _skip:
+                    pkg_pending_dates.append(_iso)
+                _dd += timedelta(days=1)
+
         v = vehs.get(d.get("current_vehicle_id") or "") or {}
         rows.append({
             "id": did,
@@ -7371,6 +7440,9 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             "package_category": _cat,
             "rent_pending": rent_pending,
             "deposit_pending": deposit_pending,
+            "pkg_pending": pkg_pending,
+            "pkg_pending_date": _pp_yesterday if pkg_pending else None,
+            "pkg_pending_dates": pkg_pending_dates,
             "supervisor_name": d.get("supervisor_name"),
         })
     return rows
@@ -7402,7 +7474,11 @@ async def pending_payments_signature(request: Request):
         {"$group": {"_id": "$status", "n": {"$sum": 1}, "rate": {"$sum": "$daily_rate"}}},
         {"$sort": {"_id": 1}},
     ]).to_list(None)
-    raw = json.dumps([acc, dep, rent, _today_ist().isoformat()], default=str, sort_keys=True)
+    pkg = await db.package_collections.aggregate([
+        {"$match": {"organization_id": org, "status": "paid"}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "amt": {"$sum": "$pay_amount"}}},
+    ]).to_list(1)
+    raw = json.dumps([acc, dep, rent, pkg, _today_ist().isoformat()], default=str, sort_keys=True)
     return {"sig": hashlib.md5(raw.encode()).hexdigest()}
 
 
