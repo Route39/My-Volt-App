@@ -14,6 +14,7 @@ export default function PendingPayments() {
   const isAdmin = user?.role === "admin" || user?.role === "company_admin";
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
+  const [pkgType, setPkgType] = useState("all");   // all | rental | commission | salary
   const [pkg, setPkg] = useState("all");
   const [supervisor, setSupervisor] = useState("all");
   const [cityTab, setCityTab] = useState("all");
@@ -58,8 +59,8 @@ export default function PendingPayments() {
   }, [load]);
 
   const packages = useMemo(
-    () => [...new Set((rows || []).map((r) => r.package_name).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
-    [rows]
+    () => [...new Set((rows || []).filter((r) => pkgType === "all" || (r.package_category || "rental") === pkgType).map((r) => r.package_name).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [rows, pkgType]
   );
 
   const supervisors = useMemo(
@@ -76,6 +77,7 @@ export default function PendingPayments() {
         (r.driver_name || "").toLowerCase().includes(term) ||
         (r.phone || "").toLowerCase().includes(term) ||
         (r.driver_code || "").toLowerCase().includes(term)) &&
+      (pkgType === "all" || (r.package_category || "rental") === pkgType) &&
       (pkg === "all" || r.package_name === pkg) &&
       (supervisor === "all" || r.supervisor_name === supervisor) &&
       (!isAdmin || cityTab === "all" || r.city === cityTab)
@@ -84,7 +86,7 @@ export default function PendingPayments() {
     else if (sortBy === "pending") list.sort((a, b) => total(b) - total(a) || byName(a, b));  // highest -> lowest -> no pending
     else list.sort(byName);
     return list;
-  }, [rows, q, pkg, supervisor, cityTab, sortBy, isAdmin]);
+  }, [rows, q, pkgType, pkg, supervisor, cityTab, sortBy, isAdmin]);
 
   // card totals follow the filters currently applied
   const totals = useMemo(() => {
@@ -120,9 +122,20 @@ export default function PendingPayments() {
           <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, phone no. or driver ID…" className="pl-9" data-testid="pp-search" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={pkg} onValueChange={setPkg}>
+          <Select value={pkgType} onValueChange={(v) => { setPkgType(v); setPkg("all"); }}>
+            <SelectTrigger className="w-48 h-10 rounded-xl bg-mv-surface border-mv-border" data-testid="pp-package-type">
+              <SelectValue placeholder="Select package type" />
+            </SelectTrigger>
+            <SelectContent className="bg-mv-surface rounded-xl border-mv-border text-mv-text">
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="rental">Rental Package</SelectItem>
+              <SelectItem value="commission">Commission Package</SelectItem>
+              <SelectItem value="salary">Salary Package</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={pkg} onValueChange={setPkg} disabled={pkgType === "all"}>
             <SelectTrigger className="w-48 h-10 rounded-xl bg-mv-surface border-mv-border" data-testid="pp-package">
-              <SelectValue />
+              <SelectValue placeholder="Select package" />
             </SelectTrigger>
             <SelectContent className="bg-mv-surface rounded-xl border-mv-border text-mv-text">
               <SelectItem value="all">All Packages</SelectItem>
@@ -189,7 +202,16 @@ export default function PendingPayments() {
                     {r.vehicle_reg || r.vehicle_number || <span className="text-mv-dim">—</span>}
                     {r.vehicle_reg && r.vehicle_number && <div className="text-[11px] text-mv-dim">{r.vehicle_number}</div>}
                   </td>
-                  <td className="px-4 py-3 text-mv-muted">{r.package_name || "—"}</td>
+                  <td className="px-4 py-3 text-mv-muted">
+                    {r.package_name ? (
+                      <>
+                        <div className="font-medium text-mv-text">{r.package_category === "commission" ? "Commission Package" : r.package_category === "salary" ? "Salary Package" : "Rental Package"}</div>
+                        {r.package_name.trim().toLowerCase() !== (r.package_category === "commission" ? "commission package" : r.package_category === "salary" ? "salary package" : "rental package") && (
+                          <div className="text-[11px] text-mv-dim">{r.package_name}</div>
+                        )}
+                      </>
+                    ) : "—"}
+                  </td>
                   <td className="px-4 py-3">
                     {r.rent_pending > 0 ? <span className="font-semibold text-red-500">{inr(r.rent_pending)}</span> : <span className="text-mv-dim">—</span>}
                   </td>

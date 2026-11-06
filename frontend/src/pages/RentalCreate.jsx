@@ -47,6 +47,7 @@ export default function RentalCreate() {
       api.get("/rental-plans").then(r => {
         const pkgs = r.data.filter(p =>
           (p.city === selCity || p.city === "All") && p.active !== false &&
+          p.package_type !== "Commission" && p.package_type !== "Salary" &&
           // "In-Build Vehicles" is not offered in Bangalore
           !(selCity?.trim().toLowerCase() === "bangalore" && p.package_type === "In-Build Vehicles")
         );

@@ -109,6 +109,8 @@ export default function DriverProfile() {
   const canEdit = ["admin", "city_manager"].includes(user?.role);
   const current = d.assignments?.find((a) => !a.end);
   const activeRental = d.rentals?.find((r) => r.status === "active");
+  const _pkgCat = d.package_category || activeRental?.package_category || d.rentals?.[0]?.package_category;
+  const isSpecialPkg = _pkgCat === "commission" || _pkgCat === "salary";   // no security deposit for these packages
 
   return (
     <div>
@@ -158,6 +160,7 @@ export default function DriverProfile() {
               </GhostBtn>
             )} */}
                         {(() => {
+              if (isSpecialPkg) return null;   // Commission / Salary: no "Enable Partial Deposit" and no "Mark Deposit Paid (QR)" buttons
               const partialOn = !!d.deposit_partial_enabled || d.deposit_status === "partial";
               const fullDone = d.deposit_status === "paid";
               const doneCls = "bg-emerald-50 text-emerald-700 border-emerald-300 cursor-default hover:bg-emerald-50";
@@ -234,7 +237,9 @@ export default function DriverProfile() {
                 </>
               );
             })()}
-            <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> Rent Paid</GhostBtn>
+            {!isSpecialPkg && (
+              <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> Rent Paid</GhostBtn>
+            )}
             {d.admin_block ? (
               <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
             ) : (

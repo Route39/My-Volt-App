@@ -28,7 +28,7 @@ export const validateAssign = (form) => {
 };
 
 // city = the driver's city, form/set = the parent form state, assigned = driver already has a rental (edit only)
-export default function DriverAssignFields({ city, form, set, assigned }) {
+export default function DriverAssignFields({ city, form, set, assigned, withPackageType = false }) {
   const [vehicles, setVehicles] = useState([]);
   const [plans, setPlans] = useState([]);
   const [managers, setManagers] = useState([]);
@@ -37,7 +37,7 @@ export default function DriverAssignFields({ city, form, set, assigned }) {
   useEffect(() => {
     // city changed in the Add form: old selections are no longer valid
     if (prevCity.current && prevCity.current !== city) {
-      set("vehicle_id", ""); set("package_id", ""); set("rental_start", ""); set("rental_end", ""); set("supervisor_id", ""); set("rental_state", "");
+      set("vehicle_id", ""); set("package_id", ""); set("rental_start", ""); set("rental_end", ""); set("supervisor_id", ""); set("rental_state", ""); if (withPackageType) set("package_category", "");
     }
     prevCity.current = city;
     if (!city) { setVehicles([]); setPlans([]); setManagers([]); return; }
@@ -55,8 +55,20 @@ export default function DriverAssignFields({ city, form, set, assigned }) {
   const pickVehicle = (v) => {
     const val = v === NONE ? "" : v;
     set("vehicle_id", val);
-    if (!val) { set("package_id", ""); set("rental_start", ""); set("rental_end", ""); set("rental_state", ""); }
+    if (!val) { set("package_id", ""); set("rental_start", ""); set("rental_end", ""); set("rental_state", ""); if (withPackageType) set("package_category", ""); }
   };
+  const planKind = (p) => (p.package_type === "Commission" ? "commission" : p.package_type === "Salary" ? "salary" : "rental");
+  const shownPlans = plans.filter((p) => planKind(p) === (withPackageType ? form.package_category : "rental"));
+  const planLabel = (p) =>
+    planKind(p) === "commission" ? `${p.name} · ${p.commission_percent ?? "—"}%`
+    : planKind(p) === "salary" ? `${p.name} · ₹${p.salary_amount ?? "—"}`
+    : `${p.name} · ₹${p.amount}/day`;
+  const pickPackageCategory = (v) => {
+    set("package_category", v === NONE ? "" : v);
+    set("package_id", ""); // package list changes with the type
+    set("rental_state", ""); // status field is hidden until a package is picked again
+  };
+
   const pickPackage = (v) => {
     set("package_id", v);
     if (!form.rental_start) set("rental_start", todayIST());
@@ -123,14 +135,30 @@ export default function DriverAssignFields({ city, form, set, assigned }) {
             </Field>
           </div>
 
-          {form.vehicle_id && (
+          {form.vehicle_id && withPackageType && (
+            <div className="col-span-2">
+              <Field label="Select Package Type">
+                <Select value={form.package_category || NONE} onValueChange={pickPackageCategory}>
+                  <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select package type" /></SelectTrigger>
+                  <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
+                    <SelectItem value={NONE}>— None —</SelectItem>
+                    <SelectItem value="rental">Rental Package</SelectItem>
+                    <SelectItem value="commission">Commission Package</SelectItem>
+                    <SelectItem value="salary">Salary Package</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          )}
+
+          {form.vehicle_id && (!withPackageType || form.package_category) && (
             <div className="col-span-2">
               <Field label="Select Package *">
                 <Select value={form.package_id || undefined} onValueChange={pickPackage}>
                   <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select package" /></SelectTrigger>
                   <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">
-                    {plans.length === 0 && <div className="px-3 py-2 text-xs text-mv-muted">No packages for {city}</div>}
-                    {plans.map((p) => <SelectItem key={p.id} value={p.id}>{p.name} · ₹{p.amount}/day</SelectItem>)}
+                    {shownPlans.length === 0 && <div className="px-3 py-2 text-xs text-mv-muted">No packages for {city}</div>}
+                    {shownPlans.map((p) => <SelectItem key={p.id} value={p.id}>{planLabel(p)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </Field>
@@ -155,7 +183,7 @@ export default function DriverAssignFields({ city, form, set, assigned }) {
       )}
 
       <div className="col-span-2">
-        {!assigned && (
+        {!assigned && (!withPackageType || form.package_id) && (
           <div className="mb-4">
             <Field label={`Rental Status${form.package_id ? " *" : " (optional)"}`}>
               <Select value={form.rental_state || (form.package_id ? undefined : NONE)} onValueChange={(v) => set("rental_state", v === NONE ? "" : v)}>

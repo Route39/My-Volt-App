@@ -24,6 +24,7 @@ export default function Rentals() {
   const reqId = useRef(0);
   const [tab, setTab] = useState(params.get("status") || "active");
   const [q, setQ] = useState("");
+  const [pkgTab, setPkgTab] = useState("rental");        // "rental" | "commission" | "salary"
   const [cityTab, setCityTab] = useState(city);          // city tab filter (admin)
   useEffect(() => { setCityTab(city); }, [city]);        // stay in sync with the top-bar city
 
@@ -36,12 +37,13 @@ export default function Rentals() {
     try {
       const { data } = await api.get("/rentals", { params: p });
       if (id !== reqId.current) return;     // a newer click already replaced this request
-      setItems(data);
-      setShown({ tab, cityTab, count: data.length });
+      const byPkg = data.filter((r) => (r.package_category || "rental") === pkgTab);
+      setItems(byPkg);
+      setShown({ tab, cityTab, count: byPkg.length });
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [tab, cityTab, q]);
+  }, [tab, cityTab, q, pkgTab]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 
   const canCreate = ["admin", "city_manager"].includes(user?.role);
@@ -59,6 +61,12 @@ export default function Rentals() {
       <PageHeader title="Rentals" subtitle={<>Modern prepaid rental platform{summary && <span className="block mt-1 font-medium text-mv-text">{summary}</span>}</>}>
         {/* {canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")} data-testid="create-rental-btn"><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} */}
       </PageHeader>
+
+      <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
+        {[["rental", "Rental Packages"], ["commission", "Commission"], ["salary", "Salary"]].map(([k, l]) => (
+          <FilterChip key={k} active={pkgTab === k} onClick={() => setPkgTab(k)} data-testid={`rental-pkg-tab-${k}`}>{l}</FilterChip>
+        ))}
+      </div>
 
       <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
         {TABS.map(([k, l]) => <FilterChip key={k} active={tab === k} onClick={() => { setTab(k); setParams({ status: k }); }} data-testid={`rental-tab-${k}`}>{l}</FilterChip>)}
@@ -98,7 +106,12 @@ export default function Rentals() {
                 <div className="flex items-center gap-2 text-mv-muted"><Car className="w-4 h-4" /> {r.vehicle_number} · {r.city}</div>
               </div>
               <div className="flex items-center justify-between mt-4 pt-3 border-t border-mv-border">
-                <div><div className="mv-label">Plan</div><div className="text-sm font-medium">{r.plan_name}</div></div>
+                <div>
+                  <div className="mv-label">Plan</div>
+                  <div className="text-sm font-medium">{r.plan_name}</div>
+                  {r.package_category === "commission" && <div className="text-[11px] text-mv-muted">Commission · {r.commission_percent ?? "—"}%</div>}
+                  {r.package_category === "salary" && <div className="text-[11px] text-mv-muted">Salary · ₹{r.salary_amount ?? "—"}</div>}
+                </div>
                 <div className="text-right"><div className="mv-label">Ends</div><div className="text-sm font-medium text-amber-400">{(r.end && r.end !== 'Ongoing') ? relativeEnd(r.end) : 'Ongoing'}</div></div>
               </div>
             </button>

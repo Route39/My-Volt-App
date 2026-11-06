@@ -506,11 +506,11 @@ export default function DriverHome() {
           </div>
           <div>
             <div className="text-emerald-300/80 mb-0.5 text-xs">Package Pattern</div>
-            <div className="font-semibold">Daily Rent</div>
+            <div className="font-semibold">{rental?.package_category === "commission" ? "Commission package" : rental?.package_category === "salary" ? "Salary package" : "Daily Rent"}</div>
           </div>
           <div>
             <div className="text-emerald-300/80 mb-0.5 text-xs">Value</div>
-            <div className="font-semibold">{inr(rental?.daily_rate || driver?.package_rate || 0)}</div>
+            <div className="font-semibold">{rental?.package_category === "commission" ? (rental?.commission_percent != null ? `${rental.commission_percent}%` : "—") : rental?.package_category === "salary" ? "Collected amount" : inr(rental?.daily_rate || driver?.package_rate || 0)}</div>
           </div>
           
           <div className="col-span-2 mt-2 pt-4 border-t border-emerald-600/30">

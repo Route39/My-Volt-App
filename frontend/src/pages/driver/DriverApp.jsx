@@ -9,6 +9,7 @@ import DriverPayments from "./DriverPayments";
 import DriverProfile from "./DriverProfile";
 import DriverKYC from "./DriverKYC";
 import DriverWeekOff from "./DriverWeekOff";
+import PackageCollectionPopup from "./PackageCollectionPopup";
 //import dapi from "../../lib/driverApi";
 
 const NAV = [
@@ -121,6 +122,8 @@ function DriverShell() {
       {adminBlocked
         ? <AdminBlockedScreen type={data.admin_block} reason={data.admin_block_reason} />
         : weekOffLocked && <WeekOffLockScreen date={data.week_off.date} />}
+      {/* Commission / Salary package drivers: pay the collected amount (X until 12:00 noon, then it stays) */}
+      <PackageCollectionPopup due={appLocked ? null : data?.package_due} driver={data?.driver} refresh={refresh} />
     </div>
   );
 }
@@ -136,7 +139,7 @@ function WeekOffLockScreen({ date }) {
         </div>
         <h1 className="text-xl font-extrabold text-slate-900">Your week-off on {prettyDate} has been approved</h1>
         <p className="text-sm text-slate-500 mt-2">
-          The app stays locked for the whole day. No daily rent is charged for this day.
+          The app stays locked for the whole day.
         </p>
       </div>
     </div>

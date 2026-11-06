@@ -4,9 +4,11 @@ import { useApp, CITIES } from "../context/AppContext";
 import { inr } from "../lib/format";
 import { Loader2, ArrowUpRight, ArrowDownRight, AlertCircle, Check, Search } from "lucide-react";
 import { PageHeader } from "../components/common/Page";
+import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { DriverCode } from "../lib/driverCodes";
+import { imgUrl } from "../lib/imgUrl";
 
 export default function DailyCollection() {
   const { city: gCity, lockedCity, cities } = useApp();
@@ -21,6 +23,7 @@ export default function DailyCollection() {
   const [pickDate, setPickDate] = useState(todayIST);
   const [pickMonth, setPickMonth] = useState(todayIST.slice(0, 7));
   const [search, setSearch] = useState("");
+  const [pkgTab, setPkgTab] = useState("all");   // all | rental | commission | salary
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -161,6 +164,65 @@ export default function DailyCollection() {
     }
     return null;
   };
+  // ---- package tabs + settled / unsettled button ----
+  const isPkgTab = pkgTab === "commission" || pkgTab === "salary";
+  const rows = items.filter((it) =>
+    pkgTab === "all" ? true
+    : pkgTab === "rental" ? !(it.package_category === "commission" || it.package_category === "salary")
+    : it.package_category === pkgTab);
+  // Commission / Salary: the collection paid today is for yesterday, so each row shows yesterday's payment
+  const pkgRows = rows.map((x) => ({ ...x, collection: x.prev_collection }));
+  // Commission / Salary tabs: total amount paid by the drivers in the rows shown (follows the city / date / search filters)
+  const pkgPaidTotal = pkgRows.reduce((s, x) => s + (Number(x.collection?.pay_amount) || 0), 0);
+
+  // Settled / Unsettled button is shown only for Commission / Salary package drivers (not Rental package)
+  const settleBtn = (it) => {
+    if (it.package_category !== "commission" && it.package_category !== "salary") return null;
+    // week-off / paid-leave day: nothing is paid on this day -> show the day's status instead of "-"
+    // if (it.rent_status === "week_off") return <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">Week-off</span>;
+    // if (it.rent_status === "paid_leave") return <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">PAID LEAVE</span>;
+    // // rental started on this date: the amount is settled the next day -> just "-"
+    if (it.rental_start && it.date <= it.rental_start) return <span className="text-slate-400 font-medium">-</span>;
+    // yesterday was a week-off / paid-leave day: nothing to settle -> show that status with yesterday's date
+    if (it.prev_day_status) return (
+      <div className="flex flex-col items-start gap-1">
+        {it.prev_day_status === "week_off"
+          ? <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">Week-off</span>
+          : <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">PAID LEAVE</span>}
+        <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.prev_date}</span>
+      </div>
+    );
+    if (!it.rent_for_date) return <span className="text-slate-400 font-medium">-</span>;
+    const pc = it.prev_collection;
+    return (
+      <div className="flex flex-col items-start gap-1" data-testid={`settle-chip-${it.id}`}>
+        {pc ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+              <Check className="w-3.5 h-3.5" /> {isPkgTab
+                ? (it.package_category === "commission" ? "Commission paid" : "Total amount paid")
+                : <>{it.package_category === "commission" ? "Commission" : "Salary"} paid {inr(pc.pay_amount)}</>}
+            </span>
+            {!isPkgTab && pc.transaction_id && (
+              <span className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200">TXN {pc.transaction_id}</span>
+            )}
+          </>
+        ) : (
+          <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-amber-50 text-amber-600 text-xs font-bold tracking-wide border border-amber-200 shadow-sm">Unsettled</span>
+        )}
+        {/* the day being settled = yesterday */}
+        <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.rent_for_date}</span>
+      </div>
+    );
+  };
+
+  // Commission / Salary package drivers pay no daily rent and no deposit
+  const isSpecialPkg = (it) => it.package_category === "commission" || it.package_category === "salary";
+  const pkgPill = (it) => (
+    <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">
+      {it.package_category === "commission" ? "Commission" : "Salary"}
+    </span>
+  );
   const qrBadgeCls = "text-[9px] px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold text-blue-600 bg-blue-50 border-blue-200";
   const txnChip = (t, manual) => t ? (
     <>
@@ -173,7 +235,17 @@ export default function DailyCollection() {
 
   return (
     <div>
-      <PageHeader title="Daily Collection" subtitle="Finance and cash flow control center" />
+      <PageHeader title="Daily Collection" subtitle={<>Finance and cash flow control center{isPkgTab && <span className="block mt-1 font-medium text-mv-text" data-testid="pkg-paid-total">Total amount paid - {inr(pkgPaidTotal)}</span>}</>} />
+
+      {/* Package tabs */}
+      <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="package-tabs">
+        {[["all", "All Packages"], ["rental", "Rental Package"], ["commission", "Commission Package"], ["salary", "Salary Package"]].map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setPkgTab(k)} data-testid={`pkg-tab-${k}`}
+            className={`h-9 px-4 rounded-full text-sm font-medium transition-colors ${pkgTab === k ? "bg-mv-primary text-white" : "border border-mv-border text-mv-muted hover:bg-mv-elevated"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
 
       {/* Controls */}
       <div className="flex flex-col xl:flex-row justify-between gap-3 mb-5">
@@ -252,7 +324,8 @@ export default function DailyCollection() {
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary Cards (hidden on the Commission / Salary tabs) */}
+      {pkgTab === "rental" && (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="mv-card p-5 relative overflow-hidden mv-rise">
           <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Gross Revenue {city !== "all" ? `(${city})` : ""}</div>
@@ -276,8 +349,104 @@ export default function DailyCollection() {
           <div className="text-xs text-mv-dim">Revenue pending settlement</div>
         </div>
       </div>
+      )}
+
+      {/* Commission / Salary package tabs: their own table */}
+      {isPkgTab && (
+        <div className="mv-card overflow-hidden overflow-x-auto mv-rise" style={{ animationDelay: "150ms" }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-mv-border text-left mv-label">
+                <th className="px-5 py-4">Driver</th>
+                <th className="px-5 py-4">Date</th>
+                <th className="px-5 py-4">Vehicle</th>
+                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission %" : "Salary"}</th>
+                <th className="px-5 py-4">Total Collected</th>
+                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission Amount" : "Salary Paid"}</th>
+                <th className="px-5 py-4">Trip Screenshot</th>
+                <th className="px-5 py-4">Settled / Unsettled</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan="8" className="px-5 py-16 text-center text-mv-muted">
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
+                      Loading collection data...
+                    </div>
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="px-5 py-16 text-center">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
+                        <AlertCircle className="w-5 h-5 text-mv-dim" />
+                      </div>
+                      <span className="text-mv-text font-medium">No {pkgTab === "commission" ? "commission" : "salary"} package drivers found {city !== "all" ? `for ${city}` : ""}</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                pkgRows.map((it) => (
+                  <tr key={it.id} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
+                    <td className="px-5 py-4 font-medium flex items-center gap-3">
+                      <Avatar className="w-8 h-8"><AvatarImage src={it.driver_avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{it.driver_name?.[0]}</AvatarFallback></Avatar>
+                      {it.driver_name} <DriverCode id={it.driver_id} className="block" />
+                    </td>
+                    <td className="px-5 py-4 text-mv-muted whitespace-nowrap">{it.date || "—"}</td>
+                    <td className="px-5 py-4">
+                      <div className="font-display font-semibold text-mv-text">{it.vehicle_code || "—"}</div>
+                      {it.vehicle_reg && <div className="text-xs text-mv-muted font-mono">{it.vehicle_reg}</div>}
+                    </td>
+                    <td className="px-5 py-4 font-display font-bold text-amber-500/90">
+                      {pkgTab === "commission"
+                        ? (it.commission_percent != null ? `${it.commission_percent}%` : "—")
+                        : (it.salary_amount != null ? inr(it.salary_amount) : "—")}
+                    </td>
+                    <td className="px-5 py-4 font-display font-bold">
+                      {it.collection ? inr(it.collection.total_collected) : <span className="text-slate-400 font-medium">—</span>}
+                    </td>
+                    <td className="px-5 py-4">
+                      {it.collection ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.collection.pay_amount)}</span>
+                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+                            <Check className="w-3.5 h-3.5" /> PAID
+                          </div>
+                          {it.collection.transaction_id && (
+                            <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">TXN {it.collection.transaction_id}</div>
+                          )}
+                        </div>
+                      ) : (it.rent_status === "week_off" || it.rent_status === "paid_leave") ? (
+                        <span className="text-slate-400 font-medium">—</span>
+                      ) : (it.rent_for_date && !(it.rental_start && it.date <= it.rental_start)) ? (
+                        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">NOT PAID</div>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {it.collection?.screenshot_url ? (
+                        <a href={imgUrl(it.collection.screenshot_url)} target="_blank" rel="noreferrer">
+                          <img src={imgUrl(it.collection.screenshot_url)} alt="Trip screenshot" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">{settleBtn(it)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Table Section */}
+      {!isPkgTab && (
       <div className="mv-card overflow-hidden overflow-x-auto mv-rise" style={{ animationDelay: "150ms" }}>
         <table className="w-full text-sm">
           <thead>
@@ -293,21 +462,23 @@ export default function DailyCollection() {
               <th className="px-5 py-4">Daily Rent</th>
               {/* <th className="px-5 py-4">Extra KM Charges</th> */}
               <th className="px-5 py-4">Deposit</th>
+              <th className="px-5 py-4">Trip Screenshot</th>
+              {pkgTab !== "rental" && <th className="px-5 py-4">Settled / Unsettled</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="6" className="px-5 py-16 text-center text-mv-muted">
+                <td colSpan={pkgTab === "rental" ? 7 : 8} className="px-5 py-16 text-center text-mv-muted">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                     Loading collection data...
                   </div>
                 </td>
               </tr>
-            ) : items.length === 0 ? (
+            ) : rows.length === 0 ? (
               <tr>
-                <td colSpan="6" className="px-5 py-16 text-center">
+                <td colSpan={pkgTab === "rental" ? 7 : 8} className="px-5 py-16 text-center">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                       <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -318,7 +489,7 @@ export default function DailyCollection() {
                 </td>
               </tr>
             ) : (
-              items.map((it) => {
+              pkgRows.map((it) => {
                 return (
                   <tr key={it.id} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
                     <td className="px-5 py-4 font-medium flex items-center gap-3">
@@ -338,7 +509,7 @@ export default function DailyCollection() {
                       )}
                     </td> */}
                     <td className="px-5 py-4 font-display font-bold">
-                      <div className="text-amber-500/90">{inr(it.daily_rate)}</div>
+                      {isSpecialPkg(it) ? <span className="text-slate-400 font-medium">-</span> : <div className="text-amber-500/90">{inr(it.daily_rate)}</div>}
                       {(it.extra_km_charge > 0) && (
                         <div className="text-[11px] text-red-500 font-semibold">+{inr(it.extra_km_charge)} extra</div>
                       )}
@@ -354,7 +525,9 @@ export default function DailyCollection() {
                       )}
                     </td> */}
                     <td className="px-5 py-4">
-                      {it.rent_status === "week_off" ? (
+                      {isSpecialPkg(it) ? (
+                        pkgPill(it)
+                      ) : it.rent_status === "week_off" ? (
                         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">
                           Week-off
                         </div>
@@ -445,7 +618,9 @@ export default function DailyCollection() {
                       )}
                     </td> */}
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
-                      {depositMode(it) === "partial" ? (
+                      {isSpecialPkg(it) ? (
+                        pkgPill(it)
+                      ) : depositMode(it) === "partial" ? (
                         <div className="flex flex-col gap-1">
                           <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">PARTIALLY PAID - {inr(it.deposit_first_amount)}</span>
                           {txnChip(it.deposit_first_txn, it.deposit_first_manual)}
@@ -478,6 +653,20 @@ export default function DailyCollection() {
                         </div>
                       )}
                     </td>
+                    <td className="px-5 py-4">
+                      {it.collection?.screenshot_url ? (
+                        <div className="flex flex-col gap-1">
+                          <a href={imgUrl(it.collection.screenshot_url)} target="_blank" rel="noreferrer">
+                            <img src={imgUrl(it.collection.screenshot_url)} alt="Trip screenshot" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
+                          </a>
+                          <span className="text-[11px] text-mv-muted">Collected {inr(it.collection.total_collected)}</span>
+                          <span className="text-[11px] font-bold text-emerald-600">Paid {inr(it.collection.pay_amount)}</span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    {pkgTab !== "rental" && <td className="px-5 py-4">{settleBtn(it)}</td>}
                   </tr>
                 );
               })
@@ -485,6 +674,7 @@ export default function DailyCollection() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

@@ -21,7 +21,9 @@ export default function DriverRental() {
         <Row icon={Package} label="Package" value={rental?.package_name || rental?.plan_name || "Standard"} />
         <Row icon={Bike} label="Vehicle" value={rental?.vehicle_reg || rental?.vehicle_number || "—"} />
         <Row label="Rental Start" value={(rental?.start_date || rental?.start) ? fmtDate(rental.start_date || rental.start) : "—"} />
-        <Row label="Deposit" value={`${inr(deposit?.amount ?? 0)} · ${deposit?.status === "paid" ? "Paid" : deposit?.status === "partial" ? `Partially paid · rest due ${deposit.next_payment_date || "—"}` : "Pending"}`} />
+        {rental?.package_category !== "commission" && rental?.package_category !== "salary" && (
+          <Row label="Deposit" value={`${inr(deposit?.amount ?? 0)} · ${deposit?.status === "paid" ? "Paid" : deposit?.status === "partial" ? `Partially paid · rest due ${deposit.next_payment_date || "—"}` : "Pending"}`} />
+        )}
       </div>
 
       {deposit?.action_required && (

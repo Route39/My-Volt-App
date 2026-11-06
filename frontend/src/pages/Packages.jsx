@@ -17,6 +17,11 @@ const typesForCity = (city) =>
     ? PACKAGE_TYPES.filter((t) => t !== "In-Build Vehicles")
     : PACKAGE_TYPES;
 
+// Commission & Salary packages: exactly 1 of each per city (default names: "Commission Package", "Salary Package")
+const COMMISSION_TYPE = "Commission";
+const SALARY_TYPE = "Salary";
+const COMMISSION_PERCENT_OPTIONS = [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70]; // edit this list as needed
+
 export default function Packages() {
   const { cities } = useApp(); // city managers get only their own city; admins get all
   const [packages, setPackages] = useState([]);
@@ -24,6 +29,7 @@ export default function Packages() {
   const [view, setView] = useState("list"); // "list" | "form"
   const [editData, setEditData] = useState(null); // { city, type, pkg? }
   const [unlocked, setUnlocked] = useState(false);
+  const [tab, setTab] = useState("rental"); // "rental" | "commission" | "salary"
 
   const fetchPackages = async () => {
     try {
@@ -65,9 +71,33 @@ export default function Packages() {
     <div className="max-w-7xl mx-auto space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold text-mv-text tracking-tight">Rental Packages</h1>
-          <p className="text-mv-muted mt-1">Manage strict Silver, Gold, Platinum, and In-Build Vehicles packages per city.</p>
+          <h1 className="text-3xl font-display font-bold text-mv-text tracking-tight">
+            {tab === "commission" ? "Commission Package" : tab === "salary" ? "Salary Package" : "Rental Packages"}
+          </h1>
+          {/* <p className="text-mv-muted mt-1">
+            {tab === "commission"
+              ? "Manage the commission package per city."
+              : tab === "salary"
+              ? "Manage the salary package per city."
+              : "Manage strict Silver, Gold, Platinum, and In-Build Vehicles packages per city."}
+          </p> */}
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-b border-mv-border pb-3">
+        {[
+          { key: "rental", label: "Rental Packages" },
+          { key: "commission", label: "Commission" },
+          { key: "salary", label: "Salary" },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-5 py-2 rounded-full text-sm font-bold transition-colors ${tab === t.key ? "bg-mv-primary text-white" : "bg-mv-surface2 text-mv-muted hover:text-mv-text"}`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -82,6 +112,7 @@ export default function Packages() {
             return (
               <div key={city}>
                 <h2 className="text-2xl font-bold text-mv-text mb-6 flex items-center gap-2"><MapPin className="w-6 h-6 text-mv-primary" /> {city}</h2>
+                {tab === "rental" && (
                 <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${typesForCity(city).length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
                   {typesForCity(city).map(type => {
                     const pkg = packages.find(p => p.city === city && p.package_type === type);
@@ -136,6 +167,60 @@ export default function Packages() {
                     );
                   })}
                 </div>
+                )}
+
+                {/* Commission OR Salary package (1 per city), chosen by the tab */}
+                {tab !== "rental" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                  {[tab === "commission" ? COMMISSION_TYPE : SALARY_TYPE].map(type => {
+                    const pkg = packages.find(p => p.city === city && p.package_type === type);
+                    const isActive = pkg && pkg.active;
+                    const isConfigured = !!pkg;
+
+                    return (
+                      <div
+                        key={type}
+                        onDoubleClick={() => isConfigured ? toggleActive(pkg) : null}
+                        className={`mv-card p-6 flex flex-col relative group transition-all select-none ${isConfigured ? 'cursor-pointer hover:border-mv-primary/30' : 'opacity-60 grayscale hover:grayscale-0'}`}
+                      >
+                        <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                          <button onClick={(e) => { e.stopPropagation(); handleEdit(city, type, pkg); }} className="p-2 text-mv-muted hover:text-mv-primary bg-mv-surface2 rounded-full">
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isActive ? 'bg-mv-primary/10 text-mv-primary' : 'bg-slate-100 text-slate-400'}`}>
+                            <Package className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-lg text-mv-text leading-tight">{pkg?.name || defaultPkgName(type)}</h3>
+                            {isActive ? (
+                              <div className="text-[10px] text-mv-muted mt-0.5 font-medium">{type} · Double click to lock</div>
+                            ) : (
+                              <div className="text-[10px] text-amber-500 mt-0.5 font-bold uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded inline-block">Coming Soon</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-2 space-y-3">
+                          {type === COMMISSION_TYPE ? (
+                            <div className="flex justify-between items-center">
+                              <span className="text-mv-muted text-sm">Commission</span>
+                              <span className="font-extrabold text-mv-primary text-xl">{isActive && pkg.commission_percent != null ? `${pkg.commission_percent}%` : "—"}</span>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between items-center">
+                              <span className="text-mv-muted text-sm">Salary</span>
+                              <span className="font-extrabold text-mv-primary text-xl">{isActive && pkg.salary_amount != null ? inr(pkg.salary_amount) : "—"}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                )}
               </div>
             );
           })}
@@ -155,7 +240,9 @@ function PackageForm({ editData, onBack, onSaved }) {
     deposit: pkg?.deposit || 5000,
     daily_limit_km: pkg?.daily_limit_km || (pkg?.monthly_km_limit ? Math.round(pkg.monthly_km_limit / 30) : ""),
     overage_per_km: pkg?.overage_per_km || "",
-    active: pkg?.active ?? true
+    active: pkg?.active ?? true,
+    commission_percent: pkg?.commission_percent ?? "",
+    salary_amount: pkg?.salary_amount ?? ""
   });
   const [saving, setSaving] = useState(false);
 
@@ -163,13 +250,28 @@ function PackageForm({ editData, onBack, onSaved }) {
 
   const handleLimitChange = (e) => set("daily_limit_km", e.target.value);
 
+  const isCommission = form.package_type === COMMISSION_TYPE;
+  const isSalary = form.package_type === SALARY_TYPE;
+  const isSpecial = isCommission || isSalary;
+
   const save = async () => {
-    if (!form.name || form.amount === "" || form.daily_limit_km === "" || form.overage_per_km === "" || form.deposit === "") {
+    if (isSpecial) {
+      if (!form.name || (isCommission && form.commission_percent === "") || (isSalary && form.salary_amount === "")) {
+        return toast.error("Please fill all fields accurately");
+      }
+    } else if (!form.name || form.amount === "" || form.daily_limit_km === "" || form.overage_per_km === "" || form.deposit === "") {
       return toast.error("Please fill all fields accurately");
     }
     setSaving(true);
     try {
-      const payload = {
+      const payload = isSpecial ? {
+        name: form.name,
+        package_type: form.package_type,
+        city: form.city,
+        active: form.active,
+        ...(isCommission ? { commission_percent: Number(form.commission_percent) } : {}),
+        ...(isSalary ? { salary_amount: Number(form.salary_amount) } : {})
+      } : {
         name: form.name,
         package_type: form.package_type,
         city: form.city,
@@ -251,6 +353,42 @@ function PackageForm({ editData, onBack, onSaved }) {
           </div>
         </div>
 
+        {isSpecial && (
+          <div className="mv-card p-6 md:p-8">
+            <h2 className="text-lg font-bold mb-6 flex items-center gap-2 border-b border-mv-border pb-4">
+              <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center"><Check className="w-4 h-4 text-amber-500" /></div>
+              {isCommission ? "Commission" : "Salary"}
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {isCommission ? (
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Commission Percentage (%)</label>
+                  <select
+                    value={form.commission_percent}
+                    onChange={e => set("commission_percent", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                  >
+                    <option value="">Select percentage</option>
+                    {COMMISSION_PERCENT_OPTIONS.map(p => <option key={p} value={p}>{p}%</option>)}
+                  </select>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Salary Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={form.salary_amount}
+                    onChange={e => set("salary_amount", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                    placeholder="15000"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isSpecial && (
         <div className="mv-card p-6 md:p-8">
           <h2 className="text-lg font-bold mb-6 flex items-center gap-2 border-b border-mv-border pb-4">
             <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center"><Check className="w-4 h-4 text-amber-500" /></div>
@@ -307,6 +445,7 @@ function PackageForm({ editData, onBack, onSaved }) {
             </div>
           </div>
         </div>
+        )}
 
         <div className="flex flex-wrap justify-end pt-4 gap-3 sm:gap-4">
           <GhostBtn onClick={onBack} disabled={saving}>Cancel</GhostBtn>

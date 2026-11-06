@@ -21,19 +21,19 @@ function loadRazorpay() {
 // Tomorrow's date in IST (YYYY-MM-DD) - earliest date allowed for the 2nd half payment
 const tomorrowIST = () => new Date(Date.now() + 5.5 * 3600 * 1000 + 24 * 3600 * 1000).toISOString().slice(0, 10);
 
-export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {}, askNextDate = false, dismissible = true }) {
+export default function PayModal({ open, onClose, kind, title, amount, lines = [], driverName, driverPhone, onDone, extraParams = {}, askNextDate = false, dismissible = true, allowZero = false, createOrderFn = null, children = null, payDisabled = false }) {
   const [nextDate, setNextDate] = useState("");
   const [phase, setPhase] = useState("confirm"); // confirm | processing | success
   const [result, setResult] = useState(null);
 
   // Nothing to pay (amount is 0) and no payment just completed -> close the popup.
   useEffect(() => {
-    if (open && phase === "confirm" && kind !== "deposit" && !(Number(amount) > 0)) onClose();
+    if (open && phase === "confirm" && kind !== "deposit" && !allowZero && !(Number(amount) > 0)) onClose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, amount, phase, kind]);
 
   if (!open) return null;
-  if (phase === "confirm" && kind !== "deposit" && !(Number(amount) > 0)) return null;
+  if (phase === "confirm" && kind !== "deposit" && !allowZero && !(Number(amount) > 0)) return null;
 
   const close = () => { setPhase("confirm"); setResult(null); onClose(); };
 
@@ -43,7 +43,9 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
     }
     setPhase("processing");
     try {
-      const { data: order } = await dapi.post("/driver/payments/create-order", { kind, ...extraParams, ...(askNextDate ? { next_payment_date: nextDate } : {}) });
+      const order = createOrderFn
+        ? await createOrderFn()
+        : (await dapi.post("/driver/payments/create-order", { kind, ...extraParams, ...(askNextDate ? { next_payment_date: nextDate } : {}) })).data;
       let verifyRes;
       if (order.gateway === "razorpay") {
         if (Capacitor.isNativePlatform()) {
@@ -118,7 +120,7 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center" data-testid="pay-modal">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={phase !== "processing" && kind !== "deposit" && (dismissible || phase === "success") ? close : undefined} />
-      <div className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-[rise_.25s_ease]">
+      <div className="relative w-full sm:max-w-sm max-h-[90vh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-[rise_.25s_ease]">
         {phase !== "processing" && kind !== "deposit" && (dismissible || phase === "success") && (
           <button onClick={close} data-testid="pay-close" className="absolute top-4 right-4 text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
         )}
@@ -152,7 +154,8 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
                 </div>
               ))}
             </div>
-            <button onClick={pay} disabled={phase === "processing" || (askNextDate && !nextDate)} data-testid="pay-now-btn"
+            {children}
+            <button onClick={pay} disabled={phase === "processing" || payDisabled || (askNextDate && !nextDate)} data-testid="pay-now-btn"
               className="mt-5 w-full h-12 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-70">
               {phase === "processing" ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</> : <>Pay {inr(amount)}</>}
             </button>

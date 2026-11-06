@@ -332,7 +332,7 @@ function AddDriverDialog({ open, setOpen, onDone }) {
           <Field label="Address"><TextInput value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
           <Field label="Emergency Contact"><TextInput value={form.emergency_contact} inputMode="numeric" maxLength={10} onChange={(e) => set("emergency_contact", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           
-          <DriverAssignFields city={form.city} form={form} set={set} assigned={null} />
+          <DriverAssignFields city={form.city} form={form} set={set} assigned={null} withPackageType />
 
           <div className="col-span-2 flex justify-end pt-4">
             <PrimaryBtn onClick={save} disabled={saving} data-testid="save-driver-btn">{saving ? "Saving..." : "Save Driver"}</PrimaryBtn>

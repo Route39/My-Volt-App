@@ -126,7 +126,7 @@ export default function Fleet() {
               <div className="flex items-center gap-4 mt-3 text-xs text-mv-muted">
                 <span className="flex items-center gap-1">
                   <User className="w-3.5 h-3.5 opacity-70" /> 
-                  {v.current_driver_name ? (
+                  {(v.current_driver_name && v.status !== "available") ? (
                     <span className="font-medium text-mv-text">{v.current_driver_name} <DriverCode id={v.current_driver_id} /></span>
                   ) : (
                     <span className="opacity-70">Driver Not Assigned</span>
@@ -161,7 +161,7 @@ export default function Fleet() {
                     <td className="px-4 py-3 font-semibold">{v.vehicle_number}{v.registration_number ? ` - ${v.registration_number}` : ""}</td>
                     <td className="px-4 py-3"><StatusChip status={v.status} /></td>
                     <td className="px-4 py-3">
-                      {v.current_driver_name ? (
+                      {(v.current_driver_name && v.status !== "available") ? (
                         <span className="font-medium">{v.current_driver_name} <DriverCode id={v.current_driver_id} /></span>
                       ) : (
                         <span className="text-mv-muted text-xs">Driver Not Assigned</span>

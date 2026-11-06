@@ -62,7 +62,7 @@ export default function VehicleProfile() {
         </div>
         <div className="flex items-center gap-4 px-6 py-4 flex-wrap justify-between">
           <div className="flex items-center gap-6 text-sm">
-            <span className="flex items-center gap-2"><User className="w-4 h-4 text-mv-dim" /> {v.current_driver_name || "No driver"} <DriverCode id={v.current_driver_id} /></span>
+            <span className="flex items-center gap-2"><User className="w-4 h-4 text-mv-dim" /> {(v.status !== "available" && v.current_driver_name) || "No driver"} {v.status !== "available" && <DriverCode id={v.current_driver_id} />}</span>
             <span className="flex items-center gap-2"><MapPin className="w-4 h-4 text-mv-dim" /> {v.parking || v.city}</span>
             {v.current_rental_code && <span className="flex items-center gap-2 text-mv-primary">{v.current_rental_code}</span>}
           </div>
@@ -106,7 +106,7 @@ export default function VehicleProfile() {
         </TabsContent>
 
         <TabsContent value="driver" className="mt-4">
-          {v.current_driver_id ? (
+          {(v.current_driver_id && v.status !== "available") ? (
             <button onClick={() => nav(`/drivers/${v.current_driver_id}`)} className="mv-card mv-card-hover p-5 flex items-center gap-4 w-full text-left">
               <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center"><User className="w-6 h-6 text-mv-muted" /></div>
               <div><div className="font-semibold">{v.current_driver_name} <DriverCode id={v.current_driver_id} /></div><div className="text-sm text-mv-dim">View driver profile →</div></div>
