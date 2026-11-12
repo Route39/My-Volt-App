@@ -8141,6 +8141,7 @@ async def startup():
         (db.package_collections, [("organization_id", 1), ("driver_id", 1), ("for_date", 1)], {}),
         (db.week_off_requests, [("driver_id", 1), ("month", 1)], {}),
         (db.users, "organization_id", {}),
+    ]
     for coll, keys, opts in indexes:
         try:
             await coll.create_index(keys, **opts)

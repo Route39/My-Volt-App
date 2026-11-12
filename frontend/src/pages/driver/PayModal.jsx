@@ -48,7 +48,8 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
         : (await dapi.post("/driver/payments/create-order", { kind, ...extraParams, ...(askNextDate ? { next_payment_date: nextDate } : {}) })).data;
       let verifyRes;
       if (order.gateway === "razorpay") {
-        if (Capacitor.isNativePlatform()) {
+        const isAndroidNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+        if (isAndroidNative) {
           verifyRes = await new Promise(async (resolve, reject) => {
             try {
               const data = await Checkout.open({
