@@ -254,7 +254,8 @@ export default function Drivers() {
                 <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
                   {d.rental_block_status === "blocked" && (
                     <button onClick={async () => {
-                      if(window.confirm("Unblock this driver? They will have 24 hours to pay.")) {
+                      // if(window.confirm("Unblock this driver? They will have 24 hours to pay.")) {
+                      if(window.confirm("Unblock this driver?")) {
                         try { await api.post(`/admin/drivers/${d.id}/unblock`); load(); } catch(err) { alert("Failed to unblock"); }
                       }
                     }} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded text-[10px] font-bold mr-2 transition-colors border border-emerald-200">

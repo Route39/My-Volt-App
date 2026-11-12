@@ -939,6 +939,12 @@ async def get_driver(did: str, request: Request):
     if not d:
         raise HTTPException(status_code=404, detail="Driver not found")
     out = ser(d)
+    _acct = await db.rental_accounts.find_one({"organization_id": user.get("organization_id") or "route39-org", "driver_id": did})
+    _st = (_acct or {}).get("status", "active")
+    _gr = (_acct or {}).get("grace_period_until")
+    if _st == "blocked" and _gr and _gr >= _today_ist().isoformat():
+        _st = "active"
+    out["rental_block_status"] = _st   # same rule the Drivers list uses
     out["assignments"] = [ser(a) for a in await db.driver_vehicle_assignments.find(
         {"driver_id": did}).sort("start", -1).to_list(100)]
     out["rentals"] = [ser(r) for r in await db.rentals.find({"driver_id": did}).sort("created_at", -1).to_list(100)]
@@ -1520,13 +1526,24 @@ async def update_driver(did: str, body: dict, request: Request):
 async def unblock_driver(did: str, request: Request):
     user = await get_user(request)
     require_role(user, ["admin", "company_admin", "city_manager"])
+    # rental_accounts has no "city" field, so check the city restriction on the driver
+    # record (drivers do have a city), then update the account by org + driver id.
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
     tomorrow = (_today_ist() + timedelta(days=1)).isoformat()
     res = await db.rental_accounts.update_one(
-        org_filter(user, {"driver_id": did}),
+        {"organization_id": user.get("organization_id") or "route39-org", "driver_id": did},
         {"$set": {"grace_period_until": tomorrow}}
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Rental account not found")
+    # Also lift a TEMPORARY admin block (e.g. the auto-block for unpaid rent) so the driver app is
+    # really unblocked. A PERMANENT block is never cleared here.
+    await db.drivers.update_one(
+        {"_id": oid(did), "organization_id": user.get("organization_id") or "route39-org", "admin_block": "temporary"},
+        {"$unset": {"admin_block": "", "admin_block_reason": "", "admin_blocked_at": "", "admin_block_auto": ""}}
+    )
     await log_audit(user, "driver_unblocked", "driver", did, "Driver manually unblocked for 24h grace period")
     return {"ok": True}
 
@@ -1570,6 +1587,28 @@ async def override_deposit_paid(did: str, request: Request):
     
     await _apply_paid(rec, f"QR_{uuid.uuid4().hex[:8]}", "manual_qr", gateway_ref="MANUAL_OVERRIDE")
     return {"ok": True}
+
+async def _clear_catchup_if_rent_settled(org, did):
+    """After the office marks rent paid: if the driver is waiting on the 'Account Reactivation
+    Required' (catch-up) screen and no past unpaid day / extra-KM due is left, end the catch-up."""
+    acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+    if not acct or not acct.get("pending_catchup"):
+        return
+    today_iso = _today_ist().isoformat()
+    past_unpaid = [k for k, v in (acct.get("rent_by_date") or {}).items()
+                   if k < today_iso and float(v or 0) > 0]
+    if past_unpaid or float(acct.get("extra_km_due", 0) or 0) > 0:
+        return
+    await db.rental_accounts.update_one(
+        {"_id": acct["_id"]},
+        {"$set": {"pending_catchup": False, "catchup_paid": False},
+         "$unset": {
+             "catchup_baseline_reading": "", "catchup_reading": "",
+             "catchup_overage_applied_reading": "", "catchup_overage_km": "",
+             "catchup_overage_charge": "", "catchup_settled_dates": "",
+         }}
+    )
+
 
 @api.post("/admin/drivers/{did}/rent-paid")
 async def admin_mark_rent_paid(did: str, request: Request, body: dict):
@@ -1620,6 +1659,7 @@ async def admin_mark_rent_paid(did: str, request: Request, body: dict):
                 "outstanding_amount": max(0.0, round(float(acct.get("outstanding_amount", 0) or 0) - owed, 2)),
                 "unpaid_dates": [x for x in (acct.get("unpaid_dates") or []) if x not in dates],
             }})
+    await _clear_catchup_if_rent_settled(org, did)
     await log_audit(user, "rent_marked_paid", "driver", did, f"Rent {amount} marked paid for {', '.join(dates)}")
     return {"ok": True, "count": len(dates), "total": round(amount * len(dates), 2)}
 
@@ -1750,6 +1790,8 @@ async def admin_edit_rent_paid(did: str, request: Request, body: dict):
                 "$inc": {"rent_due": add_total, "outstanding_amount": add_total},
                 "$addToSet": {"unpaid_dates": {"$each": list(reinstate.keys())}}})
 
+    if new_dates:
+        await _clear_catchup_if_rent_settled(org, did)
     await log_audit(user, "rent_paid_edited", "driver", did,
                     f"Rent paid updated: {len(new_dates)} added, {len(removed)} removed")
     return {"ok": True, "added": len(new_dates), "removed": len(removed)}
@@ -4691,8 +4733,8 @@ async def _end_trip_rent_charge(org, did, rate):
 # ─── DAILY RENT POPUP / BLOCK SCHEDULE (all times IST) ───────────────────────
 # Rent for day D is first asked on D+1 ("yesterday's rent"). Counting D+1 as
 # popup-day 1, the driver app is temporarily blocked at 12:00 noon on popup-day
-# RENT_BLOCK_DAY (3 => D+3), if the oldest unpaid day is still unpaid.
-RENT_BLOCK_DAY = 3
+# RENT_BLOCK_DAY (2 => D+2), if the oldest unpaid day is still unpaid.
+RENT_BLOCK_DAY = 2
 RENT_NOON_HOUR = 12
 
 
@@ -4981,7 +5023,8 @@ async def _rental_account(rental):
     pending_catchup = bool((existing or {}).get("pending_catchup"))
     catchup_baseline_reading = (existing or {}).get("catchup_baseline_reading")
     catchup_paid = bool((existing or {}).get("catchup_paid"))
-    if status == "blocked" and not pending_catchup:
+    _grace_active = bool(grace_period_until and grace_period_until >= today.isoformat())
+    if status == "blocked" and not pending_catchup and not _grace_active:
         drv_for_block = await db.drivers.find_one({"_id": ObjectId(did)})
         if drv_for_block and drv_for_block.get("admin_block") != "permanent":
             if not drv_for_block.get("admin_block"):

@@ -240,7 +240,7 @@ export default function DriverProfile() {
             {!isSpecialPkg && (
               <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> Rent Paid</GhostBtn>
             )}
-            {d.admin_block ? (
+            {(d.admin_block || d.rental_block_status === "blocked") ? (
               <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
             ) : (
               <>
@@ -1010,8 +1010,12 @@ function BlockDriverDialog({ type, setType, driver, onDone }) {
   const go = async () => {
     setBusy(true);
     try {
-      if (type === "unblock") await api.post(`/drivers/${driver.id}/admin-unblock`);
-      else {
+      if (type === "unblock") {
+        await api.post(`/drivers/${driver.id}/admin-unblock`);
+        if (driver.rental_block_status === "blocked") {
+          try { await api.post(`/admin/drivers/${driver.id}/unblock`); } catch (e) { /* no rental account: nothing more to unblock */ }
+        }
+      } else {
         if (!reason.trim()) { toast.error("Please enter a reason"); setBusy(false); return; }
         await api.post(`/drivers/${driver.id}/admin-block`, { type, reason: reason.trim() });
       }
