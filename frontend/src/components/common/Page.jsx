@@ -36,7 +36,7 @@ export function TextArea(props) {
 export function PrimaryBtn({ children, className = "", ...props }) {
   return (
     <button {...props}
-      className={`inline-flex items-center justify-center gap-2 h-9 px-4 rounded-xl bg-mv-primary hover:bg-red-600 text-white text-sm font-semibold transition-colors disabled:opacity-50 ${className}`}>
+      className={`inline-flex items-center justify-center gap-2 h-10 px-5 rounded-full shadow-md bg-red-600 hover:bg-red-700 hover:shadow-lg text-white text-sm font-semibold transition-all disabled:opacity-50 ${className}`}>
       {children}
     </button>
   );

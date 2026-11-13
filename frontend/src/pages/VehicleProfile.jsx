@@ -78,7 +78,7 @@ export default function VehicleProfile() {
       <Tabs defaultValue="overview" className="mt-6">
         <TabsList className="bg-mv-surface border border-mv-border flex-wrap h-auto">
           {["overview", "rental", "driver"].map((t) => (
-            <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize" data-testid={`vtab-${t}`}>{t}</TabsTrigger>
+            <TabsTrigger key={t} value={t} className="data-[state=active]:bg-red-600 data-[state=active]:text-white capitalize" data-testid={`vtab-${t}`}>{t}</TabsTrigger>
           ))}
         </TabsList>
 

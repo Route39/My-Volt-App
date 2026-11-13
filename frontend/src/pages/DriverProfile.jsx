@@ -257,7 +257,7 @@ export default function DriverProfile() {
 
       <Tabs defaultValue="personal" className="mt-6">
         <TabsList className="bg-mv-surface border border-mv-border flex-wrap h-auto">
-          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents", "referral", "odometer"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-mv-elevated capitalize">{t === "odometer" ? "odometer image" : t}</TabsTrigger>)}
+          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents", "referral", "odometer"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-red-600 data-[state=active]:text-white capitalize">{t === "odometer" ? "odometer image" : t}</TabsTrigger>)}
         </TabsList>
 
         <TabsContent value="personal" className="mt-4">

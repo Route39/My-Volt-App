@@ -54,8 +54,8 @@ export default function Settings() {
 
       <Tabs defaultValue="team">
         <TabsList className="bg-mv-surface border border-mv-border mb-6">
-          <TabsTrigger value="team" className="data-[state=active]:bg-mv-elevated">Team</TabsTrigger>
-          <TabsTrigger value="pkg-password" className="data-[state=active]:bg-mv-elevated">Package Password</TabsTrigger>
+          <TabsTrigger value="team" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">Team</TabsTrigger>
+          <TabsTrigger value="pkg-password" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">Package Password</TabsTrigger>
         </TabsList>
 
         <TabsContent value="team">

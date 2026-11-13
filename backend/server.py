@@ -8172,3 +8172,7 @@ async def shutdown():
     if _t:
         _t.cancel()
     client.close()
+
+# Trim spaces from all JSON inputs and search queries
+from trim_middleware import TrimMiddleware
+app.add_middleware(TrimMiddleware)
