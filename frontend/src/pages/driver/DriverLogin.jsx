@@ -19,7 +19,7 @@ export default function DriverLogin() {
   }, [authed, nav]);
 
   if (contextLoading || authed) {
-    return <div className="min-h-screen flex items-center justify-center bg-white"><Loader2 className="w-6 h-6 animate-spin text-emerald-500" /></div>;
+    return <div className="min-h-screen flex items-center justify-center bg-white"><Loader2 className="w-6 h-6 animate-spin text-red-500" /></div>;
   }
 
   const handleRequestOtp = async (e) => {
@@ -48,12 +48,10 @@ export default function DriverLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-white flex flex-col justify-center px-6">
+    <div className="min-h-screen bg-gradient-to-b from-red-50 via-white to-white flex flex-col justify-center px-6">
       <div className="max-w-sm w-full mx-auto">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-200">
-            <Zap className="w-8 h-8 text-white" fill="white" />
-          </div>
+          <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-16 h-16 object-contain shrink-0" />
           <h1 className="text-2xl font-extrabold text-slate-900 mt-4">MyEVRental</h1>
           <p className="text-slate-500 text-sm mt-1">Your daily EV rental, made simple..</p>
         </div>
@@ -67,7 +65,7 @@ export default function DriverLogin() {
                 type="tel"
                 inputMode="numeric"
                 placeholder="98000 00275"
-                className="w-full h-12 pl-10 pr-3.5 rounded-2xl bg-white border border-slate-200 outline-none focus:border-emerald-500 transition-colors disabled:bg-slate-50 disabled:text-slate-500" />
+                className="w-full h-12 pl-10 pr-3.5 rounded-2xl bg-white border border-slate-200 outline-none focus:border-red-500 transition-colors disabled:bg-slate-50 disabled:text-slate-500" />
             </div>
           </div>
           
@@ -77,14 +75,14 @@ export default function DriverLogin() {
               <input value={otp} onChange={(e) => setOtp(e.target.value)} type="tel" inputMode="numeric" required data-testid="driver-login-otp"
                 placeholder="6-digit OTP"
                 maxLength={6}
-                className="mt-1.5 w-full h-12 px-3.5 text-center tracking-[0.5em] text-lg rounded-2xl bg-white border border-slate-200 outline-none focus:border-emerald-500 transition-colors" />
+                className="mt-1.5 w-full h-12 px-3.5 text-center tracking-[0.5em] text-lg rounded-2xl bg-white border border-slate-200 outline-none focus:border-red-500 transition-colors" />
             </div>
           )}
           
           {error && <div data-testid="driver-login-error" className="text-sm text-red-600 bg-red-50 rounded-xl px-3 py-2">{error}</div>}
           
           <button type="submit" disabled={loading} data-testid="driver-login-submit"
-            className="w-full h-12 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
+            className="w-full h-12 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-60">
             {loading && <Loader2 className="w-4 h-4 animate-spin" />} {step === 1 ? "Get OTP" : "Verify & Sign In"}
           </button>
           

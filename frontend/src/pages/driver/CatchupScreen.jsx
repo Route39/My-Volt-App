@@ -128,14 +128,14 @@ export default function CatchupScreen() {
           </>
         ) : (
           <>
-            <div className="flex items-center gap-2 text-emerald-600 text-sm font-semibold mb-4">
+            <div className="flex items-center gap-2 text-red-600 text-sm font-semibold mb-4">
               <CheckCircle className="w-4 h-4" /> Payment completed
             </div>
 
             {submitError && <div className="text-red-600 text-xs font-semibold mt-3 text-center">{submitError}</div>}
 
             <button onClick={submitPhoto} disabled={submitting}
-              className="mt-5 w-full h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
+              className="mt-5 w-full h-12 rounded-2xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Continue"}
             </button>
           </>

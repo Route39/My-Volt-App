@@ -35,7 +35,7 @@ function Shell({ children }) {
     <div className="mv-noise min-h-screen flex bg-mv-bg">
       <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-mv-border bg-mv-surface fixed inset-y-0 left-0 z-30">
         <div className="h-16 flex items-center gap-2.5 px-5 border-b border-mv-border">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center"><Zap className="w-5 h-5 text-white" fill="white" /></div>
+          <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-9 h-9 object-contain shrink-0" />
           <div className="leading-none"><div className="font-display font-extrabold text-lg tracking-tight">MyVolt</div><div className="text-[10px] text-mv-dim tracking-wider uppercase mt-0.5">Platform Admin</div></div>
         </div>
         <nav className="flex-1 py-3 px-3 space-y-0.5">
@@ -54,7 +54,7 @@ function Shell({ children }) {
       </aside>
       <div className="flex-1 lg:pl-64 min-w-0 relative z-10">
         <header className="h-16 sticky top-0 z-20 glass border-b border-mv-border flex items-center px-4 sm:px-6">
-          <div className="lg:hidden flex items-center gap-2"><div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center"><Zap className="w-4 h-4 text-white" fill="white" /></div><span className="font-display font-bold">MyVolt</span></div>
+          <div className="lg:hidden flex items-center gap-2"><img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-8 h-8 object-contain shrink-0" /><span className="font-display font-bold">MyVolt</span></div>
           <span className="ml-auto text-sm text-mv-muted">Platform Administration</span>
         </header>
         <main className="px-4 sm:px-6 py-6 max-w-[1400px] mx-auto">{children}</main>
@@ -100,7 +100,7 @@ function CompaniesTable({ rows, onOpen }) {
         <tbody>
           {rows.map((c) => (
             <tr key={c.org_id} onClick={() => onOpen(c.org_id)} data-testid={`company-row-${c.org_id}`} className="border-b border-mv-border/50 hover:bg-mv-elevated cursor-pointer transition-colors">
-              <td className="px-4 py-3 font-semibold flex items-center gap-2"><div className="w-8 h-8 rounded-lg bg-blue-500/12 flex items-center justify-center"><Building2 className="w-4 h-4 text-mv-primary" /></div>{c.name}</td>
+              <td className="px-4 py-3 font-semibold flex items-center gap-2"><div className="w-8 h-8 rounded-lg bg-red-500/12 flex items-center justify-center"><Building2 className="w-4 h-4 text-mv-primary" /></div>{c.name}</td>
               <td className="px-4 py-3">{c.industry_label}</td><td className="px-4 py-3">{c.plan}</td>
               <td className="px-4 py-3">{c.users} users</td><td className="px-4 py-3"><StatusPill s={c.status} /></td>
               <td className="px-4 py-3 text-mv-muted">{fmtDate(c.created_at)}</td>
@@ -238,7 +238,7 @@ function CompanyProfile() {
     <div>
       <button onClick={() => nav("/platform/companies")} className="flex items-center gap-1.5 text-sm text-mv-muted hover:text-mv-text mb-4"><ArrowLeft className="w-4 h-4" /> Companies</button>
       <div className="mv-card p-6 flex flex-col sm:flex-row sm:items-center gap-4">
-        <div className="w-16 h-16 rounded-2xl bg-blue-500/12 flex items-center justify-center shrink-0"><Building2 className="w-8 h-8 text-mv-primary" /></div>
+        <div className="w-16 h-16 rounded-2xl bg-red-500/12 flex items-center justify-center shrink-0"><Building2 className="w-8 h-8 text-mv-primary" /></div>
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{c.name}</h1><StatusPill s={c.status} /></div>
           <div className="text-mv-muted text-sm mt-1">{c.industry_label} · {c.plan}</div>

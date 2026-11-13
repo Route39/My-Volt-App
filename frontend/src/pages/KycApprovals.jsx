@@ -55,7 +55,7 @@ export default function KycApprovals() {
             placeholder="Search driver..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="pl-9 pr-4 h-10 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-48 transition-all"
+            className="pl-9 pr-4 h-10 rounded-xl bg-white border border-slate-200 text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 w-48 transition-all"
           />
         </div>
       </PageHeader>
@@ -74,7 +74,7 @@ export default function KycApprovals() {
 
       {drivers.length === 0 ? (
         <div className="text-center py-32 bg-white rounded-3xl border border-slate-100 shadow-sm">
-          <Check className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+          <Check className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-slate-900">All caught up!</h2>
           <p className="text-slate-500 mt-1">No pending KYC approvals at the moment.</p>
         </div>
@@ -83,7 +83,7 @@ export default function KycApprovals() {
           {drivers.map(d => (
             <div key={d.id} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelected(d)}>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center font-bold text-lg">
+                <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center font-bold text-lg">
                   {d.name.charAt(0)}
                 </div>
                 <div>
@@ -136,8 +136,8 @@ export default function KycApprovals() {
                   <p className="text-xs text-slate-400 mt-1">City: {selected.city || "—"}</p>
                 </div>
                 {selected.location?.lat && (
-                  <a href={`https://www.google.com/maps/search/?api=1&query=${selected.location.lat},${selected.location.lng}`} target="_blank" rel="noreferrer" className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:border-emerald-500 text-sm font-medium transition-colors">
-                    <MapPin className="w-4 h-4 text-emerald-500" /> View on Maps
+                  <a href={`https://www.google.com/maps/search/?api=1&query=${selected.location.lat},${selected.location.lng}`} target="_blank" rel="noreferrer" className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl hover:border-red-500 text-sm font-medium transition-colors">
+                    <MapPin className="w-4 h-4 text-red-500" /> View on Maps
                   </a>
                 )}
               </div>
@@ -147,7 +147,7 @@ export default function KycApprovals() {
               <button onClick={() => action(selected.id, "reject")} className="flex-1 h-12 border-2 border-red-500 text-red-600 hover:bg-red-50 font-bold rounded-2xl transition-colors">
                 Reject KYC
               </button>
-              <button onClick={() => action(selected.id, "approve")} className="flex-1 h-12 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl transition-colors">
+              <button onClick={() => action(selected.id, "approve")} className="flex-1 h-12 bg-red-500 hover:bg-red-600 text-white font-bold rounded-2xl transition-colors">
                 Approve KYC
               </button>
             </div>

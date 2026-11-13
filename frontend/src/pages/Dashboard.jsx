@@ -11,7 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { AnimatedCounter, Skeleton } from "../components/common/Primitives";
 import { timeAgo } from "../lib/format";
 
-const STATUS_COLORS = { rented: "#3b82f6", available: "#22c55e", service: "#f59e0b", inactive: "#71717a", idle: "#a78bfa" };
+const STATUS_COLORS = { rented: "#ef4444", available: "#22c55e", service: "#f59e0b", inactive: "#71717a", idle: "#a78bfa" };
 
 const ACTION_ICONS = {
   rental_activated: KeyRound, rental_created: KeyRound, rental_renewed: KeyRound, payment_recorded: KeyRound,
@@ -55,16 +55,16 @@ export default function Dashboard() {
       label: "Total Vehicles",
       value: f.total,
       icon: Car,
-      color: "text-blue-400",
-      bg: "bg-blue-500/15",
+      color: "text-red-400",
+      bg: "bg-red-500/15",
       to: toUrl("/fleet")
     },
     {
       label: "Online Drivers",
       value: drv?.online ?? 0,
       icon: UserCheck,
-      color: "text-emerald-400",
-      bg: "bg-emerald-500/15",
+      color: "text-red-400",
+      bg: "bg-red-500/15",
       to: toUrl("/drivers", "status=online")
     },
     {

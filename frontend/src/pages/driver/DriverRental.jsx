@@ -28,7 +28,7 @@ export default function DriverRental() {
 
       {deposit?.action_required && (
         <button onClick={() => setPay("deposit")} data-testid="rental-pay-deposit-btn"
-          className="w-full h-12 rounded-2xl border border-emerald-500 text-emerald-600 font-semibold hover:bg-emerald-50 transition-colors">
+          className="w-full h-12 rounded-2xl border border-red-500 text-red-600 font-semibold hover:bg-red-50 transition-colors">
           Pay Security Deposit. {inr(deposit?.pay_now)}
         </button>
       )}

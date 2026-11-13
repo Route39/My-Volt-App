@@ -33,7 +33,7 @@ module.exports = {
           surface2: "#f7f8fa",
           elevated: "#eef1f5",
           border: "#e6e8ee",
-          primary: "#2563eb",
+          primary: "#dc2626",
           text: "#0f172a",
           muted: "#4b5563",
           dim: "#94a3b8",

@@ -16,7 +16,7 @@ const STAGES = [
   ["new", "New"], ["assigned", "Assigned"], ["inspection", "Inspection"],
   ["repair", "Repair"], ["ready", "Ready"], ["closed", "Closed"],
 ];
-const PRIO_DOT = { critical: "bg-red-500", high: "bg-amber-500", medium: "bg-blue-500", low: "bg-zinc-500" };
+const PRIO_DOT = { critical: "bg-red-500", high: "bg-amber-500", medium: "bg-red-500", low: "bg-zinc-500" };
 
 export default function ServiceRequests() {
   const { city: gCity, lockedCity, cities } = useApp();
@@ -225,7 +225,7 @@ function NewSRDialog({ open, setOpen, onDone }) {
                         </Select>
                         {key === `iss-${form.issues.length - 1}` && (
                           <button type="button" onClick={addIssue} disabled={!lastFilled} data-testid="add-issue-btn"
-                            className="mt-auto self-end rounded-md px-2 py-1 text-[11px] font-semibold normal-case tracking-normal bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">+ Add issue</button>
+                            className="mt-auto self-end rounded-md px-2 py-1 text-[11px] font-semibold normal-case tracking-normal bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">+ Add issue</button>
                         )}
                       </div>
                     ) : label}
@@ -421,7 +421,7 @@ function EditSRDialog({ open, setOpen, sr, onDone }) {
                         </Select>
                         {key === `iss-${form.issues.length - 1}` && (
                           <button type="button" onClick={addIssue} disabled={!lastFilled}
-                            className="mt-auto self-end rounded-md px-2 py-1 text-[11px] font-semibold normal-case tracking-normal bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">+ Add issue</button>
+                            className="mt-auto self-end rounded-md px-2 py-1 text-[11px] font-semibold normal-case tracking-normal bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">+ Add issue</button>
                         )}
                       </div>
                     ) : label}
@@ -489,7 +489,7 @@ function EditSRDialogOld({ open, setOpen, sr, onDone }) {
               </div>
             ))}
             <div className="flex justify-end">
-              <button type="button" onClick={addIssue} disabled={!lastFilled} className="rounded-md px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">+ Add issue</button>
+              <button type="button" onClick={addIssue} disabled={!lastFilled} className="rounded-md px-3 py-1.5 text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">+ Add issue</button>
             </div>
           </div>
           <Field label="Approved Manager"><TextInput value={form.approved_manager} onChange={(e) => set("approved_manager", e.target.value)} /></Field>

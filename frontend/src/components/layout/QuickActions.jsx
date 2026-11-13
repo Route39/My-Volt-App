@@ -50,14 +50,14 @@ export function QuickActionButton({ onClick, floating }) {
   if (floating) {
     return (
       <button onClick={onClick} data-testid="quick-action-fab"
-              className="lg:hidden fixed bottom-20 right-4 z-50 w-14 h-14 rounded-2xl bg-mv-primary shadow-lg shadow-blue-900/40 flex items-center justify-center active:scale-95 transition-transform">
+              className="lg:hidden fixed bottom-20 right-4 z-50 w-14 h-14 rounded-2xl bg-mv-primary shadow-lg shadow-red-900/40 flex items-center justify-center active:scale-95 transition-transform">
         <Plus className="w-6 h-6 text-white" />
       </button>
     );
   }
   return (
     <button onClick={onClick} data-testid="quick-action-btn"
-            className="hidden lg:inline-flex items-center gap-2 px-4 h-9 rounded-xl bg-mv-primary hover:bg-blue-600 text-white text-sm font-semibold transition-colors">
+            className="hidden lg:inline-flex items-center gap-2 px-4 h-9 rounded-xl bg-mv-primary hover:bg-red-600 text-white text-sm font-semibold transition-colors">
       <Plus className="w-4 h-4" /> Quick Action
     </button>
   );

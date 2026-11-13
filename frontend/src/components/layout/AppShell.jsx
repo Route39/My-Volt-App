@@ -92,9 +92,7 @@ export default function AppShell({ children }) {
       {/* Sidebar (desktop) */}
       <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-mv-border bg-mv-surface fixed inset-y-0 left-0 z-30">
         <div className="h-16 flex items-center gap-2.5 px-5 border-b border-mv-border">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
-            <brand.icon className="w-5 h-5 text-white" fill="white" />
-          </div>
+          <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-9 h-9 object-contain shrink-0" />
           <div className="leading-none">
             <div className="font-display font-extrabold text-lg tracking-tight">{brand.name}</div>
             <div className="text-[10px] text-mv-dim tracking-wider uppercase mt-0.5">{brand.tag}</div>
@@ -130,9 +128,7 @@ export default function AppShell({ children }) {
         {/* Top header */}
         <header className="h-16 sticky top-0 z-20 glass border-b border-mv-border flex items-center gap-3 px-4 sm:px-6">
           <div className="lg:hidden flex items-center gap-2 mr-1">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
-              <brand.icon className="w-4 h-4 text-white" fill="white" />
-            </div>
+            <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-8 h-8 object-contain shrink-0" />
             <span className="font-display font-bold">{brand.name}</span>
           </div>
           <button onClick={() => setSearchOpen(true)} data-testid="open-search"

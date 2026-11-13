@@ -5,7 +5,7 @@ import api from "../../lib/api";
 import { timeAgo } from "../../lib/format";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 
-const DOT = { red: "bg-red-500", amber: "bg-amber-500", green: "bg-green-500", blue: "bg-blue-500" };
+const DOT = { red: "bg-red-500", amber: "bg-amber-500", green: "bg-green-500", blue: "bg-red-500" };
 
 export default function Notifications() {
   const [items, setItems] = useState([]);

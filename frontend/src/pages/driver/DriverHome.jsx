@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { useNativeCamera } from "../../hooks/useNativeCamera";
 
 const STATUS_UI = {
-  active: { dot: "bg-emerald-500", label: "Active", text: "text-emerald-600" },
+  active: { dot: "bg-red-500", label: "Active", text: "text-red-600" },
   overdue: { dot: "bg-amber-500", label: "Overdue", text: "text-amber-600" },
   blocked: { dot: "bg-red-500", label: "Blocked", text: "text-red-600" },
 };
@@ -268,9 +268,9 @@ export default function DriverHome() {
             {(isTripCompletedToday || canShowStartBtn) && (
               <button 
                 onClick={() => setShowEndModal(true)}
-                className="absolute right-5 bottom-40 w-16 h-16 bg-gradient-to-b from-emerald-500 to-teal-700 rounded-full shadow-[0_8px_30px_rgb(16,185,129,0.6)] flex flex-col items-center justify-center text-white hover:scale-105 active:scale-95 transition-all border-4 border-white group pointer-events-auto"
+                className="absolute right-5 bottom-40 w-16 h-16 bg-gradient-to-b from-red-500 to-teal-700 rounded-full shadow-[0_8px_30px_rgb(16,185,129,0.6)] flex flex-col items-center justify-center text-white hover:scale-105 active:scale-95 transition-all border-4 border-white group pointer-events-auto"
               >
-                <div className="absolute inset-0 rounded-full border-4 border-emerald-500/30 animate-ping" style={{ animationDuration: '3s' }}></div>
+                <div className="absolute inset-0 rounded-full border-4 border-red-500/30 animate-ping" style={{ animationDuration: '3s' }}></div>
                 <span className="text-[11px] font-black tracking-widest leading-none mt-1">START</span>
                 <span className="text-[11px] font-black tracking-widest leading-none">TRIP</span>
               </button>
@@ -296,7 +296,7 @@ export default function DriverHome() {
             )}
 
             <div className="flex flex-col items-center text-center mt-2 mb-6">
-              <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${activeTripId ? 'bg-red-100 text-red-500' : 'bg-indigo-100 text-indigo-500'}`}>
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${activeTripId ? 'bg-red-100 text-red-500' : 'bg-red-100 text-red-500'}`}>
                 <Camera className="w-8 h-8" />
               </div>
               <h2 className="text-xl font-extrabold text-slate-900 mb-2">{modalTitle}</h2>
@@ -374,11 +374,11 @@ export default function DriverHome() {
                     if (file) setOdoImage(file);
                   }}
                   disabled={camLoading}
-                  className={`relative h-32 w-full rounded-2xl border-2 flex flex-col items-center justify-center overflow-hidden transition-colors ${odoImage ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300 bg-slate-50'}`}>
+                  className={`relative h-32 w-full rounded-2xl border-2 flex flex-col items-center justify-center overflow-hidden transition-colors ${odoImage ? 'border-red-500 bg-red-50/50' : 'border-slate-200 hover:border-slate-300 bg-slate-50'}`}>
                   {odoImage ? (
                     <div className="absolute inset-0 w-full h-full">
                       <img src={URL.createObjectURL(odoImage)} alt="Preview" className="w-full h-full object-cover opacity-80" />
-                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-indigo-900/30">
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-900/30">
                         <CheckCircle className="w-8 h-8 text-white mb-1 shadow-sm" />
                         <span className="font-bold text-white text-sm drop-shadow-md">Captured</span>
                       </div>
@@ -386,7 +386,7 @@ export default function DriverHome() {
                   ) : (
                     <>
                       {camLoading ? (
-                        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin mb-1.5" />
+                        <Loader2 className="w-6 h-6 text-red-500 animate-spin mb-1.5" />
                       ) : (
                         <Camera className="w-6 h-6 text-slate-400 mb-1.5" />
                       )}
@@ -400,14 +400,14 @@ export default function DriverHome() {
                 placeholder="Enter exact meter reading"
                 value={odoReading}
                 onChange={e => setOdoReading(e.target.value)}
-                className="w-full h-12 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 font-medium outline-none focus:border-indigo-500 focus:bg-white transition-colors"
+                className="w-full h-12 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 font-medium outline-none focus:border-red-500 focus:bg-white transition-colors"
                 required
               />
               
               <button 
                 type="submit" 
                 disabled={odoLoading}
-                className={`w-full h-12 text-white rounded-xl font-bold flex items-center justify-center disabled:opacity-50 transition-colors ${activeTripId ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-500 hover:bg-indigo-600'}`}
+                className={`w-full h-12 text-white rounded-xl font-bold flex items-center justify-center disabled:opacity-50 transition-colors ${activeTripId ? 'bg-red-500 hover:bg-red-600' : 'bg-red-500 hover:bg-red-600'}`}
               >
                 {odoLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Submit Reading"}
               </button>
@@ -446,7 +446,7 @@ export default function DriverHome() {
               
               <button 
                 onClick={() => { setShowKycModal(false); nav("/driver/kyc"); }}
-                className="w-full h-12 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-bold transition-colors"
+                className="w-full h-12 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-bold transition-colors"
               >
                 Complete KYC
               </button>
@@ -461,102 +461,102 @@ export default function DriverHome() {
       </div>
 
       {!isApprovedHidden && kycStatus === "approved" && (
-        <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-3xl flex items-start gap-3 mv-rise">
-          <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center shrink-0">
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-3xl flex items-start gap-3 mv-rise">
+          <div className="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center shrink-0">
             <ShieldCheck className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 pt-0.5">
-            <h3 className="font-bold text-emerald-900 text-sm">KYC Approved Successfully</h3>
-            <p className="text-emerald-700 text-xs mt-0.5 font-medium">Your documents have been verified.</p>
+            <h3 className="font-bold text-red-900 text-sm">KYC Approved Successfully</h3>
+            <p className="text-red-700 text-xs mt-0.5 font-medium">Your documents have been verified.</p>
           </div>
-          <button onClick={async () => { setHideApproved(true); try { await dapi.post("/driver/kyc/ack-approved"); } catch (e) {} }} className="p-1 text-emerald-400 hover:text-emerald-600 bg-emerald-100/50 rounded-full">
+          <button onClick={async () => { setHideApproved(true); try { await dapi.post("/driver/kyc/ack-approved"); } catch (e) {} }} className="p-1 text-red-400 hover:text-red-600 bg-red-100/50 rounded-full">
             <XCircle className="w-5 h-5" />
           </button>
         </div>
       )}
       
       {kyc === "submitted" && (
-        <div className="rounded-3xl bg-blue-50 border border-blue-200 p-4 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shrink-0">
+        <div className="rounded-3xl bg-red-50 border border-red-200 p-4 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center shrink-0">
             <ShieldCheck className="w-6 h-6 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="font-bold text-blue-900 text-sm">Under Review</h3>
-            <p className="text-blue-700 text-xs mt-0.5 font-medium">Your KYC is being verified</p>
+            <h3 className="font-bold text-red-900 text-sm">Under Review</h3>
+            <p className="text-red-700 text-xs mt-0.5 font-medium">Your KYC is being verified</p>
           </div>
         </div>
       )}
 
       {/* Green Hero Card */}
-      <div className="rounded-[1.5rem] bg-gradient-to-br from-emerald-700 to-emerald-950 text-white p-6 shadow-xl relative overflow-hidden">
+      <div className="rounded-[1.5rem] bg-gradient-to-br from-red-700 to-red-950 text-white p-6 shadow-xl relative overflow-hidden">
         <div className="flex items-center gap-2 mb-2">
-          <Ticket className="w-5 h-5 text-emerald-200" />
-          <span className="text-sm font-medium text-emerald-100 tracking-wide">
+          <Ticket className="w-5 h-5 text-red-200" />
+          <span className="text-sm font-medium text-red-100 tracking-wide">
             {rental?.vehicle_reg || "NO VEHICLE ASSIGNED"} 
             {driver?.vehicle_plate && driver.vehicle_plate !== rental?.vehicle_reg ? ` • ${driver.vehicle_plate}` : ""}
           </span>
         </div>
         
         <h2 className="text-4xl font-extrabold tracking-tight mb-1">{driver?.package_name || rental?.package_name || "N/A"}</h2>
-        <p className="text-xs text-emerald-300 font-bold tracking-widest uppercase mb-6">
+        <p className="text-xs text-red-300 font-bold tracking-widest uppercase mb-6">
           {driver?.name || "UNKNOWN"} - {driver?.city || "LOCATION"}
         </p>
 
         <div className="grid grid-cols-2 gap-y-4 gap-x-8 text-sm">
           <div>
-            <div className="text-emerald-300/80 mb-0.5 text-xs">Start Date</div>
+            <div className="text-red-300/80 mb-0.5 text-xs">Start Date</div>
             <div className="font-semibold">{rental?.start_date ? new Date(rental.start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : "—"}</div>
           </div>
           <div>
-            <div className="text-emerald-300/80 mb-0.5 text-xs">End Date</div>
+            <div className="text-red-300/80 mb-0.5 text-xs">End Date</div>
             <div className="font-semibold">Ongoing</div>
           </div>
           <div>
-            <div className="text-emerald-300/80 mb-0.5 text-xs">Package Pattern</div>
+            <div className="text-red-300/80 mb-0.5 text-xs">Package Pattern</div>
             <div className="font-semibold">{rental?.package_category === "commission" ? "Commission package" : rental?.package_category === "salary" ? "Salary package" : "Daily Rent"}</div>
           </div>
           <div>
-            <div className="text-emerald-300/80 mb-0.5 text-xs">Value</div>
+            <div className="text-red-300/80 mb-0.5 text-xs">Value</div>
             <div className="font-semibold">{rental?.package_category === "commission" ? (rental?.commission_percent != null ? `${rental.commission_percent}%` : "—") : rental?.package_category === "salary" ? "Collected amount" : inr(rental?.daily_rate || driver?.package_rate || 0)}</div>
           </div>
           
-          <div className="col-span-2 mt-2 pt-4 border-t border-emerald-600/30">
+          <div className="col-span-2 mt-2 pt-4 border-t border-red-600/30">
             <div className="grid grid-cols-1 gap-3">
 
               {/* Daily KM Limit */}
-              <div className="bg-emerald-800/50 rounded-2xl p-3">
-                <div className="text-[10px] text-emerald-300/70 font-semibold uppercase tracking-wider mb-2">Monthly Limit</div>
+              <div className="bg-red-800/50 rounded-2xl p-3">
+                <div className="text-[10px] text-red-300/70 font-semibold uppercase tracking-wider mb-2">Monthly Limit</div>
                 <div className="text-2xl font-extrabold leading-none">
                   {(driver.monthly_km_limit || (driver.daily_limit_km || 0) * 30)}
-                  <span className="text-xs font-normal text-emerald-300/80 ml-1">km</span>
+                  <span className="text-xs font-normal text-red-300/80 ml-1">km</span>
                 </div>
                 <div className="mt-2">
-                  <div className="flex justify-between text-[11px] text-emerald-300/80 mb-1">
+                  <div className="flex justify-between text-[11px] text-red-300/80 mb-1">
                     <span>This month: <span className="font-bold text-white">{driver.month_km_used || 0} km</span></span>
                     <span>{Math.max(0, (driver.monthly_km_limit || (driver.daily_limit_km || 0) * 30) - (driver.month_km_used || 0))} left</span>
                   </div>
-                  <div className="w-full bg-emerald-900/60 rounded-full h-1.5 overflow-hidden">
+                  <div className="w-full bg-red-900/60 rounded-full h-1.5 overflow-hidden">
                     <div 
-                      className="bg-emerald-400 h-1.5 rounded-full transition-all"
+                      className="bg-red-400 h-1.5 rounded-full transition-all"
                       style={{ width: `${Math.min(100, ((driver.month_km_used || 0) / ((driver.monthly_km_limit || (driver.daily_limit_km || 0) * 30) || 1)) * 100)}%` }}
                     />
                   </div>
-                  <div className="text-[10px] text-emerald-300/60 mt-1">
+                  <div className="text-[10px] text-red-300/60 mt-1">
                     {(driver.today_extra_km || 0) > 0 ? `${driver.today_extra_km} km over today's limit` : "Resets every month"}
                   </div>
                 </div>
               </div>
 
             </div>
-            <div className="text-[10px] text-emerald-300/60 leading-tight mt-2 text-center">
+            <div className="text-[10px] text-red-300/60 leading-tight mt-2 text-center">
               Overage ₹{driver.overage_per_km || 0}/km above the monthly limit · Extra km billed separately
             </div>
             
             {/* Paid Leave Status */}
-            {/* <div className="col-span-2 mt-4 pt-4 border-t border-emerald-600/30">
+            {/* <div className="col-span-2 mt-4 pt-4 border-t border-red-600/30">
               <div className="bg-white/10 rounded-xl p-4 border border-white/5 flex items-center justify-between">
                 <div>
-                  <div className="text-[10px] text-emerald-200 font-semibold uppercase tracking-wider mb-1">Paid Leaves</div>
+                  <div className="text-[10px] text-red-200 font-semibold uppercase tracking-wider mb-1">Paid Leaves</div>
                   <div className="text-sm font-bold text-white">
                     {driver?.leaves_taken_this_month || 0} / {driver?.leave_quota || 0} Used
                   </div>
@@ -566,7 +566,7 @@ export default function DriverHome() {
                 </div>
                 <button 
                   onClick={() => setShowLeaveModal(true)}
-                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
+                  className="bg-red-500 hover:bg-red-400 text-slate-900 px-4 py-2 rounded-lg text-xs font-bold transition-colors"
                 >
                   Apply Leave
                 </button>
@@ -604,7 +604,7 @@ export default function DriverHome() {
       {/* Deposit CTA */}
       {(!depositPaid && deposit?.amount > 0) && (
         <button onClick={() => setPay("deposit")} data-testid="home-pay-deposit-btn"
-          className="w-full h-12 rounded-2xl bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors mt-5">
+          className="w-full h-12 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition-colors mt-5">
           Pay Security Deposit. {inr(deposit.pay_now)}
         </button>
       )}
@@ -638,7 +638,7 @@ export default function DriverHome() {
           </div>
           <button 
             onClick={() => setPay((account?.extra_km_due || 0) > 0 ? "extra_km" : "daily")}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 h-12 rounded-xl font-semibold transition-colors"
+            className="bg-red-600 hover:bg-red-700 text-white px-6 h-12 rounded-xl font-semibold transition-colors"
           >
             Proceed to Payment
           </button>
@@ -653,7 +653,7 @@ export default function DriverHome() {
           <div className="relative bg-white rounded-t-3xl p-6 shadow-2xl animate-in slide-in-from-bottom flex flex-col max-h-[90vh]">
             <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600">
                 <Calendar className="w-5 h-5" />
               </div>
               <div>
@@ -675,7 +675,7 @@ export default function DriverHome() {
               min={new Date().toLocaleDateString('en-CA')} 
               value={leaveDate}
               onChange={(e) => setLeaveDate(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none mb-4"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none mb-4"
             />
             
             {leaveError && (
@@ -687,7 +687,7 @@ export default function DriverHome() {
             <button 
               onClick={handleApplyLeave}
               disabled={leaveLoading}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] transition-all text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2"
+              className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.98] transition-all text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2"
             >
               {leaveLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirm Leave"}
             </button>

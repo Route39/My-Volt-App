@@ -64,8 +64,8 @@ export default function PackageLock({ children }) {
   return (
     <div className="min-h-[70vh] flex items-center justify-center">
       <div className="bg-white rounded-3xl border border-slate-100 shadow-xl p-10 w-full max-w-sm text-center">
-        <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto mb-6">
-          <Lock className="w-8 h-8 text-indigo-600" />
+        <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-6">
+          <Lock className="w-8 h-8 text-red-600" />
         </div>
         <h2 className="text-2xl font-extrabold text-slate-900">Rental Packages</h2>
         <p className="text-slate-500 text-sm mt-2 mb-8">This page is protected. Enter the password to access it.</p>
@@ -78,7 +78,7 @@ export default function PackageLock({ children }) {
             onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
             placeholder="Enter password"
             autoFocus
-            className="w-full h-12 px-4 pr-12 rounded-xl border border-slate-200 bg-slate-50 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 text-slate-900 transition-all"
+            className="w-full h-12 px-4 pr-12 rounded-xl border border-slate-200 bg-slate-50 outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100 text-slate-900 transition-all"
           />
           <button
             type="button"
@@ -94,7 +94,7 @@ export default function PackageLock({ children }) {
         <button
           onClick={handleUnlock}
           disabled={loading}
-          className="w-full h-12 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          className="w-full h-12 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><ShieldCheck className="w-5 h-5" /> Unlock</>}
         </button>

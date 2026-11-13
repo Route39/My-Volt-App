@@ -173,8 +173,8 @@ export default function Drivers() {
                   {d.driver_code && <div className="text-[11px] font-mono font-semibold text-mv-primary">{d.driver_code}</div>}
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {d.is_online ? (
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Online
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600 border border-red-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Online
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-500/10 text-slate-500 border border-slate-500/20">
@@ -215,7 +215,7 @@ export default function Drivers() {
                     if(window.confirm("Unblock this driver? They will have 24 hours to pay.")) {
                       try { await api.post(`/admin/drivers/${d.id}/unblock`); load(); } catch(err) { alert("Failed to unblock"); }
                     }
-                  }} className="text-[10px] text-emerald-600 font-bold hover:underline px-2 py-1 bg-emerald-50 rounded-lg">Unblock Driver</button>
+                  }} className="text-[10px] text-red-600 font-bold hover:underline px-2 py-1 bg-red-50 rounded-lg">Unblock Driver</button>
                 </div>
               )} */}
             </button>
@@ -258,7 +258,7 @@ export default function Drivers() {
                       if(window.confirm("Unblock this driver?")) {
                         try { await api.post(`/admin/drivers/${d.id}/unblock`); load(); } catch(err) { alert("Failed to unblock"); }
                       }
-                    }} className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded text-[10px] font-bold mr-2 transition-colors border border-emerald-200">
+                    }} className="p-1.5 text-red-600 hover:bg-red-50 rounded text-[10px] font-bold mr-2 transition-colors border border-red-200">
                       Unblock
                     </button>
                   )}
@@ -353,7 +353,7 @@ function ImportDriversDialog({ open, setOpen, onDone }) {
           className="block w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-mv-elevated file:text-mv-text" />
         {result && (
           <div className="space-y-2">
-            <p className="text-sm"><b className="text-emerald-600">{result.created} created</b>{result.errors?.length ? <>, <b className="text-red-500">{result.errors.length} skipped</b></> : null}</p>
+            <p className="text-sm"><b className="text-red-600">{result.created} created</b>{result.errors?.length ? <>, <b className="text-red-500">{result.errors.length} skipped</b></> : null}</p>
             {result.errors?.length > 0 && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3 max-h-48 overflow-y-auto text-xs space-y-1">
                 {result.errors.map((er) => <div key={er.row}>Row {er.row}{er.name ? ` (${er.name})` : ""}: {er.error}</div>)}

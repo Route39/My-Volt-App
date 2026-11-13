@@ -237,7 +237,7 @@ function ImportVehiclesDialog({ open, setOpen, onDone }) {
           className="block w-full text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-mv-elevated file:text-mv-text" />
         {result && (
           <div className="space-y-2">
-            <p className="text-sm"><b className="text-emerald-600">{result.created} created</b>{result.errors?.length ? <>, <b className="text-red-500">{result.errors.length} skipped</b></> : null}</p>
+            <p className="text-sm"><b className="text-red-600">{result.created} created</b>{result.errors?.length ? <>, <b className="text-red-500">{result.errors.length} skipped</b></> : null}</p>
             {result.errors?.length > 0 && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3 max-h-48 overflow-y-auto text-xs space-y-1">
                 {result.errors.map((er) => <div key={er.row}>Row {er.row}{er.name ? ` (${er.name})` : ""}: {er.error}</div>)}
@@ -398,10 +398,10 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
                 <button
                   type="button"
                   onClick={handleUseSuggestion}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 transition-colors shadow-sm"
                   title="Auto-fill the next recommended code"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <Sparkles className="w-3.5 h-3.5 text-red-600" />
                   Suggest Next: <span className="font-mono font-bold">{suggestedCode}</span>
                 </button>
               )}
@@ -416,14 +416,14 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
                   codeError
                     ? "border-red-500 focus:border-red-500 bg-red-50/10 text-red-600"
                     : isUnique && form.vehicle_number
-                    ? "border-emerald-500 focus:border-emerald-500"
+                    ? "border-red-500 focus:border-red-500"
                     : ""
                 }`}
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
                 {(fetchingId || checkingCode) && <Loader2 className="w-4 h-4 animate-spin text-mv-dim" />}
                 {!fetchingId && !checkingCode && codeError && <AlertCircle className="w-4 h-4 text-red-500" />}
-                {!fetchingId && !checkingCode && isUnique && form.vehicle_number && <CheckCircle className="w-4 h-4 text-emerald-500" />}
+                {!fetchingId && !checkingCode && isUnique && form.vehicle_number && <CheckCircle className="w-4 h-4 text-red-500" />}
               </div>
             </div>
             {codeError ? (
@@ -432,7 +432,7 @@ function AddVehicleDialog({ open, setOpen, onDone }) {
                 {codeError}
               </p>
             ) : isUnique && form.vehicle_number ? (
-              <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1 font-medium">
+              <p className="text-xs text-red-600 mt-1 flex items-center gap-1 font-medium">
                 <CheckCircle className="w-3.5 h-3.5 shrink-0" />
                 Vehicle Code is available
               </p>

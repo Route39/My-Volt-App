@@ -118,14 +118,14 @@ export default function OdometerApprovals() {
                 type="date" 
                 value={fromDate} 
                 onChange={e => setFromDate(e.target.value)}
-                className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-indigo-500 outline-none" 
+                className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-red-500 outline-none" 
               />
               <span className="text-slate-500">to</span>
               <input 
                 type="date" 
                 value={toDate} 
                 onChange={e => setToDate(e.target.value)}
-                className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-indigo-500 outline-none" 
+                className="h-10 px-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-red-500 outline-none" 
               />
             </div>
           )}
@@ -137,7 +137,7 @@ export default function OdometerApprovals() {
               placeholder="Search driver name..." 
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="h-10 pl-9 pr-4 rounded-xl border border-slate-200 bg-white w-full md:w-64 focus:border-indigo-500 outline-none transition-colors text-sm"
+              className="h-10 pl-9 pr-4 rounded-xl border border-slate-200 bg-white w-full md:w-64 focus:border-red-500 outline-none transition-colors text-sm"
             />
           </div>
         </div>
@@ -153,7 +153,7 @@ export default function OdometerApprovals() {
               <th className="px-3 py-4 whitespace-nowrap text-amber-600">Daily Rent</th>
               <th className="px-3 py-4 whitespace-nowrap">Start KM</th>
               <th className="px-3 py-4 whitespace-nowrap">End KM</th>
-              <th className="px-3 py-4 whitespace-nowrap text-indigo-600">Today Driven</th>
+              <th className="px-3 py-4 whitespace-nowrap text-red-600">Today Driven</th>
               <th className="px-3 py-4 whitespace-nowrap text-red-500">Extra KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Daily KM</th>
               <th className="px-3 py-4 whitespace-nowrap text-center">Status</th>
@@ -201,7 +201,7 @@ export default function OdometerApprovals() {
                           {log.driver_name}
                           <div><DriverCode id={log.driver_id} /></div>
                           {idx === 0 && g.items.length > 1 && (
-                            <div className="text-[10px] font-semibold text-indigo-600">+{g.items.length - 1} more trip{g.items.length - 1 > 1 ? "s" : ""}</div>
+                            <div className="text-[10px] font-semibold text-red-600">+{g.items.length - 1} more trip{g.items.length - 1 > 1 ? "s" : ""}</div>
                           )}
                         </div>
                       </div>
@@ -213,7 +213,7 @@ export default function OdometerApprovals() {
                     
                     {/* Package */}
                     <td className="px-3 py-4 whitespace-nowrap">
-                      {idx === 0 && (<span className="text-xs font-semibold bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full whitespace-nowrap">
+                      {idx === 0 && (<span className="text-xs font-semibold bg-red-50 text-red-700 px-2 py-1 rounded-full whitespace-nowrap">
                         {log.package_name || "—"}
                       </span>)}
                     </td>
@@ -233,7 +233,7 @@ export default function OdometerApprovals() {
                     <td className="px-3 py-4 whitespace-nowrap">
                       {driven > 0 ? (
                         <div>
-                          <span className={`font-bold text-base ${overDaily ? "text-red-600" : "text-indigo-600"}`}>
+                          <span className={`font-bold text-base ${overDaily ? "text-red-600" : "text-red-600"}`}>
                             {driven} km
                           </span>
                         </div>
@@ -251,7 +251,7 @@ export default function OdometerApprovals() {
                           </div>
                         ) : (
                           <div>
-                            <div className="font-semibold text-emerald-600">Within Limit</div>
+                            <div className="font-semibold text-red-600">Within Limit</div>
                             <div className="text-[10px] text-slate-400">No overage</div>
                           </div>
                         )
@@ -267,7 +267,7 @@ export default function OdometerApprovals() {
                         <div className="text-[10px] text-slate-400 mb-1">All trips of this day</div>
                         <div className="w-28 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                           <div
-                            className={`h-full rounded-full ${overLimit ? "bg-red-500" : percent > 80 ? "bg-amber-500" : "bg-emerald-500"}`}
+                            className={`h-full rounded-full ${overLimit ? "bg-red-500" : percent > 80 ? "bg-amber-500" : "bg-red-500"}`}
                             style={{ width: `${percent}%` }}
                           />
                         </div>
@@ -276,7 +276,7 @@ export default function OdometerApprovals() {
                     
                     {/* Status */}
                     <td className="px-3 py-4 text-center whitespace-nowrap">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${log.status === "active" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${log.status === "active" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
                         {log.status === "active" ? "In Progress" : "Completed"}
                       </span>
                     </td>
@@ -287,7 +287,7 @@ export default function OdometerApprovals() {
                         {(log.start_image_url || log.image_url) && (
                           <button
                             onClick={() => setImgModal(imgUrl(log.start_image_url || log.image_url))}
-                            className="p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg inline-flex"
+                            className="p-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg inline-flex"
                             title="View Start Photo"
                           >
                             <ImageIcon className="w-4 h-4" />

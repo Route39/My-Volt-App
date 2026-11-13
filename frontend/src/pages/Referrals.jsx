@@ -42,7 +42,7 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
     };
 
     const list = (items || []).filter((r) => {
-        const s = q.toLowerCase();
+        const s = q.trim().toLowerCase();
         return !s || [r.referred_name, r.referred_phone, r.referrer_name].some((v) => (v || "").toLowerCase().includes(s));
     });
 
@@ -126,12 +126,12 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                   <td className="p-4">
                     <div className="font-semibold">{r.days_driven || 0} <span className="text-mv-dim font-normal">/ {r.total_days || 60}</span></div>
                     <div className="w-24 h-1.5 bg-mv-elevated rounded-full mt-1 overflow-hidden">
-                      <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, ((r.days_driven || 0) / (r.total_days || 60)) * 100)}%` }} />
+                      <div className="h-full bg-red-500" style={{ width: `${Math.min(100, ((r.days_driven || 0) / (r.total_days || 60)) * 100)}%` }} />
                     </div>
                     {(r.batch_progress || []).map((b, i) => (
                       <div key={i} className="text-[11px] mt-1 whitespace-nowrap">
                         <span className="text-mv-dim">Batch {i + 1}:</span>{" "}
-                        <span className={b.done >= b.total ? "text-emerald-600 font-semibold" : "font-semibold"}>{b.done} / {b.total}</span>
+                        <span className={b.done >= b.total ? "text-red-600 font-semibold" : "font-semibold"}>{b.done} / {b.total}</span>
                         <span className="text-mv-dim"> days</span>
                       </div>
                     ))}
@@ -141,7 +141,7 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                     {(r.batches || [{ target: 30, amount: 1000 }, { target: 60, amount: 1500 }]).map((b, i) => (
                       <RewardLine key={i} amount={b.amount} target={b.target} days={r.days_driven || 0} />
                     ))}
-                    <div className="font-bold text-emerald-600 pt-1">Earned: ₹{(r.reward_earned || 0).toLocaleString("en-IN")}</div>
+                    <div className="font-bold text-red-600 pt-1">Earned: ₹{(r.reward_earned || 0).toLocaleString("en-IN")}</div>
                   </td>
                                     {canEdit && (
                                         <td className="p-4">
@@ -315,7 +315,7 @@ function ReferralDialog({ value, setValue, fixedReferrerId, fixedReferrerName, f
 
 function RewardLine({ amount, target, days }) {
   return days >= target
-    ? <div className="text-emerald-600 font-semibold">✅ ₹{amount} · {target} days done</div>
+    ? <div className="text-red-600 font-semibold">✅ ₹{amount} · {target} days done</div>
     : <div className="text-mv-dim">⏳ ₹{amount} · {target - days} days left</div>;
 }
 

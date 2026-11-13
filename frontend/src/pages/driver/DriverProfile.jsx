@@ -14,10 +14,10 @@ import { useNativeCamera } from "../../hooks/useNativeCamera";
 
 const STATUS_CONFIG = {
   active: {
-    bg: "bg-emerald-500/10",
-    text: "text-emerald-700",
-    border: "border-emerald-200",
-    dot: "bg-emerald-500",
+    bg: "bg-red-500/10",
+    text: "text-red-700",
+    border: "border-red-200",
+    dot: "bg-red-500",
     label: "Active"
   },
   overdue: {
@@ -40,7 +40,7 @@ const getPackageBadge = (packageName = "") => {
   const name = packageName.toLowerCase();
   if (name.includes("executive")) {
     return {
-      gradient: "from-purple-600 to-indigo-700",
+      gradient: "from-purple-600 to-red-700",
       pill: "bg-purple-100 text-purple-700 border-purple-200",
       tag: "Executive Tier"
     };
@@ -54,8 +54,8 @@ const getPackageBadge = (packageName = "") => {
   }
   if (name.includes("economy") || name.includes("silver")) {
     return {
-      gradient: "from-emerald-500 to-teal-600",
-      pill: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      gradient: "from-red-500 to-teal-600",
+      pill: "bg-red-100 text-red-800 border-red-200",
       tag: "Economy Tier"
     };
   }
@@ -108,24 +108,24 @@ export default function DriverProfile() {
   return (
     <div className="px-4 pt-4 pb-24 space-y-4 max-w-lg mx-auto" data-testid="driver-profile">
       {/* ─── LUXE HERO HEADER CARD ─────────────────────────────────────── */}
-      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-900 via-emerald-950 to-slate-900 text-white p-6 shadow-xl shadow-emerald-950/20 border border-emerald-500/20">
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-slate-900 via-red-950 to-slate-900 text-white p-6 shadow-xl shadow-red-950/20 border border-red-500/20">
         {/* Ambient blurred glow in corner */}
-        <div className="absolute -top-12 -right-12 w-44 h-44 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -top-12 -right-12 w-44 h-44 bg-red-500/20 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-teal-500/10 rounded-full blur-2xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col items-center text-center">
           {/* Avatar Ring */}
           <div className="relative">
-            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-400 via-teal-500 to-emerald-600 p-1 shadow-lg shadow-emerald-900/40">
-              <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center border-2 border-emerald-400/40">
-                <span className="text-2xl font-black text-emerald-300 tracking-wider">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-red-400 via-teal-500 to-red-600 p-1 shadow-lg shadow-red-900/40">
+              <div className="w-full h-full rounded-full bg-slate-900 flex items-center justify-center border-2 border-red-400/40">
+                <span className="text-2xl font-black text-red-300 tracking-wider">
                   {initials}
                 </span>
               </div>
             </div>
             {/* Status dot indicator */}
             <div
-              className={`absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-slate-900 ${statusCfg.dot} shadow-sm ring-2 ring-emerald-400/30`}
+              className={`absolute bottom-1 right-1 w-5 h-5 rounded-full border-2 border-slate-900 ${statusCfg.dot} shadow-sm ring-2 ring-red-400/30`}
               title={statusCfg.label}
             />
           </div>
@@ -139,8 +139,8 @@ export default function DriverProfile() {
             {/* KYC Badge */}
             <div className="mt-1 flex items-center justify-center gap-2 flex-wrap">
               {isKycApproved ? (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 backdrop-blur-md">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" /> KYC Verified
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-red-500/20 text-red-300 border border-red-500/30 backdrop-blur-md">
+                  <CheckCircle2 className="w-3 h-3 text-red-400" /> KYC Verified
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 backdrop-blur-md">
@@ -157,7 +157,7 @@ export default function DriverProfile() {
                 >
                   {driver.driver_code}
                   {copiedCode ? (
-                    <Check className="w-3 h-3 text-emerald-400" />
+                    <Check className="w-3 h-3 text-red-400" />
                   ) : (
                     <Copy className="w-3 h-3 text-slate-400" />
                   )}
@@ -172,7 +172,7 @@ export default function DriverProfile() {
               href={`tel:${driver.phone}`}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
             >
-              <Phone className="w-3 h-3 text-emerald-400" /> {driver.phone}
+              <Phone className="w-3 h-3 text-red-400" /> {driver.phone}
             </a>
             {driver.city && (
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/5 border border-white/10 text-slate-300">
@@ -200,7 +200,7 @@ export default function DriverProfile() {
         <div className="rounded-2xl bg-white border border-slate-100 p-3 shadow-sm text-center">
           <div className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">This Month</div>
           <div className="mt-1 text-sm font-bold text-slate-900 flex items-center justify-center gap-1">
-            <Zap className="w-3.5 h-3.5 text-emerald-600" />
+            <Zap className="w-3.5 h-3.5 text-red-600" />
             <span>{driver.current_month_kms || 0}</span>
             <span className="text-[11px] font-normal text-slate-400">km</span>
           </div>
@@ -221,7 +221,7 @@ export default function DriverProfile() {
       <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
               <Bike className="w-4 h-4" />
             </div>
             <div>
@@ -289,8 +289,8 @@ export default function DriverProfile() {
               Dues: {inr(account.outstanding_amount)}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <Check className="w-3 h-3 text-emerald-600" /> Dues Clear
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+              <Check className="w-3 h-3 text-red-600" /> Dues Clear
             </span>
           )}
         </div>
@@ -306,7 +306,7 @@ export default function DriverProfile() {
               <span
                 className={`text-xs px-2.5 py-1 rounded-full font-semibold capitalize ${
                   deposit?.status === "paid"
-                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    ? "bg-red-50 text-red-700 border border-red-200"
                     : deposit?.status === "partial"
                     ? "bg-amber-50 text-amber-700 border border-amber-200"
                     : "bg-slate-100 text-slate-600 border border-slate-200"
@@ -332,7 +332,7 @@ export default function DriverProfile() {
             <span
               className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
                 account?.today_paid
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  ? "bg-red-50 text-red-700 border border-red-200"
                   : "bg-amber-50 text-amber-700 border border-amber-200"
               }`}
             >
@@ -350,7 +350,7 @@ export default function DriverProfile() {
           className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-slate-50 rounded-2xl transition-colors text-left"
         >
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
               <Wallet className="w-4 h-4" />
             </div>
             <div>
@@ -530,7 +530,7 @@ function OdometerImageUpload() {
     <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm space-y-3.5" data-testid="driver-odometer-images">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
             <Camera className="w-4 h-4" />
           </div>
           <div>
@@ -553,9 +553,9 @@ function OdometerImageUpload() {
         type="button"
         onClick={onTakeOrChoose}
         disabled={uploading || camLoading}
-        className="w-full h-12 rounded-2xl border-2 border-dashed border-emerald-200 hover:border-emerald-500 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-700 font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-60"
+        className="w-full h-12 rounded-2xl border-2 border-dashed border-red-200 hover:border-red-500 bg-red-50/50 hover:bg-red-50 text-red-700 font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-60"
       >
-        <Camera className="w-4 h-4 text-emerald-600" />
+        <Camera className="w-4 h-4 text-red-600" />
         <span>Take Photo / Choose Image</span>
       </button>
 
@@ -587,7 +587,7 @@ function OdometerImageUpload() {
             type="button"
             onClick={onSubmit}
             disabled={uploading}
-            className="w-full h-11 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center justify-center gap-2 shadow-sm shadow-emerald-200 transition-all active:scale-[0.99] disabled:opacity-60"
+            className="w-full h-11 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold flex items-center justify-center gap-2 shadow-sm shadow-red-200 transition-all active:scale-[0.99] disabled:opacity-60"
           >
             {uploading ? (
               <>

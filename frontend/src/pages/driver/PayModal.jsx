@@ -128,22 +128,22 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
 
         {phase === "success" ? (
           <div className="text-center py-2" data-testid="pay-success">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-9 h-9 text-emerald-600" />
+            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 className="w-9 h-9 text-red-600" />
             </div>
             <h3 className="text-xl font-bold text-slate-900">Payment Confirmed</h3>
             <div className="text-3xl font-extrabold text-slate-900 mt-2">{inr(result?.amount || amount)}</div>
             <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-left space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-slate-500">Transaction ID</span><span className="font-semibold text-slate-800" data-testid="pay-txn">{result?.transaction_id}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Date &amp; Time</span><span className="font-medium text-slate-800">{fmtDate(result?.paid_at, true)}</span></div>
-              {result?.account && <div className="flex justify-between"><span className="text-slate-500">Rental Status</span><span className="font-semibold text-emerald-600 uppercase">{result.account.status}</span></div>}
+              {result?.account && <div className="flex justify-between"><span className="text-slate-500">Rental Status</span><span className="font-semibold text-red-600 uppercase">{result.account.status}</span></div>}
             </div>
             {kind === "outstanding" && result?.account?.status === "active" && (
-              <div className="mt-4 text-sm text-emerald-600 font-semibold space-y-1" data-testid="pay-reactivated">
+              <div className="mt-4 text-sm text-red-600 font-semibold space-y-1" data-testid="pay-reactivated">
                 <div>✓ Payment Confirmed</div>
               </div>
             )}
-            <button onClick={close} data-testid="pay-continue" className="mt-5 w-full h-12 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold transition-colors">Continue</button>
+            <button onClick={close} data-testid="pay-continue" className="mt-5 w-full h-12 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold transition-colors">Continue</button>
           </div>
         ) : (
           <>
@@ -157,14 +157,14 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
             </div>
             {children}
             <button onClick={pay} disabled={phase === "processing" || payDisabled || (askNextDate && !nextDate)} data-testid="pay-now-btn"
-              className="mt-5 w-full h-12 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-70">
+              className="mt-5 w-full h-12 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-70">
               {phase === "processing" ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</> : <>Pay {inr(amount)}</>}
             </button>
             {askNextDate && (
               <div className="mt-4" data-testid="pay-next-date">
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Select date for next half payment</label>
                 <input type="date" min={tomorrowIST()} value={nextDate} onChange={(e) => setNextDate(e.target.value)}
-                  className="w-full h-11 rounded-xl border border-slate-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  className="w-full h-11 rounded-xl border border-slate-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500" />
                 <div className="text-[11px] text-slate-400 mt-1">Pick a date from tomorrow onwards to enable the Pay button.</div>
               </div>
             )}

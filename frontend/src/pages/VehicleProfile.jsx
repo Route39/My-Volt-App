@@ -47,7 +47,7 @@ export default function VehicleProfile() {
 
       {/* Header */}
       <div className="mv-card overflow-hidden mv-rise">
-        <div className="h-32 bg-gradient-to-r from-blue-100 via-blue-50 to-white relative">
+        <div className="h-32 bg-gradient-to-r from-red-100 via-red-50 to-white relative">
           <img src={v.image} alt="" className="w-full h-full object-cover opacity-25" />
           <div className="absolute inset-0 flex items-center px-6 gap-4">
             <div className="w-16 h-16 rounded-2xl bg-mv-surface border border-mv-border flex items-center justify-center shrink-0"><Zap className="w-8 h-8 text-mv-primary" fill="currentColor" /></div>

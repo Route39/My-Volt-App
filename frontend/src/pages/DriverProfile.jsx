@@ -119,7 +119,7 @@ export default function DriverProfile() {
       <div className="mv-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 mv-rise">
         <Avatar className="w-20 h-20"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-xl">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
         <div className="flex-1">
-          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1>{d.driver_code && <span className="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold bg-blue-50 text-mv-primary border border-blue-100">{d.driver_code}</span>}<StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
+          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1>{d.driver_code && <span className="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold bg-red-50 text-mv-primary border border-red-100">{d.driver_code}</span>}<StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
           <div className="flex items-center gap-5 mt-2 text-sm text-mv-muted flex-wrap">
             <span className="flex items-center gap-1.5"><Phone className="w-4 h-4" /> {d.phone}</span>
             <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {d.city}</span>
@@ -141,7 +141,7 @@ export default function DriverProfile() {
                     toast.error(e.response?.data?.detail || "Failed to mark deposit as paid");
                   }
                 }
-              }} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+              }} className="text-red-600 hover:text-red-700 hover:bg-red-50">
                 <Check className="w-4 h-4" /> Mark Deposit Paid (QR)
               </GhostBtn>
             ) : (
@@ -163,8 +163,8 @@ export default function DriverProfile() {
               if (isSpecialPkg) return null;   // Commission / Salary: no "Enable Partial Deposit" and no "Mark Deposit Paid (QR)" buttons
               const partialOn = !!d.deposit_partial_enabled || d.deposit_status === "partial";
               const fullDone = d.deposit_status === "paid";
-              const doneCls = "bg-emerald-50 text-emerald-700 border-emerald-300 cursor-default hover:bg-emerald-50";
-              const doneClickCls = "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100";
+              const doneCls = "bg-red-50 text-red-700 border-red-300 cursor-default hover:bg-red-50";
+              const doneClickCls = "bg-red-50 text-red-700 border-red-300 hover:bg-red-100";
               return (
                 <>
                   <GhostBtn
@@ -189,7 +189,7 @@ export default function DriverProfile() {
                         toast.error(e.response?.data?.detail || "Failed to update partial deposit option");
                       }
                     }}
-                    className={(fullDone && !d.deposit_first_paid_at) ? "opacity-50 cursor-not-allowed " + (partialOn ? doneCls : "") : partialOn ? doneClickCls : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+                    className={(fullDone && !d.deposit_first_paid_at) ? "opacity-50 cursor-not-allowed " + (partialOn ? doneCls : "") : partialOn ? doneClickCls : "text-red-600 hover:text-red-700 hover:bg-red-50"}>
                     <Check className="w-4 h-4" /> {partialOn ? "Partial Deposit Enabled" : "Enable Partial Deposit"}
                   </GhostBtn>
                   <GhostBtn
@@ -216,7 +216,7 @@ export default function DriverProfile() {
                         }
                       }
                     }}
-                    className={fullDone ? "text-orange-600 hover:text-orange-700 hover:bg-orange-50" : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+                    className={fullDone ? "text-orange-600 hover:text-orange-700 hover:bg-orange-50" : "text-red-600 hover:text-red-700 hover:bg-red-50"}>
                     {fullDone ? <AlertTriangle className="w-4 h-4" /> : <Check className="w-4 h-4" />} {fullDone ? "Mark Deposit Unpaid" : "Mark Deposit Paid (QR)"}
                   </GhostBtn>
                   {/* {partialDone && (
@@ -238,13 +238,13 @@ export default function DriverProfile() {
               );
             })()}
             {(!isSpecialPkg || _pkgCat === "salary") && (
-              <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> {_pkgCat === "salary" ? "Rent Paid (Salary)" : "Rent Paid"}</GhostBtn>
+              <GhostBtn onClick={() => setRentOpen(true)} className="text-red-600 hover:text-red-700 hover:bg-red-50"><CalendarDays className="w-4 h-4" /> {_pkgCat === "salary" ? "Rent Paid (Salary)" : "Rent Paid"}</GhostBtn>
             )}
             {(d.admin_block || d.rental_block_status === "blocked") ? (
-              <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
+              <GhostBtn onClick={() => setBlockType("unblock")} className="text-red-600 hover:text-red-700 hover:bg-red-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
             ) : (
               <>
-                <GhostBtn onClick={() => setLeaveOpen(true)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"><CalendarDays className="w-4 h-4" /> Paid Leave</GhostBtn>
+                <GhostBtn onClick={() => setLeaveOpen(true)} className="text-red-600 hover:text-red-700 hover:bg-red-50"><CalendarDays className="w-4 h-4" /> Paid Leave</GhostBtn>
                 <GhostBtn onClick={() => setBlockType("temporary")} className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"><Clock className="w-4 h-4" /> Temporary Block</GhostBtn>
                 <GhostBtn onClick={() => setBlockType("permanent")} className="text-red-500 hover:text-red-600 hover:bg-red-50"><Ban className="w-4 h-4" /> Permanent Block</GhostBtn>
                 <GhostBtn onClick={() => setAssign(true)} data-testid="assign-vehicle-btn"><ArrowRightLeft className="w-4 h-4" /> Change Vehicle</GhostBtn>
@@ -300,7 +300,7 @@ export default function DriverProfile() {
                     }
                   }
                 }}
-                className="mt-3 w-max text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 font-bold px-2 py-1 rounded"
+                className="mt-3 w-max text-[10px] bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-bold px-2 py-1 rounded"
               >
                 + Grant Leave
               </button> */}
@@ -313,7 +313,7 @@ export default function DriverProfile() {
             ) : (d.week_off_requests || []).map((r) => (
               <div key={r.id} className="mt-3 pb-3 border-b border-mv-border last:border-0 last:pb-0">
                 <div className="text-sm font-medium">{(r.dates || []).join(", ")}</div>
-                <div className={`text-xs mt-0.5 capitalize ${r.status === "approved" ? "text-emerald-600" : r.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>{r.status}</div>
+                <div className={`text-xs mt-0.5 capitalize ${r.status === "approved" ? "text-red-600" : r.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>{r.status}</div>
                 {r.status === "pending" && (
                   <div className="flex gap-2 mt-2">
                     <button
@@ -321,7 +321,7 @@ export default function DriverProfile() {
                         try { await api.post(`/admin/drivers/${d.id}/week-off/${r.id}/approve`); toast.success("Week-off approved"); load(); }
                         catch (e) { toast.error(e.response?.data?.detail || "Failed to approve"); }
                       }}
-                      className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-colors">Approve</button>
+                      className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-bold transition-colors">Approve</button>
                     <button
                       onClick={async () => {
                         try { await api.post(`/admin/drivers/${d.id}/week-off/${r.id}/reject`); toast.success("Week-off rejected"); load(); }
@@ -347,7 +347,7 @@ export default function DriverProfile() {
             </div>
             {d.kyc_status === "pending" || d.kyc_status === "submitted" ? (
               <div className="flex gap-3">
-                <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/approve`); toast.success("KYC Approved"); load(); }} className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold transition-colors">Approve KYC</button>
+                <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/approve`); toast.success("KYC Approved"); load(); }} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-colors">Approve KYC</button>
                 <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/reject`); toast.success("KYC Rejected"); load(); }} className="px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold transition-colors">Reject KYC</button>
               </div>
             ) : null}
@@ -555,7 +555,7 @@ function PartialDepositDialog({ open, setOpen, driver, onDone }) {
             disabled={firstPaid && secondPaid}
             title={firstPaid && secondPaid ? "Mark the remaining deposit amount as unpaid first" : ""}
             onClick={() => { const v = !firstPaid; setFirstPaid(v); if (!v) { setPaidDate(undefined); setSecondPaid(false); setSecondDate(undefined); setFirstTxn(""); setSecondTxn(""); } }}
-            className={(firstPaid ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100" : "text-blue-600 hover:text-blue-700 hover:bg-blue-50") + " disabled:opacity-50 disabled:cursor-not-allowed"}>
+            className={(firstPaid ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100" : "text-red-600 hover:text-red-700 hover:bg-red-50") + " disabled:opacity-50 disabled:cursor-not-allowed"}>
             {firstPaid ? "Partial deposit amount unpaid" : "Partial deposit amount paid"}
           </GhostBtn>
           {firstPaid && (
@@ -579,7 +579,7 @@ function PartialDepositDialog({ open, setOpen, driver, onDone }) {
             disabled={!firstPaid || (hasNext && !secondPaid)}
             title={!firstPaid ? "Mark the partial deposit amount as paid first" : (hasNext && !secondPaid) ? "Clear the next payment date first (only one date can be selected)" : ""}
             onClick={() => { const v = !secondPaid; setSecondPaid(v); if (!v) { setSecondDate(undefined); setSecondTxn(""); } }}
-            className={secondPaid ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100" : "text-blue-600 hover:text-blue-700 hover:bg-blue-50"}>
+            className={secondPaid ? "bg-red-50 text-red-600 border-red-300 hover:bg-red-100" : "text-red-600 hover:text-red-700 hover:bg-red-50"}>
             {secondPaid ? "Remaining deposit amount unpaid" : "Remaining deposit amount paid"}
           </GhostBtn>
           {secondPaid && (
@@ -984,7 +984,7 @@ function PaidLeaveDialog({ open, setOpen, driver, onDone }) {
                 fromMonth={toDate(info.min_date || todayStr)}
                 showOutsideDays={false}
                 modifiers={{ used: pastUsed.map(toDate) }}
-                modifiersClassNames={{ used: "bg-emerald-100 text-emerald-700 rounded-md" }}
+                modifiersClassNames={{ used: "bg-red-100 text-red-700 rounded-md" }}
               />
             </div>
             {pastUsed.length > 0 && <p className="text-xs text-mv-muted">Past paid leave days (locked): {pastUsed.join(", ")}</p>}
@@ -1006,7 +1006,7 @@ function BlockDriverDialog({ type, setType, driver, onDone }) {
   const cfg = {
     temporary: { title: "Temporary Block", msg: `${driver?.name} will be temporarily blocked and cannot use the driver app until you unblock.`, btn: "Temporarily Block", cls: "bg-amber-500 hover:bg-amber-600 text-white" },
     permanent: { title: "Permanent Block", msg: `${driver?.name} will be permanently blocked from the driver app.`, btn: "Permanently Block", cls: "bg-red-500 hover:bg-red-600 text-white" },
-    unblock: { title: "Unblock Driver", msg: `${driver?.name} will be able to use the driver app again.`, btn: "Unblock", cls: "bg-emerald-500 hover:bg-emerald-600 text-white" },
+    unblock: { title: "Unblock Driver", msg: `${driver?.name} will be able to use the driver app again.`, btn: "Unblock", cls: "bg-red-500 hover:bg-red-600 text-white" },
   }[type];
 
   const go = async () => {

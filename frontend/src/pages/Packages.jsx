@@ -226,7 +226,7 @@ export default function Packages() {
                             </>)}
                             {tab === "commission" && <><td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.commission_percent != null ? `${pkg.commission_percent}%` : "—"}</td><td className="px-4 py-3">{isActive && pkg.part_time_commission_percent != null ? `${pkg.part_time_commission_percent}%` : "—"}</td></>}
                             {tab === "salary" && <><td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.salary_amount != null ? inr(pkg.salary_amount) : "—"}</td><td className="px-4 py-3">{isActive ? `${pkg.part_time_salary_amount != null ? inr(pkg.part_time_salary_amount) : "—"} / ${pkg.part_time_salary_daily_rent != null ? inr(pkg.part_time_salary_daily_rent) : "—"}` : "—"}</td></>}
-                            <td className="px-4 py-3">{isActive ? <span className="text-emerald-600 font-semibold">Active</span> : <span className="text-amber-500 font-semibold">Coming Soon</span>}</td>
+                            <td className="px-4 py-3">{isActive ? <span className="text-red-600 font-semibold">Active</span> : <span className="text-amber-500 font-semibold">Coming Soon</span>}</td>
                             <td className="px-4 py-3 text-right">
                               <button onClick={(e) => { e.stopPropagation(); handleEdit(city, type, pkg); }} className="p-2 text-mv-muted hover:text-mv-primary bg-mv-surface2 rounded-full"><Edit2 className="w-4 h-4" /></button>
                             </td>
@@ -523,7 +523,7 @@ function PackageForm({ editData, onBack, onSaved }) {
                 className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
                 placeholder="800" 
               />
-              <p className="text-[10px] font-semibold text-emerald-600 mt-1">✓ Automated: 3 free days given at the end of the month (e.g. 28 days charged for 31-day month).</p>
+              <p className="text-[10px] font-semibold text-red-600 mt-1">✓ Automated: 3 free days given at the end of the month (e.g. 28 days charged for 31-day month).</p>
             </div>
 
             <div className="space-y-1">

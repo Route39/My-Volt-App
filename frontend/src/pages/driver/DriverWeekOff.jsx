@@ -10,7 +10,7 @@ const STATUS_LABEL = { pending: "Pending approval", approved: "Approved", reject
 
 const STATUS_CLS = {
   pending: "bg-amber-50 text-amber-600 border-amber-200",
-  approved: "bg-emerald-50 text-emerald-600 border-emerald-200",
+  approved: "bg-red-50 text-red-600 border-red-200",
   rejected: "bg-red-50 text-red-600 border-red-200",
 };
 
@@ -37,7 +37,7 @@ export default function DriverWeekOff() {
       <div className="p-6">
         {msg.text
           ? <div className="text-red-600 text-sm font-semibold">{msg.text}</div>
-          : <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-emerald-500" /></div>}
+          : <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-red-500" /></div>}
       </div>
     );
   }
@@ -94,7 +94,7 @@ export default function DriverWeekOff() {
   return (
     <div className="p-5" data-testid="driver-week-off">
       <h1 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-        <CalendarDays className="w-5 h-5 text-emerald-600" /> Week-off
+        <CalendarDays className="w-5 h-5 text-red-600" /> Week-off
       </h1>
       <p className="text-sm font-semibold text-slate-700 mt-4">Select dates to apply week-off</p>
       <p className="text-xs text-slate-400 mt-1">
@@ -119,16 +119,16 @@ export default function DriverWeekOff() {
           toMonth={toDate(info.today)}
           showOutsideDays={false}
           modifiers={{ pending: otherPending.map(toDate), taken: (info.taken_dates || []).map(toDate) }}
-          modifiersClassNames={{ pending: "bg-amber-100 text-amber-700 rounded-md", taken: "bg-emerald-100 text-emerald-700 rounded-md" }}
+          modifiersClassNames={{ pending: "bg-amber-100 text-amber-700 rounded-md", taken: "bg-red-100 text-red-700 rounded-md" }}
         />
       </div>
 
       {msg.text && (
-        <div className={`text-xs font-semibold mt-3 text-center ${msg.type === "ok" ? "text-emerald-600" : "text-red-600"}`}>{msg.text}</div>
+        <div className={`text-xs font-semibold mt-3 text-center ${msg.type === "ok" ? "text-red-600" : "text-red-600"}`}>{msg.text}</div>
       )}
 
       <button onClick={apply} disabled={busy || !sel.length || info.rent_pending} data-testid="apply-week-off-btn"
-        className="mt-4 w-full h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
+        className="mt-4 w-full h-12 rounded-2xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : editId ? "Update Week-off" : "Apply Week-off"}
       </button>
       {editId && (
@@ -148,7 +148,7 @@ export default function DriverWeekOff() {
                 <div className="flex items-center gap-2 shrink-0">
                   {r.status === "pending" && (
                     <button onClick={() => startEdit(r)} data-testid={`edit-week-off-${r.id}`}
-                      className="text-[11px] font-bold px-2 py-0.5 rounded-md border border-emerald-200 text-emerald-600 hover:bg-emerald-50">Edit</button>
+                      className="text-[11px] font-bold px-2 py-0.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50">Edit</button>
                   )}
                   <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${STATUS_CLS[r.status] || STATUS_CLS.pending}`}>{STATUS_LABEL[r.status] || r.status}</span>
                 </div>

@@ -71,10 +71,10 @@ export default function DriverKYC() {
       )}
 
       {data?.driver?.kyc_status === "approved" ? (
-        <div className="text-center py-20 bg-white rounded-3xl border border-emerald-100 shadow-sm shadow-emerald-100/50">
-          <CheckCircle className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+        <div className="text-center py-20 bg-white rounded-3xl border border-red-100 shadow-sm shadow-red-100/50">
+          <CheckCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-slate-900">KYC Approved</h2>
-          <p className="text-emerald-600 font-medium mt-1 px-4">Your documents have been successfully verified. You are all set!</p>
+          <p className="text-red-600 font-medium mt-1 px-4">Your documents have been successfully verified. You are all set!</p>
         </div>
       ) : data?.driver?.kyc_status === "submitted" ? (
         <div className="text-center py-20 bg-white rounded-3xl border border-amber-100 shadow-sm shadow-amber-100/50">
@@ -91,7 +91,7 @@ export default function DriverKYC() {
         {/* Driving License Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Driving</span> <span className="text-emerald-500">License</span>
+            <span className="text-slate-900">Driving</span> <span className="text-red-500">License</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <UploadBtn label="Front Side" file={files.dl_front} onChange={handleFile("dl_front")} />
@@ -102,7 +102,7 @@ export default function DriverKYC() {
         {/* Identity Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Aadhaar &</span> <span className="text-emerald-500">PAN</span>
+            <span className="text-slate-900">Aadhaar &</span> <span className="text-red-500">PAN</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <UploadBtn label="Aadhaar (optional)" file={files.aadhaar} onChange={handleFile("aadhaar")} />
@@ -113,7 +113,7 @@ export default function DriverKYC() {
         {/* Driver Photos Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Driver &</span> <span className="text-emerald-500">Vehicle</span>
+            <span className="text-slate-900">Driver &</span> <span className="text-red-500">Vehicle</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <UploadBtn label="Driver Photo" file={files.driver_photo} onChange={handleFile("driver_photo")} />
@@ -124,7 +124,7 @@ export default function DriverKYC() {
         {/* Agreement Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Rental</span> <span className="text-emerald-500">Agreement</span>
+            <span className="text-slate-900">Rental</span> <span className="text-red-500">Agreement</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <UploadBtn label="Agreement" file={files.agreement} onChange={handleFile("agreement")} />
@@ -134,7 +134,7 @@ export default function DriverKYC() {
         {/* Address Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Current</span> <span className="text-emerald-500">Address</span>
+            <span className="text-slate-900">Current</span> <span className="text-red-500">Address</span>
           </h2>
           
           <textarea 
@@ -142,11 +142,11 @@ export default function DriverKYC() {
             value={address}
             onChange={e => setAddress(e.target.value)}
             rows={3}
-            className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:border-emerald-500 focus:bg-white transition-colors resize-none"
+            className="w-full rounded-2xl border-2 border-slate-200 bg-slate-50 p-4 text-sm outline-none focus:border-red-500 focus:bg-white transition-colors resize-none"
           ></textarea>
         </div>
         
-        <button type="submit" disabled={loading} className="w-full h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-bold flex items-center justify-center disabled:opacity-50 transition-colors">
+        <button type="submit" disabled={loading} className="w-full h-14 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-bold flex items-center justify-center disabled:opacity-50 transition-colors">
           {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Submit KYC Documents"}
         </button>
       </form>
@@ -167,12 +167,12 @@ function UploadBtn({ label, file, onChange }) {
         const captured = await captureImage();
         if (captured) onChange(captured);
       }}
-      className={`relative h-28 rounded-2xl border-2 overflow-hidden flex flex-col items-center justify-center transition-colors w-full ${file ? 'border-emerald-500 bg-emerald-50/50 border-solid' : 'border-slate-200 border-dashed hover:border-slate-300 bg-slate-50'}`}
+      className={`relative h-28 rounded-2xl border-2 overflow-hidden flex flex-col items-center justify-center transition-colors w-full ${file ? 'border-red-500 bg-red-50/50 border-solid' : 'border-slate-200 border-dashed hover:border-slate-300 bg-slate-50'}`}
     >
       {file ? (
         <div className="absolute inset-0 w-full h-full">
           <img src={URL.createObjectURL(file)} alt="Preview" className="w-full h-full object-cover opacity-80" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-emerald-900/30">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-900/30">
             <CheckCircle className="w-6 h-6 text-white mb-1 shadow-sm" />
             <span className="font-bold text-white text-xs drop-shadow-md">Captured</span>
           </div>
@@ -180,7 +180,7 @@ function UploadBtn({ label, file, onChange }) {
       ) : (
         <>
           {loading ? (
-            <Loader2 className="w-6 h-6 text-emerald-500 animate-spin mb-1.5" />
+            <Loader2 className="w-6 h-6 text-red-500 animate-spin mb-1.5" />
           ) : (
             <Camera className="w-6 h-6 text-slate-400 mb-1.5" />
           )}

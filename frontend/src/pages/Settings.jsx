@@ -32,7 +32,7 @@ export default function Settings() {
   );
 
   const getAvatarColor = (name) => {
-    const colors = ["bg-amber-500", "bg-emerald-500", "bg-indigo-500", "bg-blue-500", "bg-rose-500", "bg-violet-500"];
+    const colors = ["bg-amber-500", "bg-red-500", "bg-red-500", "bg-red-500", "bg-rose-500", "bg-violet-500"];
     let hash = 0;
     for (let i = 0; i < (name || "").length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
     return colors[Math.abs(hash) % colors.length];
@@ -61,7 +61,7 @@ export default function Settings() {
         <TabsContent value="team">
           <div className="flex justify-end mb-6">
             {user?.role === "admin" && (
-              <PrimaryBtn onClick={() => { setEditingUser(null); setShowForm(true); }} className="rounded-full shadow-md bg-indigo-600 hover:bg-indigo-700 h-10 px-5">
+              <PrimaryBtn onClick={() => { setEditingUser(null); setShowForm(true); }} className="rounded-full shadow-md bg-red-600 hover:bg-red-700 h-10 px-5">
                 <Plus className="w-4 h-4 mr-1" /> Add Team Member
               </PrimaryBtn>
             )}
@@ -110,7 +110,7 @@ export default function Settings() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => handleEdit(u)} className="cursor-pointer text-sm">
-                            <Edit2 className="w-3.5 h-3.5 mr-2 text-indigo-500" /> Edit
+                            <Edit2 className="w-3.5 h-3.5 mr-2 text-red-500" /> Edit
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleDelete(u.id)} className="cursor-pointer text-sm text-red-600">
                             <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
@@ -241,7 +241,7 @@ function UserDialog({ open, setOpen, editUser, onDone }) {
           )}
         </div>
         <div className="flex justify-end pt-4">
-          <PrimaryBtn onClick={save} disabled={saving} data-testid="save-user-btn" className="w-full sm:w-auto px-8 shadow-md h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+          <PrimaryBtn onClick={save} disabled={saving} data-testid="save-user-btn" className="w-full sm:w-auto px-8 shadow-md h-11 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50">
             {saving ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : (editUser ? "Save Changes" : "Add Member")}
           </PrimaryBtn>
         </div>
@@ -277,8 +277,8 @@ function PackagePasswordTab() {
     <div className="max-w-md">
       <div className="bg-white rounded-3xl border border-slate-100 shadow-[0_2px_12px_rgb(0,0,0,0.04)] p-8">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center">
-            <Lock className="w-6 h-6 text-indigo-600" />
+          <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center">
+            <Lock className="w-6 h-6 text-red-600" />
           </div>
           <div>
             <h2 className="font-extrabold text-slate-900 text-lg">Package Password</h2>
@@ -317,7 +317,7 @@ function PackagePasswordTab() {
         </div>
 
         <div className="mt-6">
-          <PrimaryBtn onClick={save} disabled={saving} className="w-full h-11 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+          <PrimaryBtn onClick={save} disabled={saving} className="w-full h-11 rounded-xl bg-red-600 hover:bg-red-700 disabled:opacity-50">
             {saving ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : "Update Password"}
           </PrimaryBtn>
         </div>

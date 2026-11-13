@@ -83,7 +83,7 @@ export default function PackageCollectionPopup({ due, driver, refresh }) {
           <label className="block text-xs font-semibold text-slate-600 mb-1.5">Total Amount Collected (₹) *</label>
           <input type="number" inputMode="decimal" min="0" value={total} onChange={(e) => setTotal(e.target.value)}
             placeholder="Enter amount"
-            className="w-full h-11 rounded-xl border border-slate-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            className="w-full h-11 rounded-xl border border-slate-200 px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500" />
         </div>
 
         {!isCommission && (
