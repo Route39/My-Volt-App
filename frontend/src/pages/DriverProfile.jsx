@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Search, Ban, Clock, ShieldCheck, CalendarDays, Check, Eye, Download } from "lucide-react";
+import { ArrowLeft, User, Phone, MapPin, Car, KeyRound, History, FileText, AlertTriangle, ArrowRightLeft, Edit, Trash2, Ban, Clock, ShieldCheck, CalendarDays, Check, Eye, Download } from "lucide-react";
 import { toast } from "sonner";
 import api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -8,6 +8,7 @@ import { StatusChip, Skeleton, KycStatusChip } from "../components/common/Primit
 import { Field, PrimaryBtn, GhostBtn, TextInput } from "../components/common/Page";
 import { fmtDate, inr } from "../lib/format";
 import imgUrl from "../lib/imgUrl";
+import KycDocManager from "../components/KycDocManager";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -345,7 +346,7 @@ export default function DriverProfile() {
               </div>
               <KycStatusChip status={d.kyc_status || "pending"} />
             </div>
-            {d.kyc_status === "pending" || d.kyc_status === "submitted" ? (
+            {d.kyc_status !== "approved" ? (
               <div className="flex gap-3">
                 <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/approve`); toast.success("KYC Approved"); load(); }} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-colors">Approve KYC</button>
                 <button onClick={async () => { await api.post(`/admin/kyc/${d.id}/reject`); toast.success("KYC Rejected"); load(); }} className="px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold transition-colors">Reject KYC</button>
@@ -353,15 +354,7 @@ export default function DriverProfile() {
             ) : null}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <KycDocCard title="Driving License (Front)" url={d.kyc_documents?.dl_front} />
-            <KycDocCard title="Driving License (Back)" url={d.kyc_documents?.dl_back} />
-            <KycDocCard title="Aadhaar Card" url={d.kyc_documents?.aadhaar} />
-            <KycDocCard title="PAN Card" url={d.kyc_documents?.pan} />
-            <KycDocCard title="Driver Photo" url={d.kyc_documents?.driver_photo} />
-            <KycDocCard title="Driver + Vehicle" url={d.kyc_documents?.vehicle_photo} />
-            <KycDocCard title="Rental Agreement" url={d.kyc_documents?.agreement} />
-          </div>
+          <KycDocManager driverId={d.id} docs={d.kyc_documents} onChanged={() => load()} />
         </TabsContent>
 
         <TabsContent value="documents" className="mt-4">
@@ -808,22 +801,6 @@ function DeleteDriverDialog({ open, setOpen, driver, onDone }) {
   );
 }
 
-
-function KycDocCard({ title, url }) {
-  if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
-  const fullUrl = imgUrl(url);
-  return (
-    <div className="space-y-2">
-      <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>
-      <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-sm relative group cursor-pointer" onClick={() => window.open(fullUrl, '_blank')}>
-        <img src={fullUrl} alt={title} className="w-full h-full object-contain" />
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <Search className="w-8 h-8 text-white" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function RentPaidDialog({ open, setOpen, driver, onDone, salary = false }) {
   const rentPath = salary ? "salary-rent-paid" : "rent-paid";

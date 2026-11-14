@@ -4,7 +4,7 @@ import { Check, X, MapPin, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useApp, CITIES } from "../context/AppContext";
 //import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import imgUrl from "../lib/imgUrl";
+import KycDocManager from "../components/KycDocManager";
 import { PageHeader, FilterChip } from "../components/common/Page";
 
 export default function KycApprovals() {
@@ -116,14 +116,16 @@ export default function KycApprovals() {
             </div>
             
             <div className="p-6 grid md:grid-cols-2 gap-6">
-              <DocCard title="Driving License (Front)" url={selected.kyc_documents?.dl_front} />
-              <DocCard title="Driving License (Back)" url={selected.kyc_documents?.dl_back} />
-              <DocCard title="Aadhaar Card" url={selected.kyc_documents?.aadhaar} />
-              <DocCard title="PAN Card" url={selected.kyc_documents?.pan} />
-              <DocCard title="Driver Photo" url={selected.kyc_documents?.driver_photo} />
-              <DocCard title="Driver + Vehicle" url={selected.kyc_documents?.vehicle_photo} />
-              <DocCard title="Rental Agreement" url={selected.kyc_documents?.agreement} />
-              
+              <KycDocManager
+                driverId={selected.id}
+                docs={selected.kyc_documents}
+                onChanged={(docs) => {
+                  setSelected((s) => ({ ...s, kyc_documents: docs }));
+                  setDrivers((ds) => ds.map((x) => (x.id === selected.id ? { ...x, kyc_documents: docs } : x)));
+                }}
+              />
+
+              {(selected.location?.address || selected.location?.lat) && (
               <div className="md:col-span-2 rounded-2xl border border-slate-100 p-4 bg-slate-50 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div>
                   <h4 className="font-semibold text-slate-900">Current Address</h4>
@@ -141,6 +143,7 @@ export default function KycApprovals() {
                   </a>
                 )}
               </div>
+              )}
             </div>
 
             <div className="p-6 border-t border-slate-100 flex gap-4 sticky bottom-0 bg-white/90 backdrop-blur-sm">
@@ -154,22 +157,6 @@ export default function KycApprovals() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function DocCard({ title, url }) {
-  if (!url) return <div className="aspect-video bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 text-sm">Not Provided</div>;
-  const fullUrl = imgUrl(url);
-  return (
-    <div className="space-y-2">
-      <h4 className="font-semibold text-slate-700 text-sm">{title}</h4>
-      <div className="aspect-video bg-black rounded-2xl overflow-hidden shadow-sm relative group cursor-pointer" onClick={() => window.open(fullUrl, '_blank')}>
-        <img src={fullUrl} alt={title} className="w-full h-full object-contain" />
-        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-          <Search className="w-8 h-8 text-white" />
-        </div>
-      </div>
     </div>
   );
 }

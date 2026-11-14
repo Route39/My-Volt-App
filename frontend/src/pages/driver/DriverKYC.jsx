@@ -11,7 +11,7 @@ export default function DriverKYC() {
   const [loading, setLoading] = useState(false);
   const [files, setFiles] = useState({
     dl_front: null, dl_back: null, aadhaar: null, pan: null,
-    driver_photo: null, vehicle_photo: null, agreement: null,
+    driver_photo: null, vehicle_photo: null,
   });
   const [error, setError] = useState("");
   const [address, setAddress] = useState("");
@@ -22,8 +22,7 @@ export default function DriverKYC() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!address.trim()) return setError("Permanent address is required");
-    const optional = ["aadhaar", "pan"];
+    const optional = ["driver_photo", "vehicle_photo"];
     if (Object.entries(files).some(([k, f]) => !f && !optional.includes(k))) return setError("All required documents must be uploaded");
     
     setLoading(true);
@@ -105,8 +104,8 @@ export default function DriverKYC() {
             <span className="text-slate-900">Aadhaar &</span> <span className="text-red-500">PAN</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <UploadBtn label="Aadhaar (optional)" file={files.aadhaar} onChange={handleFile("aadhaar")} />
-            <UploadBtn label="PAN Card (optional)" file={files.pan} onChange={handleFile("pan")} />
+            <UploadBtn label="Aadhaar Card" file={files.aadhaar} onChange={handleFile("aadhaar")} />
+            <UploadBtn label="PAN Card" file={files.pan} onChange={handleFile("pan")} />
           </div>
         </div>
 
@@ -116,29 +115,19 @@ export default function DriverKYC() {
             <span className="text-slate-900">Driver &</span> <span className="text-red-500">Vehicle</span>
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <UploadBtn label="Driver Photo" file={files.driver_photo} onChange={handleFile("driver_photo")} />
-            <UploadBtn label="Driver + Vehicle" file={files.vehicle_photo} onChange={handleFile("vehicle_photo")} />
-          </div>
-        </div>
-
-        {/* Agreement Section */}
-        <div className="space-y-4">
-          <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Rental</span> <span className="text-red-500">Agreement</span>
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <UploadBtn label="Agreement" file={files.agreement} onChange={handleFile("agreement")} />
+            <UploadBtn label="Driver Photo (optional)" file={files.driver_photo} onChange={handleFile("driver_photo")} />
+            <UploadBtn label="Driver + Vehicle (optional)" file={files.vehicle_photo} onChange={handleFile("vehicle_photo")} />
           </div>
         </div>
 
         {/* Address Section */}
         <div className="space-y-4">
           <h2 className="text-lg font-bold">
-            <span className="text-slate-900">Current</span> <span className="text-red-500">Address</span>
+            <span className="text-slate-900">Current</span> <span className="text-red-500">Address</span> <span className="text-xs font-medium text-slate-400">(optional)</span>
           </h2>
           
           <textarea 
-            placeholder="Type your exact full address here..."
+            placeholder="Type your full address here (optional)..."
             value={address}
             onChange={e => setAddress(e.target.value)}
             rows={3}

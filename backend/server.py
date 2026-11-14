@@ -848,7 +848,9 @@ async def review_kyc(driver_id: str, action: str, request: Request):
         
     update_doc = {"$set": {"kyc_status": "approved" if action == "approve" else "rejected", "kyc_reviewed_at": now_iso()}}
     if action == "reject":
-        update_doc["$unset"] = {"kyc_documents": "", "location": ""}
+        # only clear what the driver submits; admin-uploaded docs (agreement etc.) are kept
+        update_doc["$unset"] = {"kyc_documents.dl_front": "", "kyc_documents.dl_back": "",
+                                "kyc_documents.aadhaar": "", "kyc_documents.pan": "", "location": ""}
 
     res = await db.drivers.update_one(
         org_filter(user, {"_id": oid(driver_id)}),
@@ -6235,22 +6237,21 @@ async def submit_driver_kyc(
     request: Request,
     dl_front: UploadFile = File(...),
     dl_back: UploadFile = File(...),
-    aadhaar: UploadFile = File(None),
-    pan: UploadFile = File(None),
+    aadhaar: UploadFile = File(...),
+    pan: UploadFile = File(...),
     driver_photo: UploadFile = File(None),
     vehicle_photo: UploadFile = File(None),
-    agreement: UploadFile = File(None),
     lat: str = Form(""),
     lng: str = Form(""),
-    address: str = Form("")
+    address: str = Form(""),
 ):
     user = await get_user(request)
     require_driver(user)
-    
+
     docs = {}
     kyc_file_docs = []
     for name, file in [("dl_front", dl_front), ("dl_back", dl_back), ("aadhaar", aadhaar), ("pan", pan),
-                       ("driver_photo", driver_photo), ("vehicle_photo", vehicle_photo), ("agreement", agreement)]:
+                       ("driver_photo", driver_photo), ("vehicle_photo", vehicle_photo)]:
         if file is None:
             continue
         data = await file.read()
@@ -6270,25 +6271,103 @@ async def submit_driver_kyc(
             "created_at": now_iso(),
         })
         docs[name] = f"/api/kyc-files/{token}"
-        
+
     if kyc_file_docs:
         await db.driver_kyc_files.insert_many(kyc_file_docs)
 
-    await db.drivers.update_one(
-        {"_id": ObjectId(user["id"])},
-        {"$set": {
-            "kyc_status": "submitted",
-            "kyc_documents": docs,
-            "location": {"lat": lat, "lng": lng, "address": address},
-            "kyc_submitted_at": now_iso()
-        }}
-    )
-    # re-submission after a rejection: drop this driver's previous KYC files so they don't pile up
+    # touch only the submitted keys so documents uploaded by the admin (agreement etc.) survive
+    set_doc = {"kyc_status": "submitted", "kyc_submitted_at": now_iso()}
+    for k, v in docs.items():
+        set_doc[f"kyc_documents.{k}"] = v
+    if lat != "" and lng != "":
+        set_doc["location.lat"] = lat
+        set_doc["location.lng"] = lng
+    if address.strip():   # optional: only saved when the driver typed one
+        set_doc["location.address"] = address.strip()
+    await db.drivers.update_one({"_id": ObjectId(user["id"])}, {"$set": set_doc})
+
+    # re-submission: drop only the previous files of the documents that were just replaced
     await db.driver_kyc_files.delete_many({
         "driver_id": user["id"],
+        "name": {"$in": list(docs.keys())},
         "token": {"$nin": [f["token"] for f in kyc_file_docs]},
     })
     return {"ok": True, "message": "KYC Submitted successfully"}
+
+
+# ---------- Admin: upload / replace / delete any KYC document of a driver ----------
+KYC_DOC_TYPES = {"dl_front", "dl_back", "aadhaar", "pan", "driver_photo", "vehicle_photo", "agreement"}
+KYC_ADMIN_ROLES = ["admin", "company_admin", "city_manager", "staff"]
+
+
+def _kyc_token_from_url(url):
+    if isinstance(url, str) and url.startswith("/api/kyc-files/"):
+        return url.rsplit("/", 1)[-1]
+    return None
+
+
+@api.post("/admin/drivers/{driver_id}/kyc/{doc_type}")
+async def admin_upload_kyc_doc(driver_id: str, doc_type: str, request: Request, file: UploadFile = File(...)):
+    user = await get_user(request)
+    require_role(user, KYC_ADMIN_ROLES)
+    if doc_type not in KYC_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid document type")
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(driver_id)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    content_type = (file.content_type or "").lower()
+    if not (content_type.startswith("image/") or content_type == "application/pdf"):
+        raise HTTPException(status_code=400, detail="Only image or PDF files are allowed")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File must be under 10 MB")
+
+    token = uuid.uuid4().hex
+    await db.driver_kyc_files.insert_one({
+        "organization_id": user.get("organization_id") or "route39-org",
+        "driver_id": driver_id,
+        "name": doc_type,
+        "token": token,
+        "filename": file.filename,
+        "content_type": content_type,
+        "data": Binary(data),
+        "uploaded_by": user["id"],
+        "created_at": now_iso(),
+    })
+    await db.drivers.update_one(
+        {"_id": drv["_id"]},
+        {"$set": {f"kyc_documents.{doc_type}": f"/api/kyc-files/{token}"}},
+    )
+    old_token = _kyc_token_from_url((drv.get("kyc_documents") or {}).get(doc_type))
+    if old_token:
+        await db.driver_kyc_files.delete_many({"token": old_token, "driver_id": driver_id})
+
+    await log_audit(user, "kyc_doc_uploaded", "driver", driver_id, f"KYC document '{doc_type}' uploaded by admin")
+    fresh = await db.drivers.find_one({"_id": drv["_id"]}, {"kyc_documents": 1})
+    return {"ok": True, "kyc_documents": (fresh or {}).get("kyc_documents") or {}}
+
+
+@api.delete("/admin/drivers/{driver_id}/kyc/{doc_type}")
+async def admin_delete_kyc_doc(driver_id: str, doc_type: str, request: Request):
+    user = await get_user(request)
+    require_role(user, KYC_ADMIN_ROLES)
+    if doc_type not in KYC_DOC_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid document type")
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(driver_id)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    old_token = _kyc_token_from_url((drv.get("kyc_documents") or {}).get(doc_type))
+    await db.drivers.update_one({"_id": drv["_id"]}, {"$unset": {f"kyc_documents.{doc_type}": ""}})
+    if old_token:
+        await db.driver_kyc_files.delete_many({"token": old_token, "driver_id": driver_id})
+
+    await log_audit(user, "kyc_doc_deleted", "driver", driver_id, f"KYC document '{doc_type}' deleted by admin")
+    fresh = await db.drivers.find_one({"_id": drv["_id"]}, {"kyc_documents": 1})
+    return {"ok": True, "kyc_documents": (fresh or {}).get("kyc_documents") or {}}
 
 
 # ---------- Driver-uploaded odometer images (profile page; any number, any time) ----------
