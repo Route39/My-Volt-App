@@ -36,7 +36,7 @@ function Shell({ children }) {
       <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-mv-border bg-mv-surface fixed inset-y-0 left-0 z-30">
         <div className="h-16 flex items-center gap-2.5 px-5 border-b border-mv-border">
           <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-9 h-9 object-contain shrink-0" />
-          <div className="leading-none"><div className="font-display font-extrabold text-lg tracking-tight">MyVolt</div><div className="text-[10px] text-mv-dim tracking-wider uppercase mt-0.5">Platform Admin</div></div>
+          <div className="leading-none"><div className="font-display font-extrabold text-lg tracking-tight">Route39 EV Rental</div><div className="text-[10px] text-mv-dim tracking-wider uppercase mt-0.5">Platform Admin</div></div>
         </div>
         <nav className="flex-1 py-3 px-3 space-y-0.5">
           {NAV.map(({ to, label, icon: Icon }) => (
@@ -54,7 +54,7 @@ function Shell({ children }) {
       </aside>
       <div className="flex-1 lg:pl-64 min-w-0 relative z-10">
         <header className="h-16 sticky top-0 z-20 glass border-b border-mv-border flex items-center px-4 sm:px-6">
-          <div className="lg:hidden flex items-center gap-2"><img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-8 h-8 object-contain shrink-0" /><span className="font-display font-bold">MyVolt</span></div>
+          <div className="lg:hidden flex items-center gap-2"><img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-8 h-8 object-contain shrink-0" /><span className="font-display font-bold">Route39 EV Rental</span></div>
           <span className="ml-auto text-sm text-mv-muted">Platform Administration</span>
         </header>
         <main className="px-4 sm:px-6 py-6 max-w-[1400px] mx-auto">{children}</main>
@@ -121,7 +121,7 @@ function Companies() {
   useEffect(() => { const t = setTimeout(load, q ? 250 : 0); return () => clearTimeout(t); }, [q, ind, st]);
   return (
     <div>
-      <PageHeader title="Companies" subtitle="All organizations on the MyVolt platform">
+      <PageHeader title="Companies" subtitle="All organizations on the Route39 EV Rental platform">
         <PrimaryBtn onClick={() => nav("/platform/companies/new")} data-testid="add-company-btn"><Plus className="w-4 h-4" /> Add Company</PrimaryBtn>
       </PageHeader>
       <div className="flex flex-col sm:flex-row gap-3 mb-5">
@@ -278,7 +278,7 @@ export default function PlatformApp() {
         <Route path="/platform/companies/:id" element={<CompanyProfile />} />
         <Route path="/platform/subscriptions" element={<Placeholder title="Subscriptions" subtitle="Plans and billing across companies" />} />
         <Route path="/platform/industries" element={<Placeholder title="Industries" subtitle="Industry configurations and modules" />} />
-        <Route path="/platform/users" element={<Placeholder title="Platform Users" subtitle="MyVolt platform administrators" />} />
+        <Route path="/platform/users" element={<Placeholder title="Platform Users" subtitle="Route39 EV Rental platform administrators" />} />
         <Route path="/platform/settings" element={<Placeholder title="Settings" subtitle="Platform configuration" />} />
         <Route path="*" element={<Navigate to="/platform/dashboard" replace />} />
       </Routes>

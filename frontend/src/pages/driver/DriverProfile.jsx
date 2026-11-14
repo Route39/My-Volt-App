@@ -415,7 +415,7 @@ export default function DriverProfile() {
               <LogOut className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-lg font-extrabold text-slate-900">Log out of MyVolt?</h3>
+              <h3 className="text-lg font-extrabold text-slate-900">Log out of Route39 EV Rental?</h3>
               <p className="text-xs text-slate-500 mt-1">
                 You will need your registered mobile number and OTP to sign in again.
               </p>
@@ -443,7 +443,7 @@ export default function DriverProfile() {
       {/* ─── BRAND FOOTNOTE ────────────────────────────────────────────── */}
       <div className="text-center pt-2 pb-4">
         <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-          MyVolt EV Fleet Platform
+          Route39 EV Rental EV Fleet Platform
         </p>
         <p className="text-[10px] text-slate-400 mt-0.5">Route39 Mobility Systems · v2.4</p>
       </div>

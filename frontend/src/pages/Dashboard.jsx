@@ -98,7 +98,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="mv-rise">
         <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight flex items-center gap-3">
-          {user?.org_name || "MyVolt"} <span className="chip chip-blue text-[10px] font-bold">COMMAND CENTER</span>
+          {user?.org_name || "Route39 EV Rental"} <span className="chip chip-blue text-[10px] font-bold">COMMAND CENTER</span>
         </h1>
         <p className="text-mv-muted mt-1">Fleet Operations · {city === "all" ? "All Cities" : city} · Welcome, {user?.name}</p>
       </div>

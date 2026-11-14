@@ -26,7 +26,7 @@ export default function Login() {
         <div className="relative flex items-center gap-3">
           <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-11 h-11 object-contain shrink-0" />
           <div>
-            <div className="font-display font-extrabold text-2xl tracking-tight">MyVolt</div>
+            <div className="font-display font-extrabold text-2xl tracking-tight">Route39 EV Rental</div>
             <div className="text-xs text-mv-dim tracking-widest uppercase">by Attendy</div>
           </div>
         </div>
@@ -38,7 +38,7 @@ export default function Login() {
             One simple platform that adapts to the way your business works.
           </p>
         </div>
-        <div className="relative text-xs text-mv-dim">© 2026 MyVolt · Attendy</div>
+        <div className="relative text-xs text-mv-dim">© 2026 Route39 EV Rental · Attendy</div>
       </div>
 
       {/* Right form */}
@@ -46,10 +46,10 @@ export default function Login() {
         <div className="w-full max-w-sm mv-rise">
           <div className="lg:hidden flex items-center gap-3 mb-8">
             <img src={process.env.PUBLIC_URL + "/logo.png"} alt="Route39 Rental" className="w-11 h-11 object-contain shrink-0" />
-            <div className="font-display font-extrabold text-2xl">MyVolt</div>
+            <div className="font-display font-extrabold text-2xl">Route39 EV Rental</div>
           </div>
           <h2 className="font-display text-2xl font-semibold">Sign in</h2>
-          <p className="text-mv-muted text-sm mt-1">Access your MyVolt workspace.</p>
+          <p className="text-mv-muted text-sm mt-1">Access your Route39 EV Rental workspace.</p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             <div>

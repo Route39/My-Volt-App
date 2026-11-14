@@ -92,7 +92,7 @@ export default function DriverLogin() {
             </button>
           )}
         </form>
-        <p className="text-center text-xs text-slate-400 mt-8">MyEVRental · powered by MyVolt</p>
+        <p className="text-center text-xs text-slate-400 mt-8">MyEVRental · powered by Route39 EV Rental</p>
       </div>
     </div>
   );

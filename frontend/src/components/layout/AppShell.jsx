@@ -85,7 +85,7 @@ export default function AppShell({ children }) {
   const initials = (user?.name || "U").split(" ").map((s) => s[0]).slice(0, 2).join("");
   const navItems = navForRole(user?.role);
   const mobileNav = MOBILE_NAV.filter((m) => navItems.find((n) => n.to === m.to));
-  const brand = { name: user?.org_name || "MyVolt", tag: "Fleet Operations", icon: Zap };
+  const brand = { name: user?.org_name || "Route39 EV Rental", tag: "Fleet Operations", icon: Zap };
 
   return (
     <div className="mv-noise min-h-screen flex bg-mv-bg">
