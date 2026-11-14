@@ -20,6 +20,7 @@ const isBlockedPackage = (city, planName) =>
 // Returns an error message, or "" when OK. Call it inside the form's save().
 export const validateAssign = (form) => {
   if (form.vehicle_id && !form.package_id) return "Select a package for the assigned vehicle";
+  if (form.vehicle_id && form.package_category && !form.employment_type) return "Select Full-time or Part-time";
   if (form.package_id && !form.rental_start) return "Select the rental start date";
   if (form.package_id && !form.rental_state) return "Select the rental status";
   if (form.rental_state && !form.vehicle_id) return "Select a vehicle to set the rental status";
@@ -59,10 +60,14 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
   };
   const planKind = (p) => (p.package_type === "Commission" ? "commission" : p.package_type === "Salary" ? "salary" : "rental");
   const shownPlans = plans.filter((p) => planKind(p) === (withPackageType ? form.package_category : "rental"));
+  // Part-time amount (set in the package card) is added to the label only when it has been entered
+  const hasPT = (v) => v !== null && v !== undefined && v !== "";
   const planLabel = (p) =>
-    planKind(p) === "commission" ? `${p.name} · ${p.commission_percent ?? "—"}%`
-    : planKind(p) === "salary" ? `${p.name} · ₹${p.salary_amount ?? "—"}`
-    : `${p.name} · ₹${p.amount}/day`;
+    planKind(p) === "commission"
+      ? `${p.name} · ${p.commission_percent ?? "—"}%${hasPT(p.part_time_commission_percent) ? ` (part time - ${p.part_time_commission_percent}%)` : ""}`
+    : planKind(p) === "salary"
+      ? `${p.name} · ₹${p.salary_amount ?? "—"}${hasPT(p.part_time_salary_amount) ? ` (part time - ₹${p.part_time_salary_amount})` : ""}`
+    : `${p.name} · ₹${p.amount}/day${hasPT(p.part_time_amount) ? ` (part time - ₹${p.part_time_amount}/day)` : ""}`;
   const pickPackageCategory = (v) => {
     set("package_category", v === NONE ? "" : v);
     set("package_id", ""); // package list changes with the type
@@ -120,11 +125,29 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
                 )}
               </Field>
             </div>
+            <Field label="Part-time / Full-time">
+              {assigned.hasRental ? (
+                <>
+                  <Select value={form.employment_type || assigned.employment || "full_time"} onValueChange={(v) => set("employment_type", v)}>
+                    <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border" data-testid="edit-employment-type"><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
+                      <SelectItem value="full_time">Full-time</SelectItem>
+                      <SelectItem value="part_time">Part-Time</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {form.employment_type && form.employment_type !== (assigned.employment || "full_time") && (
+                    <p className="text-[11px] text-amber-600 mt-1">New amounts will apply from today.</p>
+                  )}
+                </>
+              ) : (
+                <TextInput value={assigned.employment === "part_time" ? "Part-Time" : assigned.employment === "full_time" ? "Full-time" : "—"} readOnly disabled />
+              )}
+            </Field>
           </div>
         </div>
       ) : (
         <>
-          <div className="col-span-2">
+          <div>
             <Field label="Vehicle Assigned (optional)">
               <Select value={form.vehicle_id || NONE} onValueChange={pickVehicle} disabled={!city}>
                 <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder={city ? "Select vehicle" : "Select city first"} /></SelectTrigger>
@@ -133,6 +156,18 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
                   {vehicles.map((v) => (
                     <SelectItem key={v.id} value={v.id}>{v.vehicle_number}{v.registration_number ? ` · ${v.registration_number}` : ""}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+
+          <div>
+            <Field label="Supervisor (optional)">
+              <Select value={form.supervisor_id || NONE} onValueChange={(v) => set("supervisor_id", v === NONE ? "" : v)} disabled={!city}>
+                <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select supervisor" /></SelectTrigger>
+                <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">
+                  <SelectItem value={NONE}>— None —</SelectItem>
+                  {managers.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
@@ -155,13 +190,27 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
           )}
 
           {form.vehicle_id && (!withPackageType || form.package_category) && (
-            <div className="col-span-2">
+            <div className={withPackageType ? "" : "col-span-2"}>
               <Field label="Select Package *">
                 <Select value={form.package_id || undefined} onValueChange={pickPackage}>
                   <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select package" /></SelectTrigger>
                   <SelectContent className="bg-mv-surface border-mv-border text-mv-text max-h-64">
                     {shownPlans.length === 0 && <div className="px-3 py-2 text-xs text-mv-muted">No packages for {city}</div>}
                     {shownPlans.map((p) => <SelectItem key={p.id} value={p.id}>{planLabel(p)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+          )}
+
+          {form.vehicle_id && withPackageType && form.package_category && (
+            <div>
+              <Field label="Part-time / Full-time *">
+                <Select value={form.employment_type || undefined} onValueChange={(v) => set("employment_type", v)}>
+                  <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent className="bg-mv-surface border-mv-border text-mv-text">
+                    <SelectItem value="full_time">Full-time</SelectItem>
+                    <SelectItem value="part_time">Part-Time</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>
@@ -199,6 +248,7 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
             </Field>
           </div>
         )}
+        {assigned && (
         <Field label="Supervisor (optional)">
           <Select value={form.supervisor_id || NONE} onValueChange={(v) => set("supervisor_id", v === NONE ? "" : v)} disabled={!city}>
             <SelectTrigger className="h-10 bg-mv-surface2 border-mv-border"><SelectValue placeholder="Select supervisor" /></SelectTrigger>
@@ -208,6 +258,7 @@ export default function DriverAssignFields({ city, form, set, assigned, withPack
             </SelectContent>
           </Select>
         </Field>
+        )}
         <Field label="Manager (optional)">
           <TextInput data-testid="driver-manager" value={form.manager_name || ""} onChange={(e) => set("manager_name", e.target.value)} placeholder="Type manager name" />
         </Field>

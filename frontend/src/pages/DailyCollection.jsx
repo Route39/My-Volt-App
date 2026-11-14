@@ -202,6 +202,28 @@ export default function DailyCollection() {
   // Commission / Salary tabs: total amount paid by the drivers in the rows shown (follows the city / date / search filters)
   const pkgPaidTotal = pkgRows.reduce((s, x) => s + (Number(x.collection?.pay_amount) || 0), 0);
 
+  // Salary-rent of one row, using the same rules as the salary "Daily Rent" cell.
+  // Returns { amount, paid }. Amount is 0 when no rent applies on that row.
+  const salaryRentOf = (it) => {
+    const none = { amount: 0, paid: false };
+    if (it.package_category !== "salary") return none;
+    // paid today itself (after 9 PM): counted once, on this early row
+    if (it.is_early_row) return { amount: Number(it.collection?.pay_amount) || 0, paid: true };
+    if (!it.prev_rent_row) return none;
+    if (it.rental_start && it.date <= it.rental_start) return none;
+    if (it.prev_day_status || !it.rent_for_date) return none;   // week-off / paid-leave / nothing due
+    const pc = it.prev_collection;
+    if (pc) return pc.paid_early ? none : { amount: Number(pc.pay_amount) || 0, paid: true };  // early payments are already counted on the early row
+    return { amount: Number(it.salary_daily_rent) || 0, paid: false };
+  };
+  // Salary-rent totals of the rows shown (follows the city / date / search filters; rental & commission rows are ignored)
+  const salaryTotals = pkgRows.reduce((a, x) => {
+    const r = salaryRentOf(x);
+    if (r.paid) a.settled += r.amount; else a.unsettled += r.amount;
+    return a;
+  }, { settled: 0, unsettled: 0 });
+  const salaryGross = salaryTotals.settled + salaryTotals.unsettled;
+
   // Settled / Unsettled button is shown only for Commission / Salary package drivers (not Rental package)
   const settleBtn = (it) => {
     if (it.package_category !== "commission" && it.package_category !== "salary") return null;
@@ -279,7 +301,10 @@ export default function DailyCollection() {
     }
     const seenDrv = new Set(rows.map((x) => String(x.driver_id)));
     const matched = pendRows.filter((r) => seenDrv.has(String(r.id)) || seenDrv.has(String(r.driver_id)));
-    const dueRent = pendRows.length ? matched.reduce((a, r) => a + (Number(r.rent_pending) || 0), 0) : pendRent;
+    // salary drivers' unpaid salary-rent (from /pending-payments) is part of the pending rent too
+    const salaryDue = matched.reduce((a, r) => a + (r.package_category === "salary"
+      ? Object.values(r.salary_rent_by_date || {}).reduce((s, v) => s + (Number(v) || 0), 0) : 0), 0);
+    const dueRent = (pendRows.length ? matched.reduce((a, r) => a + (Number(r.rent_pending) || 0), 0) : pendRent) + salaryDue;
     const dueDep = pendRows.length ? matched.reduce((a, r) => a + (Number(r.deposit_pending) || 0), 0) : pendDep;
     return { running: vehicles.size, weekOff: weekOff.size, netDue: dueRent + dueDep, dueRent, dueDep };
   })();
@@ -448,7 +473,7 @@ export default function DailyCollection() {
         </div>
         <div className="mv-card p-5">
           <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Revenue</div>
-          <div className="text-3xl font-display font-bold text-emerald-500">{inr(totalSettled)}</div>
+          <div className="text-3xl font-display font-bold text-emerald-500">{inr(totalSettled + salaryTotals.settled)}</div>
           <div className="text-xs text-mv-dim mt-1">Collected</div>
         </div>
         <div className="mv-card p-5">
@@ -491,6 +516,33 @@ export default function DailyCollection() {
           <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Total Unsettled</div>
           <div className="text-3xl font-display font-bold text-rose-400 mb-1">{inr(totalUnsettled)}</div>
           <div className="text-xs text-mv-dim">Revenue pending settlement</div>
+        </div>
+      </div>
+      )}
+
+      {/* Salary package tab: salary-rent cards */}
+      {pkgTab === "salary" && (
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" data-testid="salary-summary">
+        <div className="mv-card p-5 relative overflow-hidden mv-rise">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Gross Revenue {city !== "all" ? `(${city})` : ""}</div>
+          <div className="text-3xl font-display font-bold text-mv-text mb-1">{inr(salaryGross)}</div>
+          <div className="text-xs text-mv-dim">Salary-rent (paid + unpaid)</div>
+        </div>
+        <div className="mv-card p-5 relative overflow-hidden mv-rise" style={{ animationDelay: "50ms" }}>
+          <div className="absolute top-0 right-0 p-4 opacity-10">
+            <ArrowUpRight className="w-16 h-16 text-emerald-500" />
+          </div>
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Total Settled</div>
+          <div className="text-3xl font-display font-bold text-emerald-400 mb-1">{inr(salaryTotals.settled)}</div>
+          <div className="text-xs text-mv-dim">Salary-rent paid by drivers</div>
+        </div>
+        <div className="mv-card p-5 relative overflow-hidden mv-rise" style={{ animationDelay: "100ms" }}>
+          <div className="absolute top-0 right-0 p-4 opacity-10">
+            <ArrowDownRight className="w-16 h-16 text-rose-500" />
+          </div>
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Total Unsettled</div>
+          <div className="text-3xl font-display font-bold text-rose-400 mb-1">{inr(salaryTotals.unsettled)}</div>
+          <div className="text-xs text-mv-dim">Salary-rent pending</div>
         </div>
       </div>
       )}
@@ -658,7 +710,11 @@ export default function DailyCollection() {
                       )}
                     </td> */}
                     <td className="px-5 py-4 font-display font-bold">
-                      {isSpecialPkg(it) ? <span className="text-slate-400 font-medium">-</span> : <div className="text-amber-500/90">{inr(it.daily_rate)}</div>}
+                      {it.package_category === "salary"
+                        ? (salaryRentOf(it).amount > 0
+                            ? <div className="text-amber-500/90">{inr(salaryRentOf(it).amount)}</div>
+                            : <span className="text-slate-400 font-medium">-</span>)
+                        : isSpecialPkg(it) ? <span className="text-slate-400 font-medium">-</span> : <div className="text-amber-500/90">{inr(it.daily_rate)}</div>}
                       {(it.extra_km_charge > 0) && (
                         <div className="text-[11px] text-red-500 font-semibold">+{inr(it.extra_km_charge)} extra</div>
                       )}

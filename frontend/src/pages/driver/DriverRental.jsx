@@ -18,7 +18,7 @@ export default function DriverRental() {
       <h1 className="text-2xl font-extrabold text-slate-900">My Rental</h1>
 
       <div className="rounded-3xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
-        <Row icon={Package} label="Package" value={rental?.package_name || rental?.plan_name || "Standard"} />
+        <Row icon={Package} label="Package" value={`${rental?.package_name || rental?.plan_name || "Standard"}${driver?.employment_type === "part_time" ? "/Part-time" : ""}`} />
         <Row icon={Bike} label="Vehicle" value={rental?.vehicle_reg || rental?.vehicle_number || "—"} />
         <Row label="Rental Start" value={(rental?.start_date || rental?.start) ? fmtDate(rental.start_date || rental.start) : "—"} />
         {rental?.package_category !== "commission" && rental?.package_category !== "salary" && (

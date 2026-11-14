@@ -250,7 +250,7 @@ export default function DriverProfile() {
             </div>
             <div>
               <div className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Current Package</div>
-              <div className="text-sm font-extrabold text-slate-900">{pkgName}</div>
+              <div className="text-sm font-extrabold text-slate-900">{pkgName}{driver?.employment_type === "part_time" ? "/Part-time" : ""}</div>
             </div>
           </div>
 

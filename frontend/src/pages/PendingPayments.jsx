@@ -88,9 +88,15 @@ export default function PendingPayments() {
     return list;
   }, [rows, q, pkgType, pkg, supervisor, cityTab, sortBy, isAdmin]);
 
+  // Salary driver's unpaid salary-rent: same calculation the row's "Pending Collection - ₹" line uses
+  const salaryPendingOf = (r) =>
+    r.package_category === "salary"
+      ? (r.pkg_pending_dates || []).reduce((s, dt) => s + Number((r.salary_rent_by_date || {})[dt] ?? r.salary_daily_rent ?? 0), 0)
+      : 0;
+
   // card totals follow the filters currently applied
   const totals = useMemo(() => {
-    const rent = filtered.reduce((s, r) => s + (r.rent_pending || 0), 0);
+    const rent = filtered.reduce((s, r) => s + (r.rent_pending || 0) + salaryPendingOf(r), 0);
     const deposit = filtered.reduce((s, r) => s + (r.deposit_pending || 0), 0);
     return { rent, deposit, total: rent + deposit };
   }, [filtered]);

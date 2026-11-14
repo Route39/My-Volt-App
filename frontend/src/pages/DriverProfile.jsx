@@ -680,6 +680,7 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
     start: openR?.start, end: openR?.end, code: openR?.rental_code,
     hasRental: !!openR, state: openR?.status || driver?.rental_status,
     category: openR?.package_category || driver?.package_category,
+    employment: openR?.employment_type || driver?.employment_type,
   } : null;
 
   useEffect(() => {
@@ -702,9 +703,9 @@ function EditDriverDialog({ open, setOpen, driver, onDone }) {
   };
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="bg-mv-surface border-mv-border text-mv-text">
+      <DialogContent className="bg-mv-surface border-mv-border text-mv-text max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-display">Edit Driver</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-2 gap-4 pt-2 max-h-[65vh] overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-4 pt-2">
           <Field label="Name"><TextInput value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
           <Field label="Phone"><TextInput value={form.phone} inputMode="numeric" maxLength={10} onChange={(e) => set("phone", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit mobile number" /></Field>
           <Field label="City">

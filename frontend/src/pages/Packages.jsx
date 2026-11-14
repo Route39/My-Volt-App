@@ -169,6 +169,17 @@ export default function Packages() {
                             <span className="text-mv-muted">Security Deposit</span>
                             <span className="font-semibold text-mv-text">{isActive ? inr(pkg.deposit || 5000) : "—"}</span>
                           </div>
+                          <div className="pt-3 border-t border-mv-border/50 space-y-2">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-mv-muted">Part Time</div>
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-mv-muted">Daily Rent</span>
+                              <span className="font-semibold text-mv-text">{isActive && pkg.part_time_amount != null ? inr(pkg.part_time_amount) : "—"}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-sm">
+                              <span className="text-mv-muted">Security Deposit</span>
+                              <span className="font-semibold text-mv-text">{isActive && pkg.part_time_deposit != null ? inr(pkg.part_time_deposit) : "—"}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
@@ -188,9 +199,10 @@ export default function Packages() {
                           <th className="px-4 py-3">Monthly Limit</th>
                           <th className="px-4 py-3">Extra KM Fee</th>
                           <th className="px-4 py-3">Security Deposit</th>
+                        <th className="px-4 py-3">Part Time (Rent / Deposit)</th>
                         </>)}
-                        {tab === "commission" && <th className="px-4 py-3">Commission</th>}
-                        {tab === "salary" && <th className="px-4 py-3">Salary</th>}
+                        {tab === "commission" && <><th className="px-4 py-3">Commission</th><th className="px-4 py-3">Part Time Commission</th></>}
+                        {tab === "salary" && <><th className="px-4 py-3">Salary</th><th className="px-4 py-3">Part Time (Salary / Daily Rent)</th></>}
                         <th className="px-4 py-3">Status</th>
                         <th className="px-4 py-3 text-right">Edit</th>
                       </tr>
@@ -210,9 +222,10 @@ export default function Packages() {
                               <td className="px-4 py-3">{isActive ? `${pkg.monthly_km_limit || (pkg.daily_limit_km || 0) * 30} km/month` : "—"}</td>
                               <td className="px-4 py-3">{isActive ? `${inr(pkg.overage_per_km)}/km` : "—"}</td>
                               <td className="px-4 py-3">{isActive ? inr(pkg.deposit || 5000) : "—"}</td>
+                              <td className="px-4 py-3">{isActive ? `${pkg.part_time_amount != null ? inr(pkg.part_time_amount) : "—"} / ${pkg.part_time_deposit != null ? inr(pkg.part_time_deposit) : "—"}` : "—"}</td>
                             </>)}
-                            {tab === "commission" && <td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.commission_percent != null ? `${pkg.commission_percent}%` : "—"}</td>}
-                            {tab === "salary" && <td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.salary_amount != null ? inr(pkg.salary_amount) : "—"}</td>}
+                            {tab === "commission" && <><td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.commission_percent != null ? `${pkg.commission_percent}%` : "—"}</td><td className="px-4 py-3">{isActive && pkg.part_time_commission_percent != null ? `${pkg.part_time_commission_percent}%` : "—"}</td></>}
+                            {tab === "salary" && <><td className="px-4 py-3 font-bold text-mv-primary">{isActive && pkg.salary_amount != null ? inr(pkg.salary_amount) : "—"}</td><td className="px-4 py-3">{isActive ? `${pkg.part_time_salary_amount != null ? inr(pkg.part_time_salary_amount) : "—"} / ${pkg.part_time_salary_daily_rent != null ? inr(pkg.part_time_salary_daily_rent) : "—"}` : "—"}</td></>}
                             <td className="px-4 py-3">{isActive ? <span className="text-emerald-600 font-semibold">Active</span> : <span className="text-amber-500 font-semibold">Coming Soon</span>}</td>
                             <td className="px-4 py-3 text-right">
                               <button onClick={(e) => { e.stopPropagation(); handleEdit(city, type, pkg); }} className="p-2 text-mv-muted hover:text-mv-primary bg-mv-surface2 rounded-full"><Edit2 className="w-4 h-4" /></button>
@@ -277,6 +290,26 @@ export default function Packages() {
                               <span className="font-extrabold text-mv-primary text-xl">{isActive && pkg.salary_daily_rent != null ? inr(pkg.salary_daily_rent) : "—"}</span>
                             </div>
                           )}
+                          <div className="pt-3 border-t border-mv-border/50 space-y-2">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-mv-muted">Part Time</div>
+                            {type === COMMISSION_TYPE ? (
+                              <div className="flex justify-between items-center text-sm">
+                                <span className="text-mv-muted">Commission</span>
+                                <span className="font-semibold text-mv-text">{isActive && pkg.part_time_commission_percent != null ? `${pkg.part_time_commission_percent}%` : "—"}</span>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="text-mv-muted">Salary</span>
+                                  <span className="font-semibold text-mv-text">{isActive && pkg.part_time_salary_amount != null ? inr(pkg.part_time_salary_amount) : "—"}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="text-mv-muted">Daily Rent (Salary)</span>
+                                  <span className="font-semibold text-mv-text">{isActive && pkg.part_time_salary_daily_rent != null ? inr(pkg.part_time_salary_daily_rent) : "—"}</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -305,13 +338,19 @@ function PackageForm({ editData, onBack, onSaved }) {
     active: pkg?.active ?? true,
     commission_percent: pkg?.commission_percent ?? "",
     salary_amount: pkg?.salary_amount ?? "",
-    salary_daily_rent: pkg?.salary_daily_rent ?? ""
+    salary_daily_rent: pkg?.salary_daily_rent ?? "",
+    part_time_amount: pkg?.part_time_amount ?? "",
+    part_time_deposit: pkg?.part_time_deposit ?? "",
+    part_time_commission_percent: pkg?.part_time_commission_percent ?? "",
+    part_time_salary_amount: pkg?.part_time_salary_amount ?? "",
+    part_time_salary_daily_rent: pkg?.part_time_salary_daily_rent ?? ""
   });
   const [saving, setSaving] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleLimitChange = (e) => set("monthly_km_limit", e.target.value);
+  const ptNum = (v) => (v === "" || v == null ? null : Number(v));
 
   const isCommission = form.package_type === COMMISSION_TYPE;
   const isSalary = form.package_type === SALARY_TYPE;
@@ -333,7 +372,9 @@ function PackageForm({ editData, onBack, onSaved }) {
         city: form.city,
         active: form.active,
         ...(isCommission ? { commission_percent: Number(form.commission_percent) } : {}),
-        ...(isSalary ? { salary_amount: Number(form.salary_amount), salary_daily_rent: Number(form.salary_daily_rent) } : {})
+        ...(isSalary ? { salary_amount: Number(form.salary_amount), salary_daily_rent: Number(form.salary_daily_rent) } : {}),
+        ...(isCommission ? { part_time_commission_percent: ptNum(form.part_time_commission_percent) } : {}),
+        ...(isSalary ? { part_time_salary_amount: ptNum(form.part_time_salary_amount), part_time_salary_daily_rent: ptNum(form.part_time_salary_daily_rent) } : {})
       } : {
         name: form.name,
         package_type: form.package_type,
@@ -343,7 +384,9 @@ function PackageForm({ editData, onBack, onSaved }) {
         daily_limit_km: Math.round(Number(form.monthly_km_limit) / 30), // derived, used by daily checks
         monthly_km_limit: Number(form.monthly_km_limit),
         overage_per_km: Number(form.overage_per_km),
-        active: form.active
+        active: form.active,
+        part_time_amount: ptNum(form.part_time_amount),
+        part_time_deposit: ptNum(form.part_time_deposit)
       };
       
       if (pkg && (pkg.id || pkg._id)) {
@@ -521,6 +564,74 @@ function PackageForm({ editData, onBack, onSaved }) {
           </div>
         </div>
         )}
+
+        <div className="mv-card p-6 md:p-8">
+          <h2 className="text-lg font-bold mb-6 flex items-center gap-2 border-b border-mv-border pb-4">
+            <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center"><Check className="w-4 h-4 text-amber-500" /></div>
+            Part Time
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {isCommission ? (
+              <div className="space-y-1">
+                <label className="block text-sm font-bold text-mv-text mb-1">Commission Percentage (%)</label>
+                <select
+                  value={form.part_time_commission_percent}
+                  onChange={e => set("part_time_commission_percent", e.target.value)}
+                  className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                >
+                  <option value="">Select percentage</option>
+                  {COMMISSION_PERCENT_OPTIONS.map(p => <option key={p} value={p}>{p}%</option>)}
+                </select>
+              </div>
+            ) : isSalary ? (
+              <>
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Salary Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={form.part_time_salary_amount}
+                    onChange={e => set("part_time_salary_amount", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                    placeholder="8000"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Daily Rent (Salary) (₹)</label>
+                  <input
+                    type="number"
+                    value={form.part_time_salary_daily_rent}
+                    onChange={e => set("part_time_salary_daily_rent", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                    placeholder="300"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Daily Rent Amount (₹)</label>
+                  <input
+                    type="number"
+                    value={form.part_time_amount}
+                    onChange={e => set("part_time_amount", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                    placeholder="500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Security Deposit (₹)</label>
+                  <input
+                    type="number"
+                    value={form.part_time_deposit}
+                    onChange={e => set("part_time_deposit", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold text-mv-primary"
+                    placeholder="3000"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
 
         <div className="flex flex-wrap justify-end pt-4 gap-3 sm:gap-4">
           <GhostBtn onClick={onBack} disabled={saving}>Cancel</GhostBtn>

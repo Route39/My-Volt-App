@@ -693,6 +693,7 @@ class DriverBody(BaseModel):
     manager_name: Optional[str] = None   # free-text manager
     rental_state: Optional[str] = None   # active | suspended | pending_payment | closed
     package_category: Optional[str] = None   # rental | commission | salary
+    employment_type: Optional[str] = None    # full_time | part_time (required when a package is assigned)
 
 
 @api.get("/admin/kyc/pending")
@@ -1135,6 +1136,8 @@ async def _create_driver_rental(user, org, driver_id, driver, vehicle, plan, sta
     active / suspended -> vehicle is handed over (same as Rentals -> create + activate).
     pending_payment / closed -> only the rental record is created (same as Rentals -> create)."""
     state = state or "active"
+    if (driver or {}).get("employment_type") == "part_time":
+        plan = _pt_overlay(plan)   # Part Time drivers start on the package's Part Time amounts
     if state in ("active", "suspended"):
         rid = await _create_active_rental(user, org, driver_id, driver, vehicle, plan, start, end)
         if state == "suspended":
@@ -1319,6 +1322,10 @@ async def create_driver(body: DriverBody, request: Request):
         if pkg_category and pkg_category != _plan_kind(plan):
             raise HTTPException(status_code=400, detail="Selected package does not match the package type")
         doc["package_category"] = _plan_kind(plan)
+        if doc.get("employment_type") not in ("full_time", "part_time"):
+            raise HTTPException(status_code=400, detail="Select Full-time or Part-time")
+    else:
+        doc.pop("employment_type", None)
     sup = await _validate_supervisor(org_, doc.get("city"), extra["supervisor_id"])
     if sup:
         doc["supervisor_id"] = str(sup["_id"])
@@ -1463,6 +1470,7 @@ async def update_driver(did: str, body: dict, request: Request):
         body.pop(k, None)
     # new assignment fields are handled separately below, never $set raw
     extra = {k: body.pop(k, None) for k in _ASSIGN_KEYS}
+    emp_type = body.pop("employment_type", None) or None   # only saved when a package is being assigned
     if "phone" in body:
         phone = re.sub(r"\s+", "", body.get("phone") or "")
         if not phone:
@@ -1499,6 +1507,10 @@ async def update_driver(did: str, body: dict, request: Request):
     if extra["vehicle_id"] and not has_active:
         vehicle, plan = await _validate_driver_assignment(
             org_, city_, extra["vehicle_id"], extra["package_id"], extra["rental_start"], extra["rental_end"])
+    if vehicle and plan:
+        if emp_type not in ("full_time", "part_time"):
+            raise HTTPException(status_code=400, detail="Select Full-time or Part-time")
+        body["employment_type"] = emp_type
     upd = {}
     if body:
         upd["$set"] = dict(body)
@@ -1510,6 +1522,9 @@ async def update_driver(did: str, body: dict, request: Request):
             upd["$unset"] = {"supervisor_id": "", "supervisor_name": ""}
     if upd:
         await db.drivers.update_one({"_id": oid(did)}, upd)
+    # Full-time <-> Part-time change on a driver who already has a rental: new amounts apply from today
+    if emp_type in ("full_time", "part_time") and open_rental and emp_type != (cur.get("employment_type") or "full_time"):
+        await _apply_employment_change(user, org_, did, cur, open_rental, emp_type)
     if new_vehicle:
         await _swap_driver_vehicle(user, org_, did, cur, open_rental, new_vehicle)
         if open_rental:   # reload so a status change in the same save acts on the new vehicle
@@ -2817,6 +2832,12 @@ class PlanBody(BaseModel):
     commission_percent: Optional[float] = None
     salary_amount: Optional[float] = None
     salary_daily_rent: Optional[float] = None   # daily rent for Salary package drivers (separate from rental "amount")
+    # --- Part-time amounts (optional; Full Time uses the fields above) ---
+    part_time_amount: Optional[float] = None               # rental: Daily Rent Amount (₹)
+    part_time_deposit: Optional[float] = None              # rental: Security Deposit (₹)
+    part_time_commission_percent: Optional[float] = None   # commission: Commission Percentage (%)
+    part_time_salary_amount: Optional[float] = None        # salary: Salary Amount (₹)
+    part_time_salary_daily_rent: Optional[float] = None    # salary: Daily Rent (Salary) (₹)
 
 
 @api.get("/rental-plans")
@@ -2902,6 +2923,9 @@ async def update_plan(pid: str, body: dict, request: Request):
             locked_user_ids.add(str(u["_id"]))
         async for d in db.drivers.find({"organization_id": user.get("organization_id"), "active_trip_id": {"$exists": True, "$ne": "", "$ne": None}}):
             locked_user_ids.add(str(d["_id"]))
+        # Part Time drivers have their own amounts (part_time_*): keep them out of the Full Time rate sync
+        async for d in db.drivers.find({"organization_id": user.get("organization_id"), "employment_type": "part_time"}):
+            locked_user_ids.add(str(d["_id"]))
             
         # 2. Find drivers with unpaid dues (outstanding_amount > 0)
         # async for acct in db.rental_accounts.find({"organization_id": user.get("organization_id"), "outstanding_amount": {"$gt": 0}}):
@@ -2974,6 +2998,51 @@ async def update_plan(pid: str, body: dict, request: Request):
             for d_id in drivers_to_update:
                 await db.users.update_one({"_id": ObjectId(d_id)}, {"$set": {"package_rate": new_rate, "package_name": new_name}})
                 await db.drivers.update_one({"_id": ObjectId(d_id)}, {"$set": {"package_rate": new_rate, "package_name": new_name}})
+    # Part Time drivers on this package follow the package's Part Time Daily Rent Amount. They are skipped by the
+    # Full Time sync above, so they get their own sync here (drivers mid-trip keep their frozen rate and catch up later).
+    if plan and "amount" in body and plan.get("part_time_amount") is not None:
+        pt_rate = float(plan["part_time_amount"])
+        _pt_org = user.get("organization_id")
+        _pt_ids = [str(d["_id"]) async for d in db.drivers.find(
+            {"organization_id": _pt_org, "employment_type": "part_time"}, {"_id": 1, "active_trip_id": 1})
+            if not d.get("active_trip_id")]
+        if _pt_ids:
+            _pt_rf = {"organization_id": _pt_org, "plan_id": pid, "driver_id": {"$in": _pt_ids}, "status": {"$ne": "ended"}}
+            _pt_drivers = [r_["driver_id"] async for r_ in db.rentals.find(_pt_rf, {"driver_id": 1})]
+            if _pt_drivers:
+                await db.rentals.update_many(_pt_rf, {"$set": {"daily_rate": pt_rate}})
+                await db.driver_rentals.update_many(
+                    {"organization_id": _pt_org, "driver_id": {"$in": _pt_drivers}, "status": {"$ne": "ended"}},
+                    {"$set": {"daily_rate": pt_rate}})
+                _pt_today = _today_ist()
+                _pt_today_iso = _pt_today.isoformat()
+                _pt_yday = _pt_today - timedelta(days=1)
+                _pt_acct_filter = {"organization_id": _pt_org, "driver_id": {"$in": _pt_drivers}}
+                async for a in db.rental_accounts.find(_pt_acct_filter):
+                    rent_due = float(a.get("rent_due", 0) or 0)
+                    if rent_due <= 0:
+                        continue
+                    old_rate = float(a.get("daily_rate", 0) or 0)
+                    rbd = {k: float(v) for k, v in (a.get("rent_by_date") or {}).items()}
+                    if not rbd:  # legacy account
+                        rbd = {(max(a["unpaid_dates"]) if a.get("unpaid_dates") else _pt_today_iso): rent_due}
+                    d_ = date.fromisoformat(max(rbd)) + timedelta(days=1)
+                    while d_ <= _pt_yday and old_rate > 0:
+                        rbd.setdefault(d_.isoformat(), old_rate)   # earlier unpaid days stay at the old rate
+                        d_ += timedelta(days=1)
+                    if _pt_today_iso in rbd:
+                        rbd[_pt_today_iso] = pt_rate
+                    new_total = round(sum(rbd.values()), 2)
+                    delta = round(new_total - rent_due, 2)
+                    await db.rental_accounts.update_one(
+                        {"_id": a["_id"]},
+                        {"$set": {"rent_by_date": rbd, "rent_due": new_total},
+                         "$inc": {"outstanding_amount": delta},
+                         "$addToSet": {"unpaid_dates": {"$each": list(rbd.keys())}}})
+                await db.rental_accounts.update_many(_pt_acct_filter, {"$set": {"daily_rate": pt_rate}})
+                for d_id in _pt_drivers:
+                    await db.users.update_one({"_id": ObjectId(d_id)}, {"$set": {"package_rate": pt_rate}})
+                    await db.drivers.update_one({"_id": ObjectId(d_id)}, {"$set": {"package_rate": pt_rate}})
     return ser(plan)
 
 
@@ -3097,6 +3166,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
         _pkg_cat = r.get("package_category") or "rental"
         _coll_by_date = {}
         _cp_plan = None
+        _cp_plan_full = None
         if _pkg_cat != "rental":
             deposit = 0
             deposit_paid = 0
@@ -3112,6 +3182,8 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                 _cp_plan = await db.rental_plans.find_one({
                     "organization_id": user.get("organization_id"), "package_type": "Salary",
                     "city": {"$regex": f"^{re.escape(str(r['city']))}$", "$options": "i"}}) or _cp_plan
+            _cp_plan_full = _cp_plan
+            _cp_plan = await _pt_plan(_cp_plan, r["driver_id"])
 
         # Dates on which a split-deposit part was paid (partial amount / remaining amount):
         # each of these dates must have a Daily Collection row so the Deposit column shows it.
@@ -3519,10 +3591,10 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         # commission rows: the % that applied on this day (a paid day keeps the % it was paid at)
                         "commission_percent": (
                             (_coll_by_date[d_str].get("commission_percent") if d_str in _coll_by_date and _coll_by_date[d_str].get("commission_percent") is not None
-                             else _commission_percent_on(_cp_plan, r.get("commission_percent"), d_str))
+                             else _commission_percent_on(_plan_day(_cp_plan_full, drv_doc, d_str), r.get("commission_percent"), d_str))
                             if _pkg_cat == "commission" else r.get("commission_percent")),
                         "salary_amount": r.get("salary_amount"),
-                        "salary_daily_rent": (_salary_rent_on(_cp_plan, (d - timedelta(days=1)).strftime("%Y-%m-%d")) if _pkg_cat == "salary" else None),
+                        "salary_daily_rent": (_salary_rent_on(_plan_day(_cp_plan_full, drv_doc, (d - timedelta(days=1)).strftime("%Y-%m-%d")), (d - timedelta(days=1)).strftime("%Y-%m-%d")) if _pkg_cat == "salary" else None),
                         "collection": _coll_view(_coll_by_date.get(d_str)) if idx == 0 else None,
                         "early_collection": (_coll_view(_coll_by_date[d_str]) if (idx == 0 and d_str in _coll_by_date and _coll_by_date[d_str].get("paid_early")) else None),
                         # yesterday's collection payment (settled on this day's row)
@@ -3601,6 +3673,8 @@ async def create_rental(body: RentalBody, request: Request):
     plan = None
     if body.plan_id:
         plan = await db.rental_plans.find_one({"_id": oid(body.plan_id), "organization_id": user.get("organization_id")})
+        if plan and driver.get("employment_type") == "part_time":
+            plan = _pt_overlay(plan)
 
     pkg_name = (plan.get("name") if plan else None) or body.package_name or driver.get("package_name", "Standard")
     pkg_rate = (plan.get("amount") if plan else None) or body.package_rate or driver.get("package_rate", 0)
@@ -4742,6 +4816,7 @@ async def _get_package_snapshot(org, did):
             "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
             "organization_id": org
         })
+    plan = await _pt_plan(plan, did)
     monthly_km_limit = plan.get("monthly_km_limit", 0) if plan else 0
     daily_limit_km = _effective_daily_limit(plan.get("daily_limit_km", 0) if plan else 0, monthly_km_limit)
     return {
@@ -4981,6 +5056,7 @@ async def _rental_account(rental):
                     "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
                     "organization_id": org
                 })
+            live_plan = await _pt_plan(live_plan, did)
             live_rate = float(live_plan["amount"]) if live_plan and live_plan.get("amount") else float(rate or 0)
             past_rate = float(rate or 0) or live_rate
             today_rate = past_rate if mid_trip else live_rate   # mid-trip: rate stays frozen
@@ -5075,6 +5151,7 @@ async def _rental_account(rental):
                             "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
                             "organization_id": org
                         })
+                    plan2 = await _pt_plan(plan2, did)
                     live2 = float(plan2["amount"]) if plan2 and plan2.get("amount") else float(rate or 0)
                     gap2 = float(rate or 0) or live2
                     added, d_, guard = {}, first_needed, 0
@@ -5260,6 +5337,7 @@ async def _deposit_amount_for(org, did, dep=None):
             "name": {"$regex": f"^{re.escape(rental['package_name'])}$", "$options": "i"},
             "city": {"$regex": f"^{re.escape(rental.get('city', '') or '')}$", "$options": "i"},
             "organization_id": org})
+    plan = await _pt_plan(plan, did)
     live = float((plan or {}).get("deposit") or rental.get("deposit") or 0)
     return live if live > 0 else stored
 
@@ -5350,6 +5428,8 @@ async def _driver_payload(user):
         "deposit": ser(dep) if dep else None,
         "rental": None, "account": None,
     }
+    # Full Time / Part Time (saved on the driver record) so the app can show "/Part-time" beside the package name
+    out["driver"]["employment_type"] = ((await db.drivers.find_one({"_id": ObjectId(did)}, {"employment_type": 1})) or {}).get("employment_type")
     if rental:
         acct = await _rental_account(rental)
         
@@ -5364,6 +5444,7 @@ async def _driver_payload(user):
                 "organization_id": org
             })
             
+        plan = await _pt_plan(plan, did)
         if plan and not dep and rental.get("package_category") not in ("commission", "salary"):
             dep = {
                 "organization_id": org, 
@@ -5608,6 +5689,7 @@ async def _apply_paid(rec, txn, method, gateway_ref=None):
                                 "city": {"$regex": f"^{rental_doc.get('city', '')}$", "$options": "i"},
                                 "organization_id": org
                             })
+                        sync_plan = await _pt_plan(sync_plan, did)
                         if sync_plan:
                             new_rate = float(sync_plan.get("amount", 0))
                             current_rate = float(rental_doc.get("daily_rate", 0))
@@ -5791,6 +5873,105 @@ def _salary_rent_on(plan, day_iso, fallback=0):
     return float((plan or {}).get("salary_daily_rent") or fallback or 0)
 
 
+def _pt_overlay(plan):
+    """Part Time version of a package: the package's Part Time amounts replace the Full Time ones.
+    A Part Time amount left blank keeps the Full Time one."""
+    p = dict(plan or {})
+    if p.get("part_time_amount") is not None:
+        p["amount"] = p["part_time_amount"]
+    if p.get("part_time_deposit") is not None:
+        p["deposit"] = p["part_time_deposit"]
+    if p.get("part_time_commission_percent") is not None:
+        p["commission_percent"] = p["part_time_commission_percent"]
+        p.pop("commission_history", None)      # the Full Time % history does not apply to Part Time
+    if p.get("part_time_salary_amount") is not None:
+        p["salary_amount"] = p["part_time_salary_amount"]
+    if p.get("part_time_salary_daily_rent") is not None:
+        p["salary_daily_rent"] = p["part_time_salary_daily_rent"]
+        p.pop("salary_rent_history", None)     # the Full Time rent history does not apply to Part Time
+    return p
+
+
+async def _pt_plan(plan, driver_id):
+    """Returns the plan as this driver should see it: Part Time drivers get the Part Time amounts, everyone else the plan as is."""
+    if not plan or not driver_id:
+        return plan
+    try:
+        drv = await db.drivers.find_one({"_id": oid(driver_id)}, {"employment_type": 1})
+    except Exception:
+        return plan
+    return _pt_overlay(plan) if (drv or {}).get("employment_type") == "part_time" else plan
+
+
+def _emp_on(drv, day_iso):
+    """Full Time / Part Time as it was on one day (from the history saved when the type was changed)."""
+    t = None
+    for h in sorted((drv or {}).get("employment_history") or [], key=lambda x: x.get("from") or ""):
+        if (h.get("from") or "") <= day_iso:
+            t = h.get("type")
+    return t or (drv or {}).get("employment_type") or "full_time"
+
+
+def _plan_day(plan, drv, day_iso):
+    """The package as it applied on one day: Part Time amounts only for the days the driver was Part Time.
+    `plan` must be the package as saved (not already overlaid)."""
+    return _pt_overlay(plan) if (plan and _emp_on(drv, day_iso) == "part_time") else plan
+
+
+async def _apply_employment_change(user, org, did, drv, rental, new_emp):
+    """Full-time <-> Part-time change for a driver who already has a rental. New amounts start TODAY."""
+    today_iso = _today_ist().isoformat()
+    old_emp = drv.get("employment_type") or "full_time"
+    cat = rental.get("package_category") or "rental"
+    if cat == "rental":
+        await _rental_account(rental)   # rent up to yesterday is booked at the OLD rate first
+    hist = list(drv.get("employment_history") or [])
+    if not hist:
+        hist.append({"from": "0000-01-01", "type": old_emp})
+    if hist[-1].get("from") == today_iso:
+        hist[-1]["type"] = new_emp      # changed again on the same day
+    else:
+        hist.append({"from": today_iso, "type": new_emp})
+    await db.drivers.update_one({"_id": oid(did)}, {"$set": {"employment_type": new_emp, "employment_history": hist}})
+
+    plan = None
+    if rental.get("plan_id"):
+        try:
+            plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
+        except Exception:
+            plan = None
+    if not plan and rental.get("package_name"):
+        # old rental without plan_id: find the package by name + city (same lookup used elsewhere)
+        plan = await db.rental_plans.find_one({
+            "name": {"$regex": f"^{re.escape(rental['package_name'])}$", "$options": "i"},
+            "city": {"$regex": f"^{re.escape(rental.get('city', '') or '')}$", "$options": "i"},
+            "organization_id": org})
+    if plan:
+        new_plan = _pt_overlay(plan) if new_emp == "part_time" else plan
+        extra = _plan_extra(new_plan)   # commission % / salary amount saved on the rental + driver
+        await db.rentals.update_one({"_id": rental["_id"]}, {"$set": extra})
+        await db.drivers.update_one({"_id": oid(did)}, {"$set": extra})
+        if cat == "rental":
+            new_rate = float(new_plan.get("amount") or 0)
+            if new_rate > 0:
+                await db.rentals.update_one({"_id": rental["_id"]}, {"$set": {"daily_rate": new_rate}})
+                await db.driver_rentals.update_many(
+                    {"organization_id": org, "driver_id": did, "status": {"$ne": "ended"}}, {"$set": {"daily_rate": new_rate}})
+                await db.drivers.update_one({"_id": oid(did)}, {"$set": {"package_rate": new_rate}})
+                acct = await db.rental_accounts.find_one({"organization_id": org, "driver_id": did})
+                if acct:
+                    rbd = acct.get("rent_by_date") or {}
+                    upd = {"$set": {"daily_rate": new_rate}}
+                    if today_iso in rbd:   # today's charge (if already on the ledger) moves to the new rent
+                        delta = round(new_rate - float(rbd[today_iso] or 0), 2)
+                        if delta:
+                            upd["$set"][f"rent_by_date.{today_iso}"] = new_rate
+                            upd["$inc"] = {"rent_due": delta, "outstanding_amount": delta}
+                    await db.rental_accounts.update_one({"_id": acct["_id"]}, upd)
+    await log_audit(user, "driver_employment_changed", "driver", did,
+                    f"{drv.get('name')} changed {old_emp} -> {new_emp} from {today_iso}")
+
+
 async def _package_due_state(user):
     """Commission / Salary drivers pay for each working day on the NEXT day, before 12:00 noon (IST).
     Returns the oldest unpaid day (or None). locked=True once the noon deadline has passed
@@ -5814,8 +5995,10 @@ async def _package_due_state(user):
             plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
         except Exception:
             plan = None
+    plan_full = plan   # package as saved; Part Time amounts are applied per day below
+    plan = await _pt_plan(plan, did)
     percent = float((plan or {}).get("commission_percent") or rental.get("commission_percent") or 0)
-    drv = await db.drivers.find_one({"_id": ObjectId(did)}, {"week_off_dates": 1, "paid_leave_dates": 1, "paid_leaves": 1})
+    drv = await db.drivers.find_one({"_id": ObjectId(did)}, {"week_off_dates": 1, "paid_leave_dates": 1, "paid_leaves": 1, "employment_type": 1, "employment_history": 1})
     skip = set((drv or {}).get("week_off_dates") or []) | set((drv or {}).get("paid_leave_dates") or []) | set((drv or {}).get("paid_leaves") or [])
     paid = {c.get("for_date") async for c in db.package_collections.find(
         {"organization_id": org, "driver_id": did, "status": "paid"}, {"for_date": 1})}
@@ -5839,11 +6022,11 @@ async def _package_due_state(user):
     after_noon = datetime.now(IST).hour >= PKG_NOON_HOUR
     return {
         "category": cat, "plan_name": rental.get("package_name"),
-        "commission_percent": _commission_percent_on(plan, rental.get("commission_percent"), due_date.isoformat()) if cat == "commission" else None,
+        "commission_percent": _commission_percent_on(_plan_day(plan_full, drv, due_date.isoformat()), rental.get("commission_percent"), due_date.isoformat()) if cat == "commission" else None,
         "date": due_date.isoformat(),
         "locked": bool(not early_today and (after_noon or due_date < today - timedelta(days=1))),
         "early": early_today,
-        "salary_daily_rent": _salary_rent_on(plan, due_date.isoformat()) if cat == "salary" else None,
+        "salary_daily_rent": _salary_rent_on(_plan_day(plan_full, drv, due_date.isoformat()), due_date.isoformat()) if cat == "salary" else None,
     }
 
 
@@ -6428,6 +6611,7 @@ async def admin_submit_odometer(driver_id: str, body: AdminOdometerBody, request
                     "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
                     "organization_id": user.get("organization_id")
                 })
+            sync_plan = await _pt_plan(sync_plan, driver_id)
             if sync_plan:
                 new_rate = float(sync_plan.get("amount", 0))
                 if new_rate > 0 and new_rate != daily_rate:
@@ -6736,6 +6920,7 @@ async def submit_odometer(
                     "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"},
                     "organization_id": user.get("organization_id")
                 })
+            sync_plan = await _pt_plan(sync_plan, user["id"])
             if sync_plan:
                 new_rate = float(sync_plan.get("amount", 0))
                 if new_rate > 0 and new_rate != daily_rate:
@@ -6993,7 +7178,7 @@ async def driver_create_order(body: CreateOrderBody, request: Request):
             plan = None
             if rental.get("plan_id"): plan = await db.rental_plans.find_one({"_id": oid(rental["plan_id"])})
             elif rental.get("package_name"): plan = await db.rental_plans.find_one({"name": {"$regex": f"^{rental['package_name']}$", "$options": "i"}, "city": {"$regex": f"^{rental.get('city', '')}$", "$options": "i"}, "organization_id": org})
-            if plan: amount = plan.get("deposit", 5000)
+            if plan: amount = (await _pt_plan(plan, rental.get("driver_id"))).get("deposit", 5000)
         elif dep:
             amount = dep.get("amount", 5000)
         # ---- split deposit: half now, remaining half on the date the driver picks ----
@@ -7790,6 +7975,8 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
                 _sp = await db.rental_plans.find_one({
                     "organization_id": org, "package_type": "Salary",
                     "city": {"$regex": f"^{re.escape(str(r['city']))}$", "$options": "i"}}) or _sp
+            _sp_full = _sp
+            _sp = await _pt_plan(_sp, r.get("driver_id"))
             salary_daily_rent = float((_sp or {}).get("salary_daily_rent") or 0)
 
         if _cat != "rental":
@@ -7830,7 +8017,7 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             "rent_pending": rent_pending,
             "rent_pending_dates": rent_pending_dates if r else [],
             "salary_daily_rent": salary_daily_rent,
-            "salary_rent_by_date": ({dt: _salary_rent_on(_sp, dt) for dt in pkg_pending_dates} if (_cat == "salary" and r) else {}),
+            "salary_rent_by_date": ({dt: _salary_rent_on(_plan_day(_sp_full, d, dt), dt) for dt in pkg_pending_dates} if (_cat == "salary" and r) else {}),
             "deposit_pending": deposit_pending,
             "pkg_pending": pkg_pending,
             "pkg_pending_date": _pp_yesterday if pkg_pending else None,
@@ -7946,7 +8133,14 @@ async def startup():
         (db.package_collections, [("organization_id", 1), ("driver_id", 1), ("status", 1)], {}),
         (db.driver_kyc_files, "token", {}),
         (db.driver_kyc_files, "driver_id", {}),
-    ]
+        (db.rental_payments, [("rental_id", 1), ("covers_dates", 1)], {}),
+        (db.rental_payments, [("driver_id", 1), ("kind", 1), ("payment_status", 1)], {}),
+        (db.rental_accounts, "driver_id", {}),
+        (db.rentals, [("organization_id", 1), ("driver_id", 1), ("status", 1)], {}),
+        (db.drivers, [("organization_id", 1), ("rental_status", 1)], {}),
+        (db.package_collections, [("organization_id", 1), ("driver_id", 1), ("for_date", 1)], {}),
+        (db.week_off_requests, [("driver_id", 1), ("month", 1)], {}),
+        (db.users, "organization_id", {}),
     for coll, keys, opts in indexes:
         try:
             await coll.create_index(keys, **opts)
