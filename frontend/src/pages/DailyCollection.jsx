@@ -185,13 +185,35 @@ export default function DailyCollection() {
     : pkgTab === "rental" ? !(it.package_category === "commission" || it.package_category === "salary")
     : it.package_category === pkgTab);
   // Commission / Salary: the collection paid today is for yesterday, so each row shows yesterday's payment
-  const pkgRows = rows.map((x) => ({ ...x, collection: x.prev_collection }));
+  // A salary driver who paid TODAY's rent today itself (after 9 PM) shows that payment on today's row;
+  // the next day's row then shows it as already paid and does not count it again.
+  const pkgRows = rows.flatMap((x) => {
+    // A salary driver's early payment (today's rent paid today) makes the backend also return a row dated TOMORROW
+    // (its "yesterday" has a payment). That future row showed tomorrow's date beside today's payment, so it is dropped:
+    // the payment is already shown on the row dated today (the "early" row below).
+    if (x.package_category === "salary" && x.date > todayIST) return [];
+    const prevEarly = !!x.prev_collection?.paid_early;
+    const base = { ...x, collection: prevEarly ? null : x.prev_collection };
+    if (!x.early_collection) return [base];
+    // the early row always carries the date of the payment itself (today)
+    const early = { ...x, id: `${x.id}-early`, date: x.early_collection.for_date || x.date, collection: x.early_collection, is_early_row: true };
+    return (x.prev_collection && !prevEarly) || x.prev_day_status ? [base, early] : [early];
+  });
   // Commission / Salary tabs: total amount paid by the drivers in the rows shown (follows the city / date / search filters)
   const pkgPaidTotal = pkgRows.reduce((s, x) => s + (Number(x.collection?.pay_amount) || 0), 0);
 
   // Settled / Unsettled button is shown only for Commission / Salary package drivers (not Rental package)
   const settleBtn = (it) => {
     if (it.package_category !== "commission" && it.package_category !== "salary") return null;
+    // salary driver paid TODAY's rent today itself (after 9 PM): shown on today's row with the date it is for
+    if (it.is_early_row) return (
+      <div className="flex flex-col items-start gap-1" data-testid={`settle-chip-${it.id}`}>
+        <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+          <Check className="w-3.5 h-3.5" /> {isPkgTab ? "Salary-rent paid" : <>Paid {inr(it.collection.pay_amount)}</>}
+        </span>
+        <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.collection.for_date}</span>
+      </div>
+    );
     // week-off / paid-leave day: nothing is paid on this day -> show the day's status instead of "-"
     // if (it.rent_status === "week_off") return <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">Week-off</span>;
     // if (it.rent_status === "paid_leave") return <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">PAID LEAVE</span>;
@@ -214,8 +236,8 @@ export default function DailyCollection() {
           <>
             <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
               <Check className="w-3.5 h-3.5" /> {isPkgTab
-                ? (it.package_category === "commission" ? "Commission paid" : "Total amount paid")
-                : <>{it.package_category === "commission" ? "Commission" : "Salary"} paid {inr(pc.pay_amount)}</>}
+                ? (it.package_category === "commission" ? "Commission paid" : "Salary-rent paid")
+                : <>{it.package_category === "commission" ? "Commission paid" : "Paid"} {inr(pc.pay_amount)}</>}
             </span>
             {!isPkgTab && pc.transaction_id && (
               <span className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200">TXN {pc.transaction_id}</span>
@@ -269,6 +291,54 @@ export default function DailyCollection() {
       {it.package_category === "commission" ? "Commission" : "Salary"}
     </span>
   );
+  // Salary package drivers: Daily Rent (Salary) is paid the next day -> shown like the rental drivers' Daily Rent (PAID / NOT PAID)
+  const salaryRentCell = (it) => {
+    if (it.is_early_row) {
+      const c = it.collection;
+      return (
+        <div className="flex flex-col gap-1 mt-1 mb-1">
+          <span className="font-display font-bold text-sm text-emerald-600">{inr(c.pay_amount)}</span>
+          <span className="text-[11px] text-mv-muted whitespace-nowrap">{c.for_date}</span>
+          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+            <Check className="w-3.5 h-3.5" /> PAID
+          </div>
+          {c.transaction_id && (
+            <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">TXN {c.transaction_id}</div>
+          )}
+        </div>
+      );
+    }
+    if (it.rental_start && it.date <= it.rental_start) return <span className="text-slate-400 font-medium">—</span>;
+    if (it.prev_day_status) return (
+      <div className="flex flex-col items-start gap-1">
+        {it.prev_day_status === "week_off"
+          ? <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">Week-off</span>
+          : <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-blue-50 text-blue-600 text-xs font-bold tracking-wide border border-blue-200 shadow-sm">PAID LEAVE</span>}
+        <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.prev_date}</span>
+      </div>
+    );
+    if (!it.rent_for_date) return <span className="text-slate-400 font-medium">—</span>;
+    const pc = it.prev_collection;
+    if (pc) return (
+      <div className="flex flex-col gap-1 mt-1 mb-1">
+        <span className="font-display font-bold text-sm text-emerald-600">{inr(pc.pay_amount)}</span>
+        <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.rent_for_date}</span>
+        <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
+          <Check className="w-3.5 h-3.5" /> PAID
+        </div>
+        {pc.transaction_id && (
+          <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">TXN {pc.transaction_id}</div>
+        )}
+      </div>
+    );
+    return (
+      <div className="flex flex-col gap-1 mt-1 mb-1">
+        <span className="font-display font-bold text-sm text-red-500/80">{Number(it.salary_daily_rent) > 0 ? inr(it.salary_daily_rent) : "—"}</span>
+        <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.rent_for_date}</span>
+        <div className="inline-flex items-center gap-1.5 w-max px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">NOT PAID</div>
+      </div>
+    );
+  };
   const qrBadgeCls = "text-[9px] px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold text-blue-600 bg-blue-50 border-blue-200";
   const txnChip = (t, manual) => t ? (
     <>
@@ -436,7 +506,7 @@ export default function DailyCollection() {
                 <th className="px-5 py-4">Vehicle</th>
                 <th className="px-5 py-4">{pkgTab === "commission" ? "Commission %" : "Salary"}</th>
                 <th className="px-5 py-4">Total Collected</th>
-                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission Amount" : "Collection Amount Paid"}</th>
+                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission Amount" : "Rent (Salary) Paid"}</th>
                 <th className="px-5 py-4">Trip Screenshot</th>
                 <th className="px-5 py-4">Settled / Unsettled</th>
               </tr>
@@ -480,12 +550,13 @@ export default function DailyCollection() {
                         : (it.salary_amount != null ? inr(it.salary_amount) : "—")}
                     </td>
                     <td className="px-5 py-4 font-display font-bold">
-                      {it.collection ? inr(it.collection.total_collected) : <span className="text-slate-400 font-medium">—</span>}
+                      {it.collection && it.collection.total_collected != null ? inr(it.collection.total_collected) : <span className="text-slate-400 font-medium">—</span>}
                     </td>
                     <td className="px-5 py-4">
                       {it.collection ? (
                         <div className="flex flex-col gap-1">
                           <span className="text-emerald-600 font-display font-bold text-sm">{inr(it.collection.pay_amount)}</span>
+                          {it.package_category === "salary" && <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.collection.for_date}</span>}
                           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-600 text-xs font-bold tracking-wide border border-emerald-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
                           </div>
@@ -495,7 +566,7 @@ export default function DailyCollection() {
                         </div>
                       ) : (it.rent_status === "week_off" || it.rent_status === "paid_leave") ? (
                         <span className="text-slate-400 font-medium">—</span>
-                      ) : (it.rent_for_date && !(it.rental_start && it.date <= it.rental_start)) ? (
+                      ) : (it.rent_for_date && !it.prev_collection && !(it.rental_start && it.date <= it.rental_start)) ? (
                         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 text-red-500 text-xs font-bold tracking-wide">NOT PAID</div>
                       ) : (
                         <span className="text-slate-400 font-medium">—</span>
@@ -603,7 +674,9 @@ export default function DailyCollection() {
                       )}
                     </td> */}
                     <td className="px-5 py-4">
-                      {isSpecialPkg(it) ? (
+                      {it.package_category === "salary" ? (
+                        salaryRentCell(it)
+                      ) : isSpecialPkg(it) ? (
                         pkgPill(it)
                       ) : it.rent_status === "week_off" ? (
                         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-violet-50 text-violet-600 text-xs font-bold tracking-wide border border-violet-200 shadow-sm">

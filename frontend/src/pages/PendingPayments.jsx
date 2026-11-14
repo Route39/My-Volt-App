@@ -231,11 +231,16 @@ export default function PendingPayments() {
                       <div>
                         <span className="font-semibold text-red-500">{inr(r.rent_pending)}</span>
                         <div className="text-[11px] text-mv-dim">Pending Rent</div>
+                        {(r.rent_pending_dates || []).map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}
                       </div>
                     )
                       : (r.pkg_pending_dates || []).length > 0 ? (
                         <div>
                           <span className="font-semibold text-red-500">{r.package_category === "commission" ? "Pending Commission" : "Pending Collection"}</span>
+                          {r.package_category === "salary" && (() => {
+                            const total = r.pkg_pending_dates.reduce((s, dt) => s + Number((r.salary_rent_by_date || {})[dt] ?? r.salary_daily_rent ?? 0), 0);
+                            return total > 0 ? <span className="font-semibold text-red-500"> - {inr(total)}</span> : null;
+                          })()}
                           {r.pkg_pending_dates.map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}
                         </div>
                       ) : <span className="text-mv-dim">—</span>}

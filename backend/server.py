@@ -1797,6 +1797,108 @@ async def admin_edit_rent_paid(did: str, request: Request, body: dict):
     return {"ok": True, "added": len(new_dates), "removed": len(removed)}
 
 
+@api.get("/admin/drivers/{did}/salary-rent-paid")
+async def admin_get_salary_rent_paid(did: str, request: Request):
+    """Salary-rent days the office already marked as paid (Rent Paid (Salary) button) - used to pre-fill the form."""
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    items = []
+    async for c in db.package_collections.find({"organization_id": org, "driver_id": did, "category": "salary",
+                                                "status": "paid", "manual_admin": True}):
+        items.append({"id": str(c["_id"]), "date": c.get("for_date"),
+                      "amount": float(c.get("pay_amount") or 0), "txn_id": c.get("transaction_id") or ""})
+    items.sort(key=lambda x: x["date"] or "")
+    return {"items": items}
+
+
+@api.put("/admin/drivers/{did}/salary-rent-paid")
+async def admin_edit_salary_rent_paid(did: str, request: Request, body: dict):
+    """Saves the full list of office-marked salary-rent days: edits existing ones (amount / transaction id),
+    adds new ones and removes the ones that were un-selected."""
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    org = user.get("organization_id")
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    today_iso = _today_ist().isoformat()
+
+    entries = {}
+    for e in (body.get("entries") or []):
+        d_ = str(e.get("date") or "")[:10]
+        try:
+            datetime.strptime(d_, "%Y-%m-%d")
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid date: {d_}")
+        if d_ > today_iso:
+            raise HTTPException(status_code=400, detail="Rent paid date cannot be in the future")
+        try:
+            amt = round(float(e.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            amt = 0
+        if amt <= 0:
+            raise HTTPException(status_code=400, detail=f"Enter a valid amount for {d_}")
+        entries[d_] = {"amount": amt, "txn": str(e.get("txn_id") or "").strip()}
+
+    existing = {}
+    async for c in db.package_collections.find({"organization_id": org, "driver_id": did, "category": "salary",
+                                                "status": "paid", "manual_admin": True}):
+        existing[c.get("for_date")] = c
+    new_dates = sorted(d for d in entries if d not in existing)
+    removed = sorted(d for d in existing if d not in entries)
+
+    rental = None
+    if new_dates:
+        rental = await _active_rental(org, did)
+        if not rental:
+            raise HTTPException(status_code=400, detail="No active rental for this driver")
+        if rental.get("package_category") != "salary":
+            raise HTTPException(status_code=400, detail="This driver is not on a salary package")
+        already = await db.package_collections.find({
+            "organization_id": org, "driver_id": did, "status": "paid", "for_date": {"$in": new_dates}}).to_list(100)
+        dup = sorted({x.get("for_date") for x in already})
+        if dup:
+            raise HTTPException(status_code=400, detail=f"Salary rent already paid for: {', '.join(dup)}")
+
+    # 1) edit existing entries (amount / transaction id)
+    for d_, c in existing.items():
+        if d_ not in entries:
+            continue
+        e = entries[d_]
+        upd = {}
+        if abs(float(c.get("pay_amount") or 0) - e["amount"]) > 0.005:
+            upd["pay_amount"] = e["amount"]
+        if e["txn"] and e["txn"] != (c.get("transaction_id") or ""):
+            upd["transaction_id"] = e["txn"]
+        if upd:
+            await db.package_collections.update_one({"_id": c["_id"]}, {"$set": upd})
+
+    # 2) add new entries
+    for d_ in new_dates:
+        e = entries[d_]
+        await db.package_collections.insert_one({
+            "organization_id": org, "driver_id": did, "driver_name": drv.get("name"),
+            "rental_id": str(rental["_id"]), "city": rental.get("city"),
+            "category": "salary", "plan_name": rental.get("package_name"),
+            "for_date": d_, "total_collected": None, "commission_percent": None, "pay_amount": e["amount"],
+            "screenshot_url": None, "payment_id": None,
+            "status": "paid", "transaction_id": e["txn"] or f"MANUAL_SALARY_RENT_{uuid.uuid4().hex[:8].upper()}",
+            "paid_at": now_iso(), "created_at": now_iso(),
+            "manual_admin": True, "paid_early": False, "marked_by": user.get("id")})
+
+    # 3) un-selected days: delete the record (the day becomes unpaid again)
+    for d_ in removed:
+        await db.package_collections.delete_one({"_id": existing[d_]["_id"]})
+
+    await log_audit(user, "salary_rent_paid_edited", "driver", did,
+                    f"Salary rent paid updated: {len(new_dates)} added, {len(removed)} removed")
+    return {"ok": True, "added": len(new_dates), "removed": len(removed)}
+
+
 @api.post("/admin/drivers/{did}/deposit-partial-toggle")
 async def toggle_deposit_partial(did: str, request: Request, body: dict):
     """Enable / disable the 'pay half now, half later' option for ONE driver.
@@ -2714,6 +2816,7 @@ class PlanBody(BaseModel):
     # --- Commission / Salary packages (optional; unused by Economy/Premium/Executive/In-Build) ---
     commission_percent: Optional[float] = None
     salary_amount: Optional[float] = None
+    salary_daily_rent: Optional[float] = None   # daily rent for Salary package drivers (separate from rental "amount")
 
 
 @api.get("/rental-plans")
@@ -2762,6 +2865,23 @@ async def update_plan(pid: str, body: dict, request: Request):
                 else:
                     _hist.append({"from": _today_iso, "percent": _new_cp})
                 body["commission_history"] = _hist
+        except (TypeError, ValueError):
+            pass
+    # Salary daily rent: remember each change with the day it was made, so earlier / pending days keep the rent they were earned at
+    if old_plan and body.get("salary_daily_rent") is not None:
+        try:
+            _new_sr = float(body["salary_daily_rent"])
+            _old_sr = old_plan.get("salary_daily_rent")
+            if _old_sr is not None and float(_old_sr) != _new_sr:
+                _shist = list(old_plan.get("salary_rent_history") or [])
+                if not _shist:
+                    _shist.append({"from": "0000-01-01", "amount": float(_old_sr)})
+                _sr_today = _today_ist().isoformat()
+                if _shist[-1].get("from") == _sr_today:
+                    _shist[-1]["amount"] = _new_sr        # changed again on the same day
+                else:
+                    _shist.append({"from": _sr_today, "amount": _new_sr})
+                body["salary_rent_history"] = _shist
         except (TypeError, ValueError):
             pass
     await db.rental_plans.update_one(org_filter(user, {"_id": oid(pid)}), {"$set": body})
@@ -2982,11 +3102,16 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             deposit_paid = 0
             async for _c in db.package_collections.find({"organization_id": user.get("organization_id"), "driver_id": r["driver_id"], "status": "paid"}):
                 _coll_by_date[_c.get("for_date")] = _c
-            if _pkg_cat == "commission" and r.get("plan_id"):   # package of this rental: its % history gives each day's %
+            if _pkg_cat in ("commission", "salary") and r.get("plan_id"):   # package of this rental: its % history gives each day's %
                 try:
                     _cp_plan = await db.rental_plans.find_one({"_id": oid(r["plan_id"])})
                 except Exception:
                     _cp_plan = None
+            if _pkg_cat == "salary" and not (_cp_plan or {}).get("salary_daily_rent") and r.get("city"):
+                # rental's plan_id missing / stale: use the city's current Salary package
+                _cp_plan = await db.rental_plans.find_one({
+                    "organization_id": user.get("organization_id"), "package_type": "Salary",
+                    "city": {"$regex": f"^{re.escape(str(r['city']))}$", "$options": "i"}}) or _cp_plan
 
         # Dates on which a split-deposit part was paid (partial amount / remaining amount):
         # each of these dates must have a Daily Collection row so the Deposit column shows it.
@@ -3397,7 +3522,9 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                              else _commission_percent_on(_cp_plan, r.get("commission_percent"), d_str))
                             if _pkg_cat == "commission" else r.get("commission_percent")),
                         "salary_amount": r.get("salary_amount"),
+                        "salary_daily_rent": (_salary_rent_on(_cp_plan, (d - timedelta(days=1)).strftime("%Y-%m-%d")) if _pkg_cat == "salary" else None),
                         "collection": _coll_view(_coll_by_date.get(d_str)) if idx == 0 else None,
+                        "early_collection": (_coll_view(_coll_by_date[d_str]) if (idx == 0 and d_str in _coll_by_date and _coll_by_date[d_str].get("paid_early")) else None),
                         # yesterday's collection payment (settled on this day's row)
                         "prev_collection": _coll_view(_coll_by_date.get((d - timedelta(days=1)).strftime("%Y-%m-%d"))) if idx == 0 else None,
                         "start_meter": start_meter if start_meter else None,
@@ -5627,13 +5754,15 @@ async def driver_logout(response: Response):
 
 # ---------- Commission / Salary packages: driver pays the collected amount (with trip screenshot) ----------
 PKG_NOON_HOUR = 12
+SALARY_EARLY_PAY_HOUR = 21   # salary drivers may pay TODAY's rent from 9 PM (IST)
 
 
 def _coll_view(c):
     if not c:
         return None
     return {"screenshot_url": c.get("screenshot_url"), "total_collected": c.get("total_collected"),
-            "pay_amount": c.get("pay_amount"), "transaction_id": c.get("transaction_id"), "for_date": c.get("for_date")}
+            "pay_amount": c.get("pay_amount"), "transaction_id": c.get("transaction_id"), "for_date": c.get("for_date"),
+            "paid_early": bool(c.get("paid_early"))}
 
 
 def _commission_percent_on(plan, fallback, day_iso):
@@ -5647,6 +5776,19 @@ def _commission_percent_on(plan, fallback, day_iso):
     if val is not None:
         return float(val)
     return float((plan or {}).get("commission_percent") or fallback or 0)
+
+
+def _salary_rent_on(plan, day_iso, fallback=0):
+    """Daily Rent (Salary) that applied on one working day. Every change is saved with the day it was made
+    (plan["salary_rent_history"]); a day uses the rent of the latest change made on or before it, so past / pending
+    days keep their old rent. No history -> the package's current rent."""
+    val = None
+    for h in sorted((plan or {}).get("salary_rent_history") or [], key=lambda x: x.get("from") or ""):
+        if (h.get("from") or "") <= day_iso:
+            val = h.get("amount")
+    if val is not None:
+        return float(val)
+    return float((plan or {}).get("salary_daily_rent") or fallback or 0)
 
 
 async def _package_due_state(user):
@@ -5685,14 +5827,23 @@ async def _package_due_state(user):
             due_date = d
             break
         d += timedelta(days=1)
+    early_today = False
     if not due_date:
-        return None
+        # Salary drivers may pay TODAY's rent today itself, from 9 PM (IST); the popup then has an X (not locked)
+        if (cat == "salary" and datetime.now(IST).hour >= SALARY_EARLY_PAY_HOUR and start <= today
+                and today.isoformat() not in paid and today.isoformat() not in skip):
+            due_date = today
+            early_today = True
+        else:
+            return None
     after_noon = datetime.now(IST).hour >= PKG_NOON_HOUR
     return {
         "category": cat, "plan_name": rental.get("package_name"),
         "commission_percent": _commission_percent_on(plan, rental.get("commission_percent"), due_date.isoformat()) if cat == "commission" else None,
         "date": due_date.isoformat(),
-        "locked": bool(after_noon or due_date < today - timedelta(days=1)),
+        "locked": bool(not early_today and (after_noon or due_date < today - timedelta(days=1))),
+        "early": early_today,
+        "salary_daily_rent": _salary_rent_on(plan, due_date.isoformat()) if cat == "salary" else None,
     }
 
 
@@ -5701,7 +5852,7 @@ async def package_collection_create_order(
     request: Request,
     total_collected: float = Form(...),
     for_date: str = Form(...),
-    image: UploadFile = File(...),
+    image: Optional[UploadFile] = File(None),
 ):
     user = await get_user(request)
     require_driver(user)
@@ -5714,13 +5865,18 @@ async def package_collection_create_order(
         raise HTTPException(status_code=400, detail="This date is not due for payment")
     if not total_collected or total_collected <= 0:
         raise HTTPException(status_code=400, detail="Enter the total amount collected")
-    if not image or not image.filename or not (image.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=400, detail="Upload the trip screenshot")
-    data = await image.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Upload the trip screenshot")
-    if len(data) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image must be under 10 MB")
+    # trip screenshot: compulsory for Commission drivers, optional for Salary drivers
+    # (a Salary driver who does upload one is still validated exactly as before)
+    has_image = bool(image and image.filename)
+    data = None
+    if has_image or state["category"] != "salary":
+        if not has_image or not (image.content_type or "").startswith("image/"):
+            raise HTTPException(status_code=400, detail="Upload the trip screenshot")
+        data = await image.read()
+        if not data:
+            raise HTTPException(status_code=400, detail="Upload the trip screenshot")
+        if len(data) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Image must be under 10 MB")
     if state["category"] == "commission":
         pct = float(state.get("commission_percent") or 0)
         if pct <= 0:
@@ -5728,17 +5884,21 @@ async def package_collection_create_order(
         pay_amount = round(total_collected * pct / 100, 2)
     else:
         pct = None
-        pay_amount = round(total_collected, 2)
+        pay_amount = round(float(state.get("salary_daily_rent") or 0), 2)   # salary drivers always pay the package's Daily Rent (Salary)
+        if pay_amount <= 0:
+            raise HTTPException(status_code=400, detail="Daily Rent (Salary) is not set for this salary package")
     if pay_amount <= 0:
         raise HTTPException(status_code=400, detail="Amount to pay must be more than 0")
 
     # the screenshot itself is stored inside MongoDB (same as the KYC documents)
-    shot_token = uuid.uuid4().hex  # random, unguessable id used in the image URL
-    await db.package_screenshots.insert_one({
-        "organization_id": org, "driver_id": did, "token": shot_token,
-        "filename": image.filename, "content_type": image.content_type or "image/jpeg",
-        "data": Binary(data), "created_at": now_iso(),
-    })
+    shot_token = None
+    if data:   # no screenshot uploaded (Salary driver) -> nothing to store
+        shot_token = uuid.uuid4().hex  # random, unguessable id used in the image URL
+        await db.package_screenshots.insert_one({
+            "organization_id": org, "driver_id": did, "token": shot_token,
+            "filename": image.filename, "content_type": image.content_type or "image/jpeg",
+            "data": Binary(data), "created_at": now_iso(),
+        })
 
     rental = await _active_rental(org, did)
     # rental_id is left empty on purpose: this payment must never be mixed into the daily-rent / deposit
@@ -5755,8 +5915,9 @@ async def package_collection_create_order(
         "rental_id": str(rental["_id"]) if rental else None, "city": (rental or {}).get("city"),
         "category": state["category"], "plan_name": state.get("plan_name"),
         "for_date": for_date, "total_collected": round(total_collected, 2),
+        "paid_early": bool(state.get("early")),
         "commission_percent": pct, "pay_amount": pay_amount,
-        "screenshot_url": f"/api/package-screenshots/{shot_token}", "payment_id": pid,
+        "screenshot_url": (f"/api/package-screenshots/{shot_token}" if shot_token else None), "payment_id": pid,
         "status": "pending", "transaction_id": None, "paid_at": None, "created_at": now_iso()})
 
     amount_paise = int(round(pay_amount * 100))
@@ -7605,6 +7766,7 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
         if r:
             acct = await _rental_account(r)
             rent_pending = round(float(acct.get("rent_due", 0) or 0), 2)
+            rent_pending_dates = sorted(k for k, v in (acct.get("rent_by_date") or {}).items() if v)
 
         # deposit still unpaid: full / first part if nothing paid yet, remaining part once its
         # next payment date is today or has passed, nothing while the next date is still ahead
@@ -7616,6 +7778,20 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
 
         # Commission / Salary package drivers pay no daily rent and no security deposit
         _cat = (r or {}).get("package_category") or "rental"
+        salary_daily_rent = None
+        if _cat == "salary" and r:
+            _sp = None
+            if r.get("plan_id"):
+                try:
+                    _sp = await db.rental_plans.find_one({"_id": oid(r["plan_id"])})
+                except Exception:
+                    _sp = None
+            if not (_sp or {}).get("salary_daily_rent") and r.get("city"):
+                _sp = await db.rental_plans.find_one({
+                    "organization_id": org, "package_type": "Salary",
+                    "city": {"$regex": f"^{re.escape(str(r['city']))}$", "$options": "i"}}) or _sp
+            salary_daily_rent = float((_sp or {}).get("salary_daily_rent") or 0)
+
         if _cat != "rental":
             rent_pending = 0.0
             deposit_pending = 0.0
@@ -7652,6 +7828,9 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             "package_name": (r or {}).get("package_name") or d.get("package_name"),
             "package_category": _cat,
             "rent_pending": rent_pending,
+            "rent_pending_dates": rent_pending_dates if r else [],
+            "salary_daily_rent": salary_daily_rent,
+            "salary_rent_by_date": ({dt: _salary_rent_on(_sp, dt) for dt in pkg_pending_dates} if (_cat == "salary" and r) else {}),
             "deposit_pending": deposit_pending,
             "pkg_pending": pkg_pending,
             "pkg_pending_date": _pp_yesterday if pkg_pending else None,

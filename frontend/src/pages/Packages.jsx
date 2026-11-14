@@ -271,6 +271,12 @@ export default function Packages() {
                               <span className="font-extrabold text-mv-primary text-xl">{isActive && pkg.salary_amount != null ? inr(pkg.salary_amount) : "—"}</span>
                             </div>
                           )}
+                          {type === SALARY_TYPE && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-mv-muted text-sm">Daily Rent (Salary)</span>
+                              <span className="font-extrabold text-mv-primary text-xl">{isActive && pkg.salary_daily_rent != null ? inr(pkg.salary_daily_rent) : "—"}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -298,7 +304,8 @@ function PackageForm({ editData, onBack, onSaved }) {
     overage_per_km: pkg?.overage_per_km || "",
     active: pkg?.active ?? true,
     commission_percent: pkg?.commission_percent ?? "",
-    salary_amount: pkg?.salary_amount ?? ""
+    salary_amount: pkg?.salary_amount ?? "",
+    salary_daily_rent: pkg?.salary_daily_rent ?? ""
   });
   const [saving, setSaving] = useState(false);
 
@@ -312,7 +319,7 @@ function PackageForm({ editData, onBack, onSaved }) {
 
   const save = async () => {
     if (isSpecial) {
-      if (!form.name || (isCommission && form.commission_percent === "") || (isSalary && form.salary_amount === "")) {
+      if (!form.name || (isCommission && form.commission_percent === "") || (isSalary && (form.salary_amount === "" || form.salary_daily_rent === ""))) {
         return toast.error("Please fill all fields accurately");
       }
     } else if (!form.name || form.amount === "" || form.monthly_km_limit === "" || form.overage_per_km === "" || form.deposit === "") {
@@ -326,7 +333,7 @@ function PackageForm({ editData, onBack, onSaved }) {
         city: form.city,
         active: form.active,
         ...(isCommission ? { commission_percent: Number(form.commission_percent) } : {}),
-        ...(isSalary ? { salary_amount: Number(form.salary_amount) } : {})
+        ...(isSalary ? { salary_amount: Number(form.salary_amount), salary_daily_rent: Number(form.salary_daily_rent) } : {})
       } : {
         name: form.name,
         package_type: form.package_type,
@@ -429,6 +436,7 @@ function PackageForm({ editData, onBack, onSaved }) {
                   </select>
                 </div>
               ) : (
+                <>
                 <div className="space-y-1">
                   <label className="block text-sm font-bold text-mv-text mb-1">Salary Amount (₹)</label>
                   <input
@@ -439,6 +447,17 @@ function PackageForm({ editData, onBack, onSaved }) {
                     placeholder="15000"
                   />
                 </div>
+                <div className="space-y-1">
+                  <label className="block text-sm font-bold text-mv-text mb-1">Daily Rent (Salary) (₹)</label>
+                  <input
+                    type="number"
+                    value={form.salary_daily_rent}
+                    onChange={e => set("salary_daily_rent", e.target.value)}
+                    className="w-full h-11 px-4 rounded-xl border border-mv-border bg-mv-surface text-mv-text focus:outline-none focus:border-mv-primary transition-colors font-bold"
+                    placeholder="500"
+                  />
+                </div>
+                </>
               )}
             </div>
           </div>

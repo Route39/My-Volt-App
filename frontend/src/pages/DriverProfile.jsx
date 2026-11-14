@@ -237,8 +237,8 @@ export default function DriverProfile() {
                 </>
               );
             })()}
-            {!isSpecialPkg && (
-              <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> Rent Paid</GhostBtn>
+            {(!isSpecialPkg || _pkgCat === "salary") && (
+              <GhostBtn onClick={() => setRentOpen(true)} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><CalendarDays className="w-4 h-4" /> {_pkgCat === "salary" ? "Rent Paid (Salary)" : "Rent Paid"}</GhostBtn>
             )}
             {(d.admin_block || d.rental_block_status === "blocked") ? (
               <GhostBtn onClick={() => setBlockType("unblock")} className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"><ShieldCheck className="w-4 h-4" /> Unblock</GhostBtn>
@@ -423,7 +423,7 @@ export default function DriverProfile() {
         if (v) setD((p) => ({ ...p, deposit_partial_enabled: true, deposit_partial_first_amount: v.first_amount, deposit_partial_next_date: v.next_payment_date, deposit_amount: v.total || p.deposit_amount }));
         load();
       }} />
-      <RentPaidDialog open={rentOpen} setOpen={setRentOpen} driver={d} onDone={() => { setRentOpen(false); load(); }} />
+      <RentPaidDialog open={rentOpen} setOpen={setRentOpen} salary={_pkgCat === "salary"} driver={d} onDone={() => { setRentOpen(false); load(); }} />
       <PaidLeaveDialog open={leaveOpen} setOpen={setLeaveOpen} driver={d} onDone={() => { setLeaveOpen(false); load(); }} />
       <DeleteDriverDialog open={del} setOpen={setDel} driver={d} onDone={() => { setDel(false); nav("/drivers"); }} />
     </div>
@@ -824,7 +824,8 @@ function KycDocCard({ title, url }) {
   );
 }
 
-function RentPaidDialog({ open, setOpen, driver, onDone }) {
+function RentPaidDialog({ open, setOpen, driver, onDone, salary = false }) {
+  const rentPath = salary ? "salary-rent-paid" : "rent-paid";
   const [sel, setSel] = useState([]);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
@@ -838,7 +839,7 @@ function RentPaidDialog({ open, setOpen, driver, onDone }) {
     if (!open || !driver?.id) return;
     setSel([]); setAmount(""); setTxns({}); setAmts({}); setSaved([]);
     setLoading(true);
-    api.get(`/admin/drivers/${driver.id}/rent-paid`)
+    api.get(`/admin/drivers/${driver.id}/${rentPath}`)
       .then(({ data }) => {
         const items = data.items || [];
         setSaved(items);
@@ -862,7 +863,7 @@ function RentPaidDialog({ open, setOpen, driver, onDone }) {
     if (removing.length && !window.confirm(`Remove rent paid for ${removing.map((x) => x.date).join(", ")}? These days will become unpaid again.`)) return;
     setBusy(true);
     try {
-      await api.put(`/admin/drivers/${driver.id}/rent-paid`, {
+      await api.put(`/admin/drivers/${driver.id}/${rentPath}`, {
         entries: keys.map((k) => ({ date: k, amount: amtFor(k), txn_id: (txns[k] || "").trim() })),
       });
       toast.success("Rent paid details saved");
@@ -875,7 +876,7 @@ function RentPaidDialog({ open, setOpen, driver, onDone }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Rent Paid</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{salary ? "Rent Paid (Salary)" : "Rent Paid"}</DialogTitle></DialogHeader>
         <div className="flex justify-center rounded-xl border border-mv-border">
           <Calendar mode="multiple" selected={sel} onSelect={(v) => setSel(v || [])} disabled={(day) => day > new Date()} />
         </div>
