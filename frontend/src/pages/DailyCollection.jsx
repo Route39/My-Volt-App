@@ -291,12 +291,17 @@ export default function DailyCollection() {
     return { total, paid, pending: Math.max(0, total - paid) };
   };
   const stats = (() => {
-    const vehicles = new Set(), weekOff = new Set(), depSeen = new Set();
-    let pendRent = 0, pendDep = 0;
+    const vehicles = new Set(), weekOff = new Set(), depSeen = new Set(), rentPaidSet = new Set(), rentUnpaidSet = new Set();
+    let pendRent = 0, pendDep = 0, rentPaidAmt = 0, rentUnpaidAmt = 0;
     for (const it of rows) {
       if (it.rent_status === "week_off") weekOff.add(it.driver_id);
       else if (it.rent_status !== "paid_leave" && (it.vehicle_code || it.vehicle_reg)) vehicles.add(it.vehicle_code || it.vehicle_reg);
       pendRent += pendingRentOf(it);
+      if (!_special(it) && it.rent_status !== "week_off" && it.rent_status !== "paid_leave") {
+        const _amt = Number(it.rent_amount || it.daily_rate) || 0;
+        if (it.rent_status === "paid") { rentPaidSet.add(String(it.driver_id)); rentPaidAmt += _amt; }
+        else { rentUnpaidSet.add(String(it.driver_id)); rentUnpaidAmt += _amt; }
+      }
       if (!_special(it) && !depSeen.has(it.driver_id)) { depSeen.add(it.driver_id); pendDep += depositOf(it).pending; }
     }
     const seenDrv = new Set(rows.map((x) => String(x.driver_id)));
@@ -306,7 +311,7 @@ export default function DailyCollection() {
       ? Object.values(r.salary_rent_by_date || {}).reduce((s, v) => s + (Number(v) || 0), 0) : 0), 0);
     const dueRent = (pendRows.length ? matched.reduce((a, r) => a + (Number(r.rent_pending) || 0), 0) : pendRent) + salaryDue;
     const dueDep = pendRows.length ? matched.reduce((a, r) => a + (Number(r.deposit_pending) || 0), 0) : pendDep;
-    return { running: vehicles.size, weekOff: weekOff.size, netDue: dueRent + dueDep, dueRent, dueDep };
+    return { running: vehicles.size, rentPaid: rentPaidSet.size, rentUnpaid: rentUnpaidSet.size, rentPaidAmt, rentUnpaidAmt, weekOff: weekOff.size, netDue: dueRent + dueDep, dueRent, dueDep };
   })();
 
   // Commission / Salary package drivers pay no daily rent and no deposit
@@ -466,10 +471,20 @@ export default function DailyCollection() {
       </div>
 
       {!isPkgTab && (
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6" data-testid="dc-summary">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6" data-testid="dc-summary">
         <div className="mv-card p-5">
           <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Running Vehicles</div>
           <div className="text-3xl font-display font-bold text-mv-text">{stats.running}</div>
+        </div>
+        <div className="mv-card p-5">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Rent Paid</div>
+          <div className="text-3xl font-display font-bold text-green-600">{stats.rentPaid}</div>
+          <div className="text-xs text-mv-dim mt-1">Drivers · <b className="text-green-600">{inr(stats.rentPaidAmt)}</b></div>
+        </div>
+        <div className="mv-card p-5">
+          <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Rent Unpaid</div>
+          <div className="text-3xl font-display font-bold text-amber-500">{stats.rentUnpaid}</div>
+          <div className="text-xs text-mv-dim mt-1">Drivers · <b className="text-amber-500">{inr(stats.rentUnpaidAmt)}</b></div>
         </div>
         <div className="mv-card p-5">
           <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">Revenue</div>
@@ -546,6 +561,36 @@ export default function DailyCollection() {
         </div>
       </div>
       )}
+
+      {pkgTab === "commission" && (() => {
+        const cr = rows.filter((it) => it.package_category === "commission");
+        const veh = new Set(), paidD = new Set(), unpaidD = new Set(), wo = new Set();
+        let paidAmt = 0, collected = 0;
+        for (const it of cr) {
+          if (it.rent_status === "week_off" || it.rent_status === "paid_leave") { if (it.rent_status === "week_off") wo.add(String(it.driver_id)); continue; }
+          if (it.vehicle_code || it.vehicle_reg) veh.add(it.vehicle_code || it.vehicle_reg);
+          if (it.collection) { paidD.add(String(it.driver_id)); paidAmt += Number(it.collection.pay_amount) || 0; collected += Number(it.collection.total_collected) || 0; }
+          else if (it.rent_for_date && !it.prev_collection && !(it.rental_start && it.date <= it.rental_start)) unpaidD.add(String(it.driver_id));
+        }
+        const cards = [
+          { label: "Running Vehicles", value: veh.size, sub: "", color: "text-mv-text" },
+          { label: "Commission Paid", value: paidD.size, sub: `Drivers · ${inr(paidAmt)}`, color: "text-green-600" },
+          { label: "Commission Unpaid", value: unpaidD.size, sub: "Drivers", color: "text-amber-500" },
+          { label: "Total Collection", value: inr(collected), sub: "Collected by drivers", color: "text-red-500" },
+          { label: "Week Off", value: wo.size, sub: "Drivers", color: "text-violet-500" },
+        ];
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6" data-testid="commission-summary">
+            {cards.map((k) => (
+              <div key={k.label} className="mv-card p-5">
+                <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">{k.label}</div>
+                <div className={`text-3xl font-display font-bold ${k.color}`}>{k.value}</div>
+                {k.sub && <div className="text-xs text-mv-dim mt-1">{k.sub}</div>}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Commission / Salary package tabs: their own table */}
       {isPkgTab && (

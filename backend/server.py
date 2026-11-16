@@ -929,8 +929,19 @@ async def list_drivers(request: Request, city: Optional[str] = None, status: Opt
     elif status == "offline":
         docs = [d for d in docs if not d.get("is_online")]
 
+    # Package category comes from the driver's latest rental; unassigned drivers get none
+    _pk = {}
+    if driver_ids:
+        async for r_ in db.rentals.find({"driver_id": {"$in": driver_ids}}, {"driver_id": 1, "package_category": 1, "created_at": 1}).sort("created_at", 1):
+            _pk[str(r_.get("driver_id"))] = r_.get("package_category") or "rental"
+    for d in docs:
+        if d.get("current_vehicle_id") or d.get("package_name") or d.get("rental_status") == "active":
+            d["package_category"] = d.get("package_category") or _pk.get(str(d["_id"])) or "rental"
+        else:
+            d["package_category"] = None
+
     if package_category in ("rental", "commission", "salary"):
-        docs = [d for d in docs if (d.get("package_category") or "rental") == package_category]
+        docs = [d for d in docs if d.get("package_category") == package_category]
 
     return [ser(d) for d in docs]
 

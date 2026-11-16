@@ -25,6 +25,25 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
     const canSetReward = ["admin", "company_admin", "city_manager"].includes(user?.role);
     const { city: gCity, lockedCity, cities } = useApp();
     const [city, setCity] = useState(lockedCity || gCity);
+    const [drvAll, setDrvAll] = useState(null);
+    useEffect(() => {
+        let alive = true;
+        const p = {};
+        if (city && city !== "all") p.city = city;
+        api.get("/drivers", { params: p }).then(({ data }) => alive && setDrvAll(Array.isArray(data) ? data : [])).catch(() => alive && setDrvAll([]));
+        return () => { alive = false; };
+    }, [city]);
+    const onlineIds = new Set((drvAll || []).filter((d) => d.is_online).map((d) => String(d.id)));
+    const refs = items || [];
+    const bDone = (r, i) => { const b = (r.batch_progress || [])[i]; return !!b && b.total > 0 && b.done >= b.total; };
+    const refCards = [
+        { label: "Total Drivers", n: drvAll ? drvAll.length : null, color: "text-red-500", bg: "bg-red-500/15" },
+        { label: "Referral Drivers", n: items ? refs.length : null, color: "text-blue-500", bg: "bg-blue-500/15" },
+        { label: "Online", n: items && drvAll ? refs.filter((r) => onlineIds.has(String(r.referred_driver_id))).length : null, color: "text-green-500", bg: "bg-green-500/15" },
+        { label: "Offline", n: items && drvAll ? refs.filter((r) => !onlineIds.has(String(r.referred_driver_id))).length : null, color: "text-zinc-500", bg: "bg-zinc-500/15" },
+        { label: "Batch 1 Completed", n: items ? refs.filter((r) => bDone(r, 0)).length : null, color: "text-amber-500", bg: "bg-amber-500/15" },
+        { label: "Both Batches Completed", n: items ? refs.filter((r) => r.batches_completed || (bDone(r, 0) && bDone(r, 1))).length : null, color: "text-purple-500", bg: "bg-purple-500/15" },
+    ];
 
     const load = useCallback(async () => {
         const params = {};
@@ -48,6 +67,17 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
 
     return (
         <div>
+            {!referrerId && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+                    {refCards.map((k) => (
+                        <div key={k.label} className="mv-card p-4">
+                            <div className={`w-9 h-9 rounded-xl ${k.bg} flex items-center justify-center`}><UserPlus className={`w-4 h-4 ${k.color}`} /></div>
+                            <div className="font-display text-2xl font-bold mt-3">{k.n == null ? "–" : k.n}</div>
+                            <div className="text-[11px] tracking-widest uppercase text-mv-dim mt-1">{k.label}</div>
+                        </div>
+                    ))}
+                </div>
+            )}
             {!referrerId && !lockedCity && (
                 <div className="mb-4" data-testid="referral-city-tabs">
                     <div className="mv-label mb-2">City Filter</div>
@@ -65,14 +95,14 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                         className="w-full h-10 pl-9 pr-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:ring-2 focus:ring-mv-primary/30" />
                 </div>
                 {canEdit && (
-                    <div className="flex items-center gap-2">
+                    <div className="grid grid-cols-2 sm:flex items-center gap-2">
                         {canSetReward && (
                             <GhostBtn onClick={() => setRewardOpen(true)} data-testid="referral-amount-btn">
-                                <IndianRupee className="w-4 h-4" /> Referral Amount
+                                <IndianRupee className="w-4 h-4 shrink-0" /> <span className="whitespace-nowrap"><span className="sm:hidden">Amount</span><span className="hidden sm:inline">Referral Amount</span></span>
                             </GhostBtn>
                         )}
                         <PrimaryBtn onClick={() => setForm({})} data-testid="add-referral-btn">
-                            <Plus className="w-4 h-4" /> Add Referral
+                            <Plus className="w-4 h-4 shrink-0" /> <span className="whitespace-nowrap"><span className="sm:hidden">Add</span><span className="hidden sm:inline">Add Referral</span></span>
                         </PrimaryBtn>
                     </div>
                 )}

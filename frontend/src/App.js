@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, Outlet } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { AppProvider } from "@/context/AppContext";
@@ -43,6 +43,14 @@ function Protected({ children }) {
   return <AppShell>{children}</AppShell>;
 }
 
+function ProtectedLayout() {
+  const { user, loading } = useAuth();
+  if (loading || user === null)
+    return <div className="min-h-screen flex items-center justify-center bg-mv-bg"><Loader2 className="w-6 h-6 animate-spin text-mv-primary" /></div>;
+  if (!user) return <Navigate to="/login" replace />;
+  return <AppShell><Outlet /></AppShell>;
+}
+
 function AdminOnly({ children }) {
   const { user } = useAuth();
   if (user?.role !== "admin") return <Navigate to="/dashboard" replace />;
@@ -65,28 +73,30 @@ function Shell() {
       <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
-      <Route path="/settings" element={<Protected><Settings /></Protected>} />
-      <Route path="/kyc" element={<Protected><KycApprovals /></Protected>} />
-      {/* <Route path="/odometer" element={<Protected><OdometerApprovals /></Protected>} /> */}
+      <Route element={<ProtectedLayout />}>
+      <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/settings" element={<Settings />} />
+      <Route path="/kyc" element={<KycApprovals />} />
+      {/* <Route path="/odometer" element={<OdometerApprovals />} /> */}
 
       {/* Fleet (Route39) */}
-      <Route path="/fleet" element={<Protected><Fleet /></Protected>} />
-      <Route path="/fleet/:id" element={<Protected><VehicleProfile /></Protected>} />
-      <Route path="/drivers" element={<Protected><Drivers /></Protected>} />
-      <Route path="/drivers/:id" element={<Protected><DriverProfile /></Protected>} />
-      <Route path="/rentals" element={<Protected><Rentals /></Protected>} />
-      <Route path="/rentals/new" element={<Protected><RentalCreate /></Protected>} />
-      <Route path="/rentals/:id" element={<Protected><RentalProfile /></Protected>} />
-      <Route path="/daily-collection" element={<Protected><DailyCollection /></Protected>} />
-      <Route path="/service-requests" element={<Protected><ServiceRequests /></Protected>} />
-      <Route path="/vehicle-service" element={<Protected><VehicleService /></Protected>} />
-      <Route path="/incidents" element={<Protected><Incidents /></Protected>} />
-      <Route path="/packages" element={<Protected><Packages /></Protected>} />
-      <Route path="/referrals" element={<Protected><Referrals /></Protected>} />
-      <Route path="/team-documents" element={<Protected><TeamDocuments /></Protected>} />
-      <Route path="/pending-payments" element={<Protected><PendingPayments /></Protected>} />
+      <Route path="/fleet" element={<Fleet />} />
+      <Route path="/fleet/:id" element={<VehicleProfile />} />
+      <Route path="/drivers" element={<Drivers />} />
+      <Route path="/drivers/:id" element={<DriverProfile />} />
+      <Route path="/rentals" element={<Rentals />} />
+      <Route path="/rentals/new" element={<RentalCreate />} />
+      <Route path="/rentals/:id" element={<RentalProfile />} />
+      <Route path="/daily-collection" element={<DailyCollection />} />
+      <Route path="/service-requests" element={<ServiceRequests />} />
+      <Route path="/vehicle-service" element={<VehicleService />} />
+      <Route path="/incidents" element={<Incidents />} />
+      <Route path="/packages" element={<Packages />} />
+      <Route path="/referrals" element={<Referrals />} />
+      <Route path="/team-documents" element={<TeamDocuments />} />
+      <Route path="/pending-payments" element={<PendingPayments />} />
 
+      </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

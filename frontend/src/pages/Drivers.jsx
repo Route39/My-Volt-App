@@ -23,6 +23,24 @@ export default function Drivers() {
   const [pkgCat, setPkgCat] = useState(params.get("package_category") || "all");
   const [city, setCity] = useState(lockedCity || params.get("city") || gCity);
   const [view, setView] = useState("list");
+  const [allDrv, setAllDrv] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    setAllDrv(null);
+    const p = {};
+    if (city && city !== "all") p.city = city;
+    api.get("/drivers", { params: p }).then(({ data }) => alive && setAllDrv(Array.isArray(data) ? data : [])).catch(() => alive && setAllDrv([]));
+    return () => { alive = false; };
+  }, [city]);
+  const pkgOf = (d) => (d.package_category || d.package?.category || "").toLowerCase();
+  const drvCards = [
+    { label: "Total Drivers", n: allDrv?.length, color: "text-red-500", bg: "bg-red-500/15", go: () => { setStatus("all"); setPkgCat("all"); } },
+    { label: "Online", n: allDrv?.filter((d) => d.is_online).length, color: "text-green-500", bg: "bg-green-500/15", go: () => setStatus("online") },
+    { label: "Offline", n: allDrv?.filter((d) => !d.is_online).length, color: "text-zinc-500", bg: "bg-zinc-500/15", go: () => setStatus("offline") },
+    { label: "Rental", n: allDrv?.filter((d) => pkgOf(d) === "rental").length, color: "text-blue-500", bg: "bg-blue-500/15", go: () => setPkgCat("rental") },
+    { label: "Commission", n: allDrv?.filter((d) => pkgOf(d) === "commission").length, color: "text-amber-500", bg: "bg-amber-500/15", go: () => setPkgCat("commission") },
+    { label: "Salary", n: allDrv?.filter((d) => pkgOf(d) === "salary").length, color: "text-purple-500", bg: "bg-purple-500/15", go: () => setPkgCat("salary") },
+  ];
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
   const [showImport, setShowImport] = useState(false);
   const [delTarget, setDelTarget] = useState(null);   // driver selected for deletion (popup open when set)
@@ -96,6 +114,15 @@ export default function Drivers() {
           </div>
         )}
       </PageHeader>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        {drvCards.map((k) => (
+          <button key={k.label} type="button" onClick={k.go} className="mv-card p-4 text-left hover:shadow-md transition">
+            <div className={`w-9 h-9 rounded-xl ${k.bg} flex items-center justify-center`}><Users className={`w-4 h-4 ${k.color}`} /></div>
+            <div className="font-display text-2xl font-bold mt-3">{k.n == null ? <Skeleton className="h-7 w-10" /> : k.n}</div>
+            <div className="text-[11px] tracking-widest uppercase text-mv-dim mt-1">{k.label}</div>
+          </button>
+        ))}
+      </div>
 
       <div className="flex flex-col lg:flex-row gap-3 mb-5">
         <div className="relative flex-1 max-w-md">

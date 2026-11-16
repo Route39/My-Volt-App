@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { ShieldCheck as KycCardIcon } from "lucide-react";
 import api from "../lib/api";
 import { Check, X, MapPin, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +15,22 @@ export default function KycApprovals() {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
+  const [kycAll, setKycAll] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const p = {};
+    if (city && city !== "all") p.city = city;
+    api.get("/drivers", { params: p }).then(({ data }) => alive && setKycAll(Array.isArray(data) ? data : [])).catch(() => alive && setKycAll([]));
+    return () => { alive = false; };
+  }, [city, drivers]);
+  const kc = (fn) => (kycAll ? kycAll.filter(fn).length : null);
+  const kycCards = [
+    { label: "Total Drivers", n: kc(() => true), color: "text-red-500", bg: "bg-red-500/15" },
+    { label: "KYC Submitted", n: kc((d) => ["submitted", "approved", "rejected"].includes(d.kyc_status) || d.kyc_submitted_at), color: "text-blue-500", bg: "bg-blue-500/15" },
+    { label: "KYC Approved", n: kc((d) => d.kyc_status === "approved"), color: "text-green-500", bg: "bg-green-500/15" },
+    { label: "KYC Pending", n: kc((d) => d.kyc_status === "submitted"), color: "text-amber-500", bg: "bg-amber-500/15" },
+    { label: "KYC Rejected", n: kc((d) => d.kyc_status === "rejected"), color: "text-zinc-500", bg: "bg-zinc-500/15" },
+  ];
   
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +76,15 @@ export default function KycApprovals() {
           />
         </div>
       </PageHeader>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        {kycCards.map((k) => (
+          <div key={k.label} className="mv-card p-4">
+            <div className={`w-9 h-9 rounded-xl ${k.bg} flex items-center justify-center`}><KycCardIcon className={`w-4 h-4 ${k.color}`} /></div>
+            <div className="font-display text-2xl font-bold mt-3">{k.n == null ? "–" : k.n}</div>
+            <div className="text-[11px] tracking-widest uppercase text-mv-dim mt-1">{k.label}</div>
+          </div>
+        ))}
+      </div>
 
       {/* City filter – admin only (city managers are locked to their own city) */}
       {!lockedCity && (

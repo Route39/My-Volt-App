@@ -69,7 +69,7 @@ export default function Packages() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-mv-text tracking-tight">
@@ -85,7 +85,7 @@ export default function Packages() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-mv-border pb-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-mv-border pb-3">
         {[
           { key: "rental", label: "Rental Packages" },
           { key: "commission", label: "Commission" },
@@ -99,6 +99,12 @@ export default function Packages() {
             {t.label}
           </button>
         ))}
+        <div className="ml-auto">
+          <div className="inline-flex rounded-xl border border-mv-border overflow-hidden">
+            <button onClick={() => setLayout("cards")} data-testid="packages-cards-view" className={`w-10 h-10 flex items-center justify-center ${layout === "cards" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><LayoutGrid className="w-4 h-4" /></button>
+            <button onClick={() => setLayout("table")} data-testid="packages-table-view" className={`w-10 h-10 flex items-center justify-center ${layout === "table" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><ListIcon className="w-4 h-4" /></button>
+          </div>
+        </div>
       </div>
 
       {loading ? (
@@ -108,19 +114,13 @@ export default function Packages() {
           ))}
         </div>
       ) : (
-        <div className="space-y-12">
-          <div className="flex justify-end">
-          <div className="inline-flex rounded-xl border border-mv-border overflow-hidden">
-            <button onClick={() => setLayout("cards")} data-testid="packages-cards-view" className={`w-10 h-10 flex items-center justify-center ${layout === "cards" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><LayoutGrid className="w-4 h-4" /></button>
-            <button onClick={() => setLayout("table")} data-testid="packages-table-view" className={`w-10 h-10 flex items-center justify-center ${layout === "table" ? "bg-mv-elevated text-mv-primary" : "text-mv-dim"}`}><ListIcon className="w-4 h-4" /></button>
-          </div>
-        </div>
+        <div className="space-y-3">
         {cities.map(city => {
             return (
               <div key={city}>
-                <h2 className="text-2xl font-bold text-mv-text mb-6 flex items-center gap-2"><MapPin className="w-6 h-6 text-mv-primary" /> {city}</h2>
+                <h2 className="text-xl font-bold text-mv-text mb-2 flex items-center gap-2"><MapPin className="w-5 h-5 text-mv-primary" /> {city}</h2>
                 {tab === "rental" && (
-                <div className={`${layout === "table" ? "hidden" : ""} grid grid-cols-1 md:grid-cols-2 gap-6 ${typesForCity(city).length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
+                <div className={`${layout === "table" ? "hidden" : ""} grid grid-cols-1 md:grid-cols-2 gap-4 ${typesForCity(city).length === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
                   {typesForCity(city).map(type => {
                     const pkg = packages.find(p => p.city === city && p.package_type === type);
                     const isActive = pkg && pkg.active;
@@ -130,7 +130,7 @@ export default function Packages() {
                       <div 
                         key={type} 
                         onDoubleClick={() => isConfigured ? toggleActive(pkg) : null}
-                        className={`mv-card p-6 flex flex-col relative group transition-all select-none ${isConfigured ? 'cursor-pointer hover:border-mv-primary/30' : 'opacity-60 grayscale hover:grayscale-0'}`}
+                        className={`mv-card p-5 flex flex-col relative group transition-all select-none ${isConfigured ? 'cursor-pointer hover:border-mv-primary/30' : 'opacity-60 grayscale hover:grayscale-0'}`}
                       >
                         <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity z-10">
                           <button onClick={(e) => { e.stopPropagation(); handleEdit(city, type, pkg); }} className="p-2 text-mv-muted hover:text-mv-primary bg-mv-surface2 rounded-full">
@@ -153,7 +153,7 @@ export default function Packages() {
                         </div>
                         
                         <div className="mt-2 space-y-3">
-                          <div className="flex justify-between items-center pb-3 border-b border-mv-border/50">
+                          <div className="flex justify-between items-center pb-2 border-b border-mv-border/50">
                             <span className="text-mv-muted text-sm">Daily Rate</span>
                             <span className="font-extrabold text-mv-primary text-xl">{isActive ? inr(pkg.amount) : "—"}</span>
                           </div>
@@ -250,7 +250,7 @@ export default function Packages() {
                       <div
                         key={type}
                         onDoubleClick={() => isConfigured ? toggleActive(pkg) : null}
-                        className={`mv-card p-6 flex flex-col relative group transition-all select-none ${isConfigured ? 'cursor-pointer hover:border-mv-primary/30' : 'opacity-60 grayscale hover:grayscale-0'}`}
+                        className={`mv-card p-5 flex flex-col relative group transition-all select-none ${isConfigured ? 'cursor-pointer hover:border-mv-primary/30' : 'opacity-60 grayscale hover:grayscale-0'}`}
                       >
                         <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity z-10">
                           <button onClick={(e) => { e.stopPropagation(); handleEdit(city, type, pkg); }} className="p-2 text-mv-muted hover:text-mv-primary bg-mv-surface2 rounded-full">

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
   Car, KeyRound, CheckCircle2, Wrench, PowerOff, AlertTriangle, ArrowRight,
-  Activity, ChevronRight, TrendingUp, Users, UserCheck, UserX,
+  ChevronRight, TrendingUp, Users, UserCheck, UserX,
 } from "lucide-react";
 import api from "../lib/api";
 import { useApp } from "../context/AppContext";
@@ -25,6 +25,9 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [recent, setRecent] = useState([]);
+  const [rentToday, setRentToday] = useState(null);
+  const [dcRows, setDcRows] = useState([]);
+  const [drvList, setDrvList] = useState(null);
   const nav = useNavigate();
 
   useEffect(() => {
@@ -32,6 +35,18 @@ export default function Dashboard() {
     setData(null);
     api.get("/dashboard/summary", { params: { city } }).then((r) => alive && setData(r.data)).catch(() => {});
     api.get("/dashboard/recent", { params: { limit: 12 } }).then((r) => alive && setRecent(r.data)).catch(() => {});
+    const today = new Date().toLocaleDateString("en-CA");
+    setRentToday(null);
+    api.get("/drivers", { params: city && city !== "all" ? { city } : {} }).then((r) => alive && setDrvList(Array.isArray(r.data) ? r.data : [])).catch(() => alive && setDrvList([]));
+    api.get("/admin/daily-collection", { params: { from_date: today, to_date: today, ...(city && city !== "all" ? { city } : {}) } })
+      .then((r) => {
+        if (!alive) return;
+        const rows = (Array.isArray(r.data) ? r.data : []).filter((x) => !x.is_paid_leave);
+        const count = (fn) => new Set(rows.filter(fn).map((x) => x.driver_id)).size;
+        setRentToday({ paid: count((x) => x.rent_status === "paid"), unpaid: count((x) => x.rent_status !== "paid") });
+        setDcRows(rows);
+      })
+      .catch(() => alive && setRentToday({ paid: 0, unpaid: 0 }));
     return () => { alive = false; };
   }, [city]);
 
@@ -130,7 +145,7 @@ export default function Dashboard() {
             <span className="mv-label">Live</span>
           </div>
           {!f ? <Skeleton className="h-56 rounded-xl" /> : (
-            <div className="flex items-center gap-4">
+            <div className="flex flex-col xl:flex-row items-center gap-4">
               <div className="relative w-40 h-40 shrink-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -144,7 +159,7 @@ export default function Dashboard() {
                   <div className="text-[10px] text-mv-dim uppercase tracking-wider">Vehicles</div>
                 </div>
               </div>
-              <div className="flex-1 space-y-2.5">
+              <div className="w-full xl:w-auto xl:flex-1 min-w-0 space-y-2.5">
                 {donut.map((d) => (
                   <div key={d.key} className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS_COLORS[d.key] }} />
@@ -167,7 +182,7 @@ export default function Dashboard() {
             </button>
           </div>
           {!data ? <Skeleton className="h-40 rounded-xl" /> : (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
               {[
                 { l: "Active", v: data.rentals.active, c: "text-green-400", to: "/rentals?status=active" },
                 { l: "Expiring Today", v: data.rentals.expiring_today, c: "text-amber-400", to: "/rentals?status=expiring" },
@@ -188,7 +203,7 @@ export default function Dashboard() {
       {/* City overview */}
       <div className="mv-rise">
         <h3 className="font-display text-lg font-semibold mb-3">City Overview</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {!data && Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}
           {data?.cities.map((c) => {
             const pct = c.total ? (c.rented / c.total) * 100 : 0;
@@ -197,7 +212,7 @@ export default function Dashboard() {
                       className="mv-card mv-card-hover p-5 text-left">
                 <div className="flex items-center justify-between">
                   <span className="font-display font-semibold uppercase tracking-wide">{c.city}</span>
-                  <span className="text-xs text-mv-dim">{c.total} vehicles</span>
+                  <span className="text-xs text-mv-dim whitespace-nowrap shrink-0 ml-2">{c.total} vehicles</span>
                 </div>
                 <div className="font-display text-3xl font-bold mt-2"><AnimatedCounter value={c.rented} /> <span className="text-base text-mv-dim font-normal">rented</span></div>
                 <div className="mt-3 h-2 rounded-full bg-mv-elevated overflow-hidden">
@@ -213,52 +228,53 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
-        {/* Needs attention */}
-        <div className="lg:col-span-6 mv-card p-5 sm:p-6 mv-rise">
-          <h3 className="font-display text-lg font-semibold flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-5 h-5 text-amber-400" /> Needs Attention
-          </h3>
-          {!data ? <Skeleton className="h-40 rounded-xl" /> : data.attention.length === 0 ? (
-            <div className="py-10 text-center text-mv-muted text-sm">All clear. Nothing needs attention right now ✓</div>
-          ) : (
-            <div className="space-y-2">
-              {data.attention.map((a, i) => (
-                <button key={i} onClick={() => nav(a.link)} data-testid={`attention-${i}`}
-                        className="w-full flex items-center gap-3 p-3 rounded-xl bg-mv-surface2 hover:bg-mv-elevated transition-colors text-left">
-                  <span className={`w-2 h-2 rounded-full ${a.level === "red" ? "bg-red-500" : "bg-amber-500"}`} />
-                  <span className="text-sm flex-1">{a.label}</span>
-                  <ChevronRight className="w-4 h-4 text-mv-dim" />
-                </button>
-              ))}
+      <div>
+        <h2 className="font-display text-xl font-semibold mb-4">Drivers &amp; Rent Today</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            { label: "Drivers Onboarded", value: drv?.total, icon: Users, color: "text-red-500", bg: "bg-red-500/15", sub: "Total drivers so far" },
+            { label: "Rent Paid", value: rentToday?.paid, icon: CheckCircle2, color: "text-green-500", bg: "bg-green-500/15", sub: "Today" },
+            { label: "Rent Unpaid", value: rentToday?.unpaid, icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/15", sub: "Today" },
+          ].map((k) => (
+            <div key={k.label} className="mv-card p-5">
+              <div className={`w-10 h-10 rounded-xl ${k.bg} flex items-center justify-center`}><k.icon className={`w-5 h-5 ${k.color}`} /></div>
+              <div className="font-display text-3xl font-bold mt-4">{k.value == null ? <Skeleton className="h-8 w-12" /> : <AnimatedCounter value={k.value} />}</div>
+              <div className="text-xs tracking-widest uppercase text-mv-dim mt-1">{k.label}</div>
+              <div className="text-xs text-mv-muted mt-1">{k.sub}</div>
             </div>
-          )}
+          ))}
         </div>
+      </div>
 
-        {/* Recent operations */}
-        <div className="lg:col-span-6 mv-card p-5 sm:p-6 mv-rise">
-          <h3 className="font-display text-lg font-semibold flex items-center gap-2 mb-4">
-            <Activity className="w-5 h-5 text-mv-primary" /> Recent Operations
-          </h3>
-          {recent.length === 0 ? <div className="py-10 text-center text-mv-dim text-sm">No recent activity yet.</div> : (
-            <div className="relative pl-5 space-y-4 max-h-80 overflow-y-auto no-scrollbar">
-              <div className="absolute left-[7px] top-1 bottom-1 w-px bg-mv-border" />
-              {recent.map((r, i) => {
-                const Icon = ACTION_ICONS[r.action] || Activity;
+      <div>
+        <h2 className="font-display text-xl font-semibold mb-4">City-wise Drivers &amp; Rent Today</h2>
+        {(() => {
+          const order = ["Tiruppur", "Coimbatore", "Chennai", "Bangalore"];
+          const names = Array.from(new Set([...order, ...(drvList || []).map((d) => d.city).filter(Boolean)]))
+            .filter((c) => (drvList || []).some((d) => d.city === c));
+          if (!drvList) return <Skeleton className="h-32 rounded-2xl" />;
+          if (!names.length) return <div className="mv-card p-6 text-sm text-mv-muted text-center">No drivers yet.</div>;
+          return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              {names.map((c) => {
+                const total = drvList.filter((d) => d.city === c).length;
+                const cr = dcRows.filter((x) => x.city === c);
+                const cnt = (fn) => new Set(cr.filter(fn).map((x) => x.driver_id)).size;
+                const paid = cnt((x) => x.rent_status === "paid"), unpaid = cnt((x) => x.rent_status !== "paid");
                 return (
-                  <div key={r.id} className="relative flex gap-3 mv-fade" style={{ animationDelay: `${i * 40}ms` }}>
-                    <div className="absolute -left-5 w-4 h-4 rounded-full bg-mv-surface border-2 border-mv-primary" />
-                    <Icon className="w-4 h-4 text-mv-muted mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-sm text-mv-text">{r.summary}</div>
-                      <div className="text-[11px] text-mv-dim">{r.city ? `${r.city} · ` : ""}{timeAgo(r.created_at)}</div>
+                  <div key={c} className="mv-card p-5">
+                    <div className="font-display font-bold uppercase tracking-wide mb-4">{c}</div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div><div className="font-display text-2xl font-bold">{total}</div><div className="text-[10px] uppercase tracking-widest text-mv-dim mt-1">Onboarded</div></div>
+                      <div><div className="font-display text-2xl font-bold text-green-600">{paid}</div><div className="text-[10px] uppercase tracking-widest text-mv-dim mt-1">Rent Paid</div></div>
+                      <div><div className="font-display text-2xl font-bold text-amber-500">{unpaid}</div><div className="text-[10px] uppercase tracking-widest text-mv-dim mt-1">Unpaid</div></div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-        </div>
+          );
+        })()}
       </div>
     </div>
   );

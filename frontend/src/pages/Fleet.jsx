@@ -30,6 +30,33 @@ export default function Fleet() {
   const [city, setCity] = useState(lockedCity || params.get("city") || gCity);
   const [showAdd, setShowAdd] = useState(params.get("new") === "1");
   const [showImport, setShowImport] = useState(false);
+  const [allVeh, setAllVeh] = useState(null);
+  const [movingIds, setMovingIds] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    setAllVeh(null); setMovingIds(null);
+    const p = {};
+    if (city && city !== "all") p.city = city;
+    api.get("/vehicles", { params: { ...p, limit: 1000 } }).then(({ data }) => {
+      const list = Array.isArray(data) ? data : (data?.items || []);
+      if (alive) setAllVeh(list);
+    }).catch(() => alive && setAllVeh([]));
+    api.get("/drivers", { params: p }).then(({ data }) => {
+      const ids = new Set((Array.isArray(data) ? data : []).filter((d) => d.is_online && d.current_vehicle_id).map((d) => String(d.current_vehicle_id)));
+      if (alive) setMovingIds(ids);
+    }).catch(() => alive && setMovingIds(new Set()));
+    return () => { alive = false; };
+  }, [city]);
+  const vc = (fn) => (allVeh ? allVeh.filter(fn).length : null);
+  const vehCards = [
+    { label: "Total Vehicles", n: vc(() => true), color: "text-red-500", bg: "bg-red-500/15", go: "all" },
+    { label: "Rented", n: vc((v) => v.status === "rented"), color: "text-rose-500", bg: "bg-rose-500/15", go: "rented" },
+    { label: "Available", n: vc((v) => v.status === "available"), color: "text-green-500", bg: "bg-green-500/15", go: "available" },
+    { label: "Service", n: vc((v) => v.status === "service"), color: "text-amber-500", bg: "bg-amber-500/15", go: "service" },
+    { label: "Active", n: vc((v) => !["inactive", "accident"].includes(v.status)), color: "text-blue-500", bg: "bg-blue-500/15", go: "all" },
+    { label: "Inactive", n: vc((v) => v.status === "inactive"), color: "text-zinc-500", bg: "bg-zinc-500/15", go: "inactive" },
+    { label: "Moving", n: allVeh && movingIds ? allVeh.filter((v) => movingIds.has(String(v.id))).length : null, color: "text-purple-500", bg: "bg-purple-500/15", go: null },
+  ];
 
   useEffect(() => { const t = setTimeout(() => setDq(q), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => {
@@ -67,6 +94,15 @@ export default function Fleet() {
           </div>
         )}
       </PageHeader>
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
+        {vehCards.map((k) => (
+          <button key={k.label} type="button" onClick={() => k.go && setStatus(k.go)} className="mv-card p-4 text-left hover:shadow-md transition">
+            <div className={`w-9 h-9 rounded-xl ${k.bg} flex items-center justify-center`}><Car className={`w-4 h-4 ${k.color}`} /></div>
+            <div className="font-display text-2xl font-bold mt-3">{k.n == null ? <Skeleton className="h-7 w-10" /> : k.n}</div>
+            <div className="text-[11px] tracking-widest uppercase text-mv-dim mt-1">{k.label}</div>
+          </button>
+        ))}
+      </div>
 
       {/* Controls */}
       <div className="flex flex-col lg:flex-row gap-3 mb-5">

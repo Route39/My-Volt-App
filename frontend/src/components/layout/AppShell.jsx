@@ -26,9 +26,6 @@ const NAV = [
   // { to: "/odometer", label: "Odometer Logs", icon: Car, mod: "drivers" },
   { to: "/kyc", label: "KYC Approvals", icon: FileBadge, mod: "drivers" },
   { to: "/referrals", label: "Referral Drivers", icon: UserPlus, mod: "drivers" },
-  { to: "/service-requests", label: "Service Requests", icon: Wrench, mod: "service" },
-  { to: "/vehicle-service", label: "Vehicle Service", icon: ClipboardList, mod: "service" },
-  { to: "/incidents", label: "Incidents", icon: AlertTriangle, mod: "incidents" },
   { to: "/team-documents", label: "Documents", icon: FolderOpen, mod: "documents" },
   { to: "/settings", label: "Settings", icon: Settings, mod: "settings" },
 ];
@@ -51,7 +48,7 @@ function CitySelector() {
   useEffect(() => { if (user?.role === "city_manager" && user?.city && city !== user.city) setCity(user.city); }, [user]);
   if (user?.role === "city_manager") {
     return (
-      <div data-testid="city-selector" className="inline-flex items-center gap-2 h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm font-medium">
+      <div data-testid="city-selector" className="inline-flex items-center gap-2 h-9 px-3 shrink-0 whitespace-nowrap rounded-xl border border-mv-border bg-mv-surface text-sm font-medium">
         <MapPin className="w-4 h-4 text-mv-primary" /> {user.city}
       </div>
     );
@@ -61,8 +58,8 @@ function CitySelector() {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button data-testid="city-selector"
-                className="inline-flex items-center gap-2 h-9 px-3 rounded-xl border border-mv-border bg-mv-surface hover:bg-mv-elevated text-sm font-medium transition-colors">
-          <MapPin className="w-4 h-4 text-mv-primary" /> {label}
+                className="inline-flex items-center gap-1.5 sm:gap-2 h-9 px-2.5 sm:px-3 shrink-0 whitespace-nowrap rounded-xl border border-mv-border bg-mv-surface hover:bg-mv-elevated text-sm font-medium transition-colors">
+          <MapPin className="w-4 h-4 text-mv-primary shrink-0" /> {city === "all" ? <><span className="sm:hidden">All</span><span className="hidden sm:inline">All Cities</span></> : label}
           <ChevronDown className="w-3.5 h-3.5 text-mv-dim" />
         </button>
       </DropdownMenuTrigger>

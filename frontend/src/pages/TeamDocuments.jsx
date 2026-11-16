@@ -7,11 +7,14 @@ import { CITIES } from "../context/AppContext";
 import { Skeleton, EmptyState } from "../components/common/Primitives";
 import { PageHeader, PrimaryBtn, GhostBtn, Field, TextInput, FilterChip } from "../components/common/Page";
 import { fmtDate } from "../lib/format";
+import { imgUrl } from "../lib/imgUrl";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 
 const fmtSize = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((b || 0) / 1024))} KB`);
 // yyyy-mm-dd in the browser's local timezone (matches the <input type="date"> value)
+const KYC_LABELS = { dl_front: "Licence Front", dl_back: "Licence Back", driver_photo: "Driver Photo", vehicle_photo: "Vehicle Photo", agreement: "Agreement", aadhaar_front: "Aadhaar Front", aadhaar_back: "Aadhaar Back", pan: "PAN Card" };
+const kycLabel = (k) => KYC_LABELS[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const localDay = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA") : "");
 
 // Date filter: all | today | this_week (Mon-Sun) | this_month | date | month | custom
@@ -46,6 +49,20 @@ export default function TeamDocuments() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [cityTab, setCityTab] = useState("all");
+  const [kycDrivers, setKycDrivers] = useState(null);
+  useEffect(() => {
+    api.get("/drivers").then(({ data }) => setKycDrivers(Array.isArray(data) ? data : [])).catch(() => setKycDrivers([]));
+  }, []);
+  const kycList = kycDrivers && kycDrivers.filter((d) => d.kyc_documents && Object.values(d.kyc_documents).some((u) => typeof u === "string" && u)
+    && (cityTab === "all" || (d.city || "").toLowerCase() === String(cityTab).toLowerCase())
+    && (!q || `${d.name} ${d.driver_code || ""} ${d.current_vehicle_number || ""}`.toLowerCase().includes(q.toLowerCase())));
+  const cityDrivers = kycDrivers && kycDrivers.filter((d) => cityTab === "all" || (d.city || "").toLowerCase() === String(cityTab).toLowerCase());
+  const kycSubmitted = cityDrivers && cityDrivers.filter((d) => d.kyc_submitted_at || (d.kyc_documents && Object.values(d.kyc_documents).some((u) => typeof u === "string" && u))).length;
+  const kycCards = [
+    { label: "Total Drivers", n: cityDrivers?.length, color: "text-red-500", bg: "bg-red-500/15" },
+    { label: "KYC Submitted", n: kycSubmitted, color: "text-green-500", bg: "bg-green-500/15" },
+    { label: "KYC Pending", n: cityDrivers ? cityDrivers.length - kycSubmitted : null, color: "text-amber-500", bg: "bg-amber-500/15" },
+  ];
 
   const load = useCallback(async () => {
     try {
@@ -111,20 +128,9 @@ export default function TeamDocuments() {
           <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search document name…" className="pl-9" data-testid="doc-search" />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={dateFilter} onValueChange={setDateFilter}>
-            <SelectTrigger className="w-40 h-10 rounded-xl bg-mv-surface border-mv-border" data-testid="doc-date-filter">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-mv-surface rounded-xl border-mv-border text-mv-text">
-              <SelectItem value="all">All Time</SelectItem>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="this_week">This Week</SelectItem>
-              <SelectItem value="this_month">This Month</SelectItem>
-              <SelectItem value="date">Specific Date</SelectItem>
-              <SelectItem value="month">Specific Month</SelectItem>
-              <SelectItem value="custom">Custom Range</SelectItem>
-            </SelectContent>
-          </Select>
+          {[["all", "All Time"], ["today", "Today"], ["this_week", "This Week"], ["this_month", "This Month"], ["date", "Specific Date"], ["month", "Specific Month"], ["custom", "Custom Range"]].map(([v, l]) => (
+            <FilterChip key={v} active={dateFilter === v} onClick={() => setDateFilter(v)}>{l}</FilterChip>
+          ))}
           {dateFilter === "date" && (
             <input type="date" value={pickDate} onChange={(e) => setPickDate(e.target.value)}
               className="h-10 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm focus:border-mv-primary outline-none" />
@@ -156,7 +162,7 @@ export default function TeamDocuments() {
 
       {!items && <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-xl" />)}</div>}
       {items && filtered.length === 0 && (
-        <EmptyState icon={FileText} title="No documents found" subtitle={items.length ? "Try changing the search or filters." : "Click “Add document” to upload the first one."} />
+        (items.length ? <div className="mv-card p-5 text-sm text-mv-muted text-center">No company documents match the search or filters.</div> : null)
       )}
       {items && filtered.length > 0 && (
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -185,6 +191,55 @@ export default function TeamDocuments() {
       )}
 
       <AddDocumentDialog open={showNew} setOpen={setShowNew} isAdmin={isAdmin} userCity={user?.city} onDone={() => { setShowNew(false); load(); }} />
+      <div className="mt-10">
+        <h2 className="font-display text-xl font-semibold mb-1">Driver KYC Documents</h2>
+        <p className="text-sm text-mv-muted mb-4">Documents uploaded by drivers during KYC</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          {kycCards.map((k) => (
+            <div key={k.label} className="mv-card p-4">
+              <div className={`w-9 h-9 rounded-xl ${k.bg} flex items-center justify-center`}><FileText className={`w-4 h-4 ${k.color}`} /></div>
+              <div className="font-display text-2xl font-bold mt-3">{k.n == null ? <Skeleton className="h-7 w-10" /> : k.n}</div>
+              <div className="text-[11px] tracking-widest uppercase text-mv-dim mt-1">{k.label}</div>
+            </div>
+          ))}
+        </div>
+        {kycList === null ? <Skeleton className="h-32 rounded-2xl" /> : kycList.length === 0 ? (
+          <div className="mv-card p-8 text-center text-sm text-mv-muted">No driver KYC documents found.</div>
+        ) : (
+          <div className="space-y-3">
+            {kycList.map((d) => {
+              const docs = Object.entries(d.kyc_documents).filter(([, u]) => typeof u === "string" && u);
+              return (
+                <div key={d.id} className="mv-card p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div>
+                      <div className="font-semibold">{d.name} <span className="text-xs font-mono text-red-500 ml-1">{d.driver_code}</span></div>
+                      <div className="text-xs text-mv-muted">{d.current_vehicle_number ? `${d.current_vehicle_number}${d.current_vehicle_reg ? " - " + d.current_vehicle_reg : ""}` : "No vehicle assigned"} · {d.city}</div>
+                    </div>
+                    <span className="text-xs text-mv-dim">{docs.length} documents</span>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-8 gap-3">
+                    {docs.map(([k, u]) => (
+                      <div key={k} className="rounded-xl border overflow-hidden">
+                        <a href={imgUrl(u)} target="_blank" rel="noreferrer" className="block aspect-square bg-mv-elevated">
+                          {/\.pdf$/i.test(u) ? <div className="h-full flex items-center justify-center"><FileText className="w-8 h-8 text-mv-dim" /></div> : <img src={imgUrl(u)} alt={kycLabel(k)} className="w-full h-full object-cover" />}
+                        </a>
+                        <div className="px-2 py-2 flex items-center justify-between gap-1">
+                          <span className="text-xs truncate">{kycLabel(k)}</span>
+                          <span className="flex gap-1">
+                            <a href={imgUrl(u)} target="_blank" rel="noreferrer" title="View" className="p-1 hover:text-red-500"><ExternalLink className="w-3.5 h-3.5" /></a>
+                            <a href={imgUrl(u)} download title="Download" className="p-1 hover:text-red-500"><Download className="w-3.5 h-3.5" /></a>
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

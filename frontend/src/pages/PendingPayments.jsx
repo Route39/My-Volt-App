@@ -113,16 +113,27 @@ export default function PendingPayments() {
 
       {/* Summary cards */}
       <div className="grid sm:grid-cols-3 gap-4 mb-5" data-testid="pp-cards">
-        {[
-          ["Total Pending Amount (daily Rent and Deposit Amount)", totals.total],
-          ["Pending Rent Amount", totals.rent],
-          ["Pending Deposit Amount", totals.deposit],
-        ].map(([label, value]) => (
-          <div key={label} className="mv-card p-4">
-            <div className="mv-label">{label}</div>
-            <div className={`font-display text-2xl font-bold mt-1.5 ${value > 0 ? "text-red-500" : "text-mv-text"}`}>{inr(value)}</div>
-          </div>
-        ))}
+        {(() => {
+          const pendDrivers = (rows || []).filter((r) => r.package_category === pkgType
+            && (cityTab === "all" || r.city === cityTab)
+            && ((Number(r.rent_pending) || 0) > 0 || Object.values(r.salary_rent_by_date || {}).some((v) => Number(v) > 0))).length;
+          const word = pkgType === "commission" ? "Commission" : "Salary-rent";
+          const list = isPkgOnly ? [
+            [`Total Pending ${word}`, totals.rent, true],
+            ["Drivers with Pending", pendDrivers, false],
+            ["Pending Deposit Amount", totals.deposit, true],
+          ] : [
+            ["Total Pending Amount (daily Rent and Deposit Amount)", totals.total, true],
+            ["Pending Rent Amount", totals.rent, true],
+            ["Pending Deposit Amount", totals.deposit, true],
+          ];
+          return list.map(([label, value, money]) => (
+            <div key={label} className="mv-card p-4">
+              <div className="mv-label">{label}</div>
+              <div className={`font-display text-2xl font-bold mt-1.5 ${value > 0 ? "text-red-500" : "text-mv-text"}`}>{money ? inr(value) : value}</div>
+            </div>
+          ));
+        })()}
       </div>
 
       {/* Package tabs */}

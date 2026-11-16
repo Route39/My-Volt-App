@@ -27,6 +27,27 @@ export default function Rentals() {
   const [q, setQ] = useState("");
   const [pkgTab, setPkgTab] = useState("rental");        // "rental" | "commission" | "salary"
   const [cityTab, setCityTab] = useState(city);          // city tab filter (admin)
+  const [allRent, setAllRent] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const p = {};
+    if (cityTab && cityTab !== "all") p.city = cityTab;
+    api.get("/rentals", { params: p }).then(({ data }) => alive && setAllRent(Array.isArray(data) ? data : (data?.items || []))).catch(() => alive && setAllRent([]));
+    return () => { alive = false; };
+  }, [cityTab]);
+  const rList = (allRent || []).filter((r) => (r.package_category || "rental") === pkgTab);
+  const rStat = (r) => (r.display_status || r.status || "").toLowerCase();
+  const dayOf = (v) => { const d = new Date(v); return isNaN(d) ? "" : d.toLocaleDateString("en-CA"); };
+  const todayL = new Date().toLocaleDateString("en-CA");
+  const weekL = new Date(Date.now() + 7 * 864e5).toLocaleDateString("en-CA");
+  const rCards = [
+    { label: "Total Rentals", n: rList.length, color: "text-mv-text", go: "all" },
+    { label: "Active", n: rList.filter((r) => rStat(r) === "active").length, color: "text-green-600", go: "active" },
+    { label: "Suspended", n: rList.filter((r) => rStat(r) === "suspended").length, color: "text-amber-500", go: "suspended" },
+    { label: "Completed", n: rList.filter((r) => rStat(r) === "completed").length, color: "text-zinc-500", go: "completed" },
+    { label: "New This Month", n: rList.filter((r) => dayOf(r.start).slice(0, 7) === todayL.slice(0, 7)).length, color: "text-blue-500", go: null },
+    { label: "Ending This Week", n: rList.filter((r) => rStat(r) === "active" && dayOf(r.end) && dayOf(r.end) >= todayL && dayOf(r.end) <= weekL).length, color: "text-red-500", go: null },
+  ];
   useEffect(() => { setCityTab(city); }, [city]);        // stay in sync with the top-bar city
 
   const load = useCallback(async () => {
@@ -62,6 +83,14 @@ export default function Rentals() {
       <PageHeader title="Rentals" subtitle={<>Modern prepaid rental platform{summary && <span className="block mt-1 font-medium text-mv-text">{summary}</span>}</>}>
         {/* {canCreate && <PrimaryBtn onClick={() => nav("/rentals/new")} data-testid="create-rental-btn"><Plus className="w-4 h-4" /> Create Rental</PrimaryBtn>} */}
       </PageHeader>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6" data-testid="rental-cards">
+        {rCards.map((k) => (
+          <button key={k.label} type="button" onClick={() => k.go && setTab(k.go)} className="mv-card p-5 text-left hover:shadow-md transition">
+            <div className="text-xs text-mv-muted uppercase tracking-widest font-semibold mb-3">{k.label}</div>
+            <div className={`text-3xl font-display font-bold ${k.color}`}>{allRent ? k.n : "–"}</div>
+          </button>
+        ))}
+      </div>
 
       <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
         {[["rental", "Rental Packages"], ["commission", "Commission"], ["salary", "Salary"]].map(([k, l]) => (
