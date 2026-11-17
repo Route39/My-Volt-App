@@ -19,6 +19,32 @@ export default function PendingPayments() {
   const [supervisor, setSupervisor] = useState("all");
   const [cityTab, setCityTab] = useState("all");
   const [sortBy, setSortBy] = useState("pending");   // az | za | pending
+  const [period, setPeriod] = useState("all");
+  const [pickDate, setPickDate] = useState("");
+  const [pickMonth, setPickMonth] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const range = useMemo(() => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const [y, m, d] = today.split("-").map(Number);
+    const iso = (dt) => dt.toISOString().split("T")[0];
+    if (period === "today") return [today, today];
+    if (period === "this_week") { const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); return [iso(new Date(Date.UTC(y, m - 1, d - dow))), iso(new Date(Date.UTC(y, m - 1, d - dow + 6)))]; }
+    if (period === "this_month") return [iso(new Date(Date.UTC(y, m - 1, 1))), iso(new Date(Date.UTC(y, m, 0)))];
+    if (period === "date") return pickDate ? [pickDate, pickDate] : null;
+    if (period === "month") { if (!pickMonth) return null; const [py, pm] = pickMonth.split("-").map(Number); return [`${pickMonth}-01`, iso(new Date(Date.UTC(py, pm, 0)))]; }
+    if (period === "custom") return fromDate && toDate ? [fromDate, toDate] : null;
+    return null;
+  }, [period, pickDate, pickMonth, fromDate, toDate]);
+  const view = useMemo(() => {
+    if (!rows || !range) return rows;
+    const inR = (dt) => dt >= range[0] && dt <= range[1];
+    return rows.map((r) => {
+      const rd = (r.rent_pending_dates || []).filter(inR);
+      const rbd = r.rent_by_date || {};
+      return { ...r, rent_pending_dates: rd, rent_pending: Math.round(rd.reduce((s, dt) => s + (Number(rbd[dt]) || 0), 0) * 100) / 100, pkg_pending_dates: (r.pkg_pending_dates || []).filter(inR) };
+    });
+  }, [rows, range]);
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -72,7 +98,7 @@ export default function PendingPayments() {
     const term = q.trim().toLowerCase();
     const byName = (a, b) => (a.driver_name || "").localeCompare(b.driver_name || "", undefined, { sensitivity: "base" });
     const total = (r) => (r.rent_pending || 0) + (r.deposit_pending || 0);
-    const list = (rows || []).filter((r) =>
+    const list = (view || []).filter((r) =>
       (!term ||
         (r.driver_name || "").toLowerCase().includes(term) ||
         (r.phone || "").toLowerCase().includes(term) ||
@@ -86,7 +112,7 @@ export default function PendingPayments() {
     else if (sortBy === "pending") list.sort((a, b) => total(b) - total(a) || byName(a, b));  // highest -> lowest -> no pending
     else list.sort(byName);
     return list;
-  }, [rows, q, pkgType, pkg, supervisor, cityTab, sortBy, isAdmin]);
+  }, [view, q, pkgType, pkg, supervisor, cityTab, sortBy, isAdmin]);
 
   // Salary driver's unpaid salary-rent: same calculation the row's "Pending Collection - ₹" line uses
   const salaryPendingOf = (r) =>
@@ -195,6 +221,19 @@ export default function PendingPayments() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-5" data-testid="pp-period-tabs">
+        {[["all", "All"], ["today", "Today"], ["this_week", "This Week"], ["this_month", "This Month"], ["date", "Specific Date"], ["month", "Specific Month"], ["custom", "Custom Range"]].map(([k, l]) => (
+          <FilterChip key={k} active={period === k} onClick={() => setPeriod(k)}>{l}</FilterChip>
+        ))}
+        {period === "date" && <input type="date" value={pickDate} onChange={(e) => setPickDate(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />}
+        {period === "month" && <input type="month" value={pickMonth} onChange={(e) => setPickMonth(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />}
+        {period === "custom" && (<>
+          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />
+          <span className="text-mv-dim text-sm">to</span>
+          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />
+        </>)}
+      </div>
+
       {/* City tabs - admin only */}
       {isAdmin && (
         <div className="flex flex-wrap gap-2 mb-5" data-testid="pp-city-tabs">
@@ -248,7 +287,7 @@ export default function PendingPayments() {
                       <div>
                         <span className="font-semibold text-red-500">{inr(r.rent_pending)}</span>
                         <div className="text-[11px] text-mv-dim">Pending Rent</div>
-                        {(r.rent_pending_dates || []).map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}
+                        <details className="mt-1 group"><summary className="text-[11px] font-medium text-mv-primary cursor-pointer select-none list-none">{(r.rent_pending_dates || []).length} days <span className="inline-block transition-transform group-open:rotate-180">▾</span></summary><div className="mt-1 max-h-48 overflow-y-auto pr-2">{(r.rent_pending_dates || []).map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}</div></details>
                       </div>
                     )
                       : (r.pkg_pending_dates || []).length > 0 ? (
@@ -258,7 +297,7 @@ export default function PendingPayments() {
                             const total = r.pkg_pending_dates.reduce((s, dt) => s + Number((r.salary_rent_by_date || {})[dt] ?? r.salary_daily_rent ?? 0), 0);
                             return total > 0 ? <span className="font-semibold text-red-500"> - {inr(total)}</span> : null;
                           })()}
-                          {r.pkg_pending_dates.map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}
+                          <details className="mt-1 group"><summary className="text-[11px] font-medium text-mv-primary cursor-pointer select-none list-none">{r.pkg_pending_dates.length} days <span className="inline-block transition-transform group-open:rotate-180">▾</span></summary><div className="mt-1 max-h-48 overflow-y-auto pr-2">{r.pkg_pending_dates.map((dt) => <div key={dt} className="text-[11px] text-mv-dim">{dt}</div>)}</div></details>
                         </div>
                       ) : <span className="text-mv-dim">—</span>}
                   </td>

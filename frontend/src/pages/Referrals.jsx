@@ -26,6 +26,25 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
     const { city: gCity, lockedCity, cities } = useApp();
     const [city, setCity] = useState(lockedCity || gCity);
     const [drvAll, setDrvAll] = useState(null);
+    const [period, setPeriod] = useState("all");
+    const [pickDate, setPickDate] = useState("");
+    const [pickMonth, setPickMonth] = useState("");
+    const [fromDate, setFromDate] = useState("");
+    const [toDate, setToDate] = useState("");
+    const range = (() => {
+        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        const [y, m, d] = today.split("-").map(Number);
+        const iso = (dt) => dt.toISOString().split("T")[0];
+        if (period === "today") return [today, today];
+        if (period === "this_week") { const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); return [iso(new Date(Date.UTC(y, m - 1, d - dow))), iso(new Date(Date.UTC(y, m - 1, d - dow + 6)))]; }
+        if (period === "this_month") return [iso(new Date(Date.UTC(y, m - 1, 1))), iso(new Date(Date.UTC(y, m, 0)))];
+        if (period === "date") return pickDate ? [pickDate, pickDate] : null;
+        if (period === "month") { if (!pickMonth) return null; const [py, pm] = pickMonth.split("-").map(Number); return [`${pickMonth}-01`, iso(new Date(Date.UTC(py, pm, 0)))]; }
+        if (period === "custom") return fromDate && toDate ? [fromDate, toDate] : null;
+        return null;
+    })();
+    const istDay = (v) => { if (!v) return ""; const t = new Date(v); return isNaN(t) ? String(v).slice(0, 10) : t.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); };
+    const dated = items && range ? items.filter((r) => { const dt = istDay(r.referred_at); return dt >= range[0] && dt <= range[1]; }) : items;
     useEffect(() => {
         let alive = true;
         const p = {};
@@ -34,7 +53,7 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
         return () => { alive = false; };
     }, [city]);
     const onlineIds = new Set((drvAll || []).filter((d) => d.is_online).map((d) => String(d.id)));
-    const refs = items || [];
+    const refs = dated || [];
     const bDone = (r, i) => { const b = (r.batch_progress || [])[i]; return !!b && b.total > 0 && b.done >= b.total; };
     const refCards = [
         { label: "Total Drivers", n: drvAll ? drvAll.length : null, color: "text-red-500", bg: "bg-red-500/15" },
@@ -60,7 +79,7 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
         catch { toast.error("Failed to delete"); }
     };
 
-    const list = (items || []).filter((r) => {
+    const list = (dated || []).filter((r) => {
         const s = q.trim().toLowerCase();
         return !s || [r.referred_name, r.referred_phone, r.referrer_name].some((v) => (v || "").toLowerCase().includes(s));
     });
@@ -85,6 +104,23 @@ export function ReferralList({ referrerId, referrerName, referrerCode, showRefer
                         {["all", ...cities].map((c) => (
                             <FilterChip key={c} active={city === c} onClick={() => setCity(c)} data-testid={`referral-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
                         ))}
+                    </div>
+                </div>
+            )}
+            {!referrerId && (
+                <div className="mb-4" data-testid="referral-period-tabs">
+                    <div className="mv-label mb-2">Referred On</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {[["all", "All"], ["today", "Today"], ["this_week", "This Week"], ["this_month", "This Month"], ["date", "Specific Date"], ["month", "Specific Month"], ["custom", "Custom Range"]].map(([k, l]) => (
+                            <FilterChip key={k} active={period === k} onClick={() => setPeriod(k)}>{l}</FilterChip>
+                        ))}
+                        {period === "date" && <input type="date" value={pickDate} onChange={(e) => setPickDate(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />}
+                        {period === "month" && <input type="month" value={pickMonth} onChange={(e) => setPickMonth(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />}
+                        {period === "custom" && (<>
+                            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />
+                            <span className="text-mv-dim text-sm">to</span>
+                            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-9 px-3 rounded-xl border border-mv-border bg-mv-surface text-sm outline-none focus:border-mv-primary" />
+                        </>)}
                     </div>
                 </div>
             )}

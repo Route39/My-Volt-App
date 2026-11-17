@@ -92,20 +92,20 @@ export default function Rentals() {
         ))}
       </div>
 
-      <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
+      <div className="flex flex-wrap gap-2 mb-5">
         {[["rental", "Rental Packages"], ["commission", "Commission"], ["salary", "Salary"]].map(([k, l]) => (
           <FilterChip key={k} active={pkgTab === k} onClick={() => setPkgTab(k)} data-testid={`rental-pkg-tab-${k}`}>{l}</FilterChip>
         ))}
       </div>
 
-      <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
+      <div className="flex flex-wrap gap-2 mb-5">
         {TABS.map(([k, l]) => <FilterChip key={k} active={tab === k} onClick={() => { setTab(k); setParams({ status: k }); }} data-testid={`rental-tab-${k}`}>{l}</FilterChip>)}
       </div>
 
       {isAdmin && (
         <div className="mb-5">
           <div className="mv-label mb-2">City filter</div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar">
+          <div className="flex flex-wrap gap-2">
             {["all", ...cities].map((c) => (
               <FilterChip key={c} active={cityTab === c} onClick={() => setCityTab(c)} data-testid={`rental-city-tab-${c}`}>{c === "all" ? "All Cities" : c}</FilterChip>
             ))}

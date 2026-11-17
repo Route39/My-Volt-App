@@ -8038,10 +8038,12 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
 
         # total daily rent still unpaid (same account used by Daily Collection / driver app)
         rent_pending = 0.0
+        rbd_out = {}
         if r:
             acct = await _rental_account(r)
             rent_pending = round(float(acct.get("rent_due", 0) or 0), 2)
             rent_pending_dates = sorted(k for k, v in (acct.get("rent_by_date") or {}).items() if v)
+            rbd_out = {k: round(float(v), 2) for k, v in (acct.get("rent_by_date") or {}).items() if v}
 
         # deposit still unpaid: full / first part if nothing paid yet, remaining part once its
         # next payment date is today or has passed, nothing while the next date is still ahead
@@ -8106,6 +8108,7 @@ async def list_pending_payments(request: Request, city: Optional[str] = None):
             "package_category": _cat,
             "rent_pending": rent_pending,
             "rent_pending_dates": rent_pending_dates if r else [],
+            "rent_by_date": rbd_out,
             "salary_daily_rent": salary_daily_rent,
             "salary_rent_by_date": ({dt: _salary_rent_on(_plan_day(_sp_full, d, dt), dt) for dt in pkg_pending_dates} if (_cat == "salary" and r) else {}),
             "deposit_pending": deposit_pending,

@@ -16,6 +16,26 @@ export default function KycApprovals() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [kycAll, setKycAll] = useState(null);
+  const [period, setPeriod] = useState("all");
+  const [pickDate, setPickDate] = useState("");
+  const [pickMonth, setPickMonth] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const range = (() => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const [y, m, d] = today.split("-").map(Number);
+    const iso = (dt) => dt.toISOString().split("T")[0];
+    if (period === "today") return [today, today];
+    if (period === "this_week") { const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); return [iso(new Date(Date.UTC(y, m - 1, d - dow))), iso(new Date(Date.UTC(y, m - 1, d - dow + 6)))]; }
+    if (period === "this_month") return [iso(new Date(Date.UTC(y, m - 1, 1))), iso(new Date(Date.UTC(y, m, 0)))];
+    if (period === "date") return pickDate ? [pickDate, pickDate] : null;
+    if (period === "month") { if (!pickMonth) return null; const [py, pm] = pickMonth.split("-").map(Number); return [`${pickMonth}-01`, iso(new Date(Date.UTC(py, pm, 0)))]; }
+    if (period === "custom") return fromDate && toDate ? [fromDate, toDate] : null;
+    return null;
+  })();
+  const istDay = (v) => { if (!v) return ""; const t = new Date(v); return isNaN(t) ? String(v).slice(0, 10) : t.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); };
+  const inR = (d) => !range || ((x) => x >= range[0] && x <= range[1])(istDay(d.kyc_submitted_at));
+  const shown = drivers.filter(inR);
   useEffect(() => {
     let alive = true;
     const p = {};
@@ -23,9 +43,9 @@ export default function KycApprovals() {
     api.get("/drivers", { params: p }).then(({ data }) => alive && setKycAll(Array.isArray(data) ? data : [])).catch(() => alive && setKycAll([]));
     return () => { alive = false; };
   }, [city, drivers]);
-  const kc = (fn) => (kycAll ? kycAll.filter(fn).length : null);
+  const kc = (fn) => (kycAll ? kycAll.filter((d) => inR(d) && fn(d)).length : null);
   const kycCards = [
-    { label: "Total Drivers", n: kc(() => true), color: "text-red-500", bg: "bg-red-500/15" },
+    { label: "Total Drivers", n: kycAll ? kycAll.length : null, color: "text-red-500", bg: "bg-red-500/15" },
     { label: "KYC Submitted", n: kc((d) => ["submitted", "approved", "rejected"].includes(d.kyc_status) || d.kyc_submitted_at), color: "text-blue-500", bg: "bg-blue-500/15" },
     { label: "KYC Approved", n: kc((d) => d.kyc_status === "approved"), color: "text-green-500", bg: "bg-green-500/15" },
     { label: "KYC Pending", n: kc((d) => d.kyc_status === "submitted"), color: "text-amber-500", bg: "bg-amber-500/15" },
@@ -98,7 +118,23 @@ export default function KycApprovals() {
         </div>
       )}
 
-      {drivers.length === 0 ? (
+      <div className="mb-5" data-testid="kyc-period-tabs">
+        <div className="mv-label mb-2">KYC Submitted On</div>
+        <div className="flex flex-wrap items-center gap-2">
+          {[["all", "All"], ["today", "Today"], ["this_week", "This Week"], ["this_month", "This Month"], ["date", "Specific Date"], ["month", "Specific Month"], ["custom", "Custom Range"]].map(([k, l]) => (
+            <FilterChip key={k} active={period === k} onClick={() => setPeriod(k)}>{l}</FilterChip>
+          ))}
+          {period === "date" && <input type="date" value={pickDate} onChange={(e) => setPickDate(e.target.value)} className="h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-red-500" />}
+          {period === "month" && <input type="month" value={pickMonth} onChange={(e) => setPickMonth(e.target.value)} className="h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-red-500" />}
+          {period === "custom" && (<>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-red-500" />
+            <span className="text-slate-400 text-sm">to</span>
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-9 px-3 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-red-500" />
+          </>)}
+        </div>
+      </div>
+
+      {shown.length === 0 ? (
         <div className="text-center py-32 bg-white rounded-3xl border border-slate-100 shadow-sm">
           <Check className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-slate-900">All caught up!</h2>
@@ -106,7 +142,7 @@ export default function KycApprovals() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {drivers.map(d => (
+          {shown.map(d => (
             <div key={d.id} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelected(d)}>
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center font-bold text-lg">

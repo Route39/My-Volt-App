@@ -132,7 +132,7 @@ export default function Fleet() {
         </div>
       )}
 
-      <div className="flex gap-2 mb-5 overflow-x-auto no-scrollbar">
+      <div className="flex flex-wrap gap-2 mb-5">
         {STATUSES.map((s) => (
           <FilterChip key={s} active={status === s} onClick={() => setStatus(s)} data-testid={`fleet-filter-${s}`}>
             {s === "all" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}

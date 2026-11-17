@@ -114,21 +114,21 @@ export default function DriverProfile() {
   const isSpecialPkg = _pkgCat === "commission" || _pkgCat === "salary";   // no security deposit for these packages
 
   return (
-    <div>
+    <div className="pb-24">
       <button onClick={() => nav(-1)} className="flex items-center gap-1.5 text-sm text-mv-muted hover:text-mv-text mb-4"><ArrowLeft className="w-4 h-4" /> Back</button>
 
-      <div className="mv-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 mv-rise">
-        <Avatar className="w-20 h-20"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-xl">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
-        <div className="flex-1">
-          <div className="flex items-center gap-3 flex-wrap"><h1 className="font-display text-2xl font-bold">{d.name}</h1>{d.driver_code && <span className="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold bg-red-50 text-mv-primary border border-red-100">{d.driver_code}</span>}<StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
-          <div className="flex items-center gap-5 mt-2 text-sm text-mv-muted flex-wrap">
+      <div className="mv-card p-5 sm:p-6 flex flex-wrap items-start gap-4 mv-rise">
+        <Avatar className="w-14 h-14 sm:w-20 sm:h-20 shrink-0"><AvatarImage src={d.avatar} /><AvatarFallback className="bg-mv-elevated text-xl">{d.name.split(" ").map((s) => s[0]).slice(0, 2).join("")}</AvatarFallback></Avatar>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap"><h1 className="font-display text-xl sm:text-2xl font-bold">{d.name}</h1>{d.driver_code && <span className="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold bg-red-50 text-mv-primary border border-red-100">{d.driver_code}</span>}<StatusChip status={d.status} />{d.admin_block && <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-600">{d.admin_block === "permanent" ? "Permanently Blocked" : "Temporarily Blocked"}</span>}{d.rental_status === "active" && <StatusChip status="active" label="Rental Active" />}</div>
+          <div className="flex items-center gap-x-4 gap-y-1.5 mt-3 text-sm text-mv-muted flex-wrap">
             <span className="flex items-center gap-1.5"><Phone className="w-4 h-4" /> {d.phone}</span>
             <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {d.city}</span>
             <span className="flex items-center gap-1.5"><Car className="w-4 h-4" /> {d.current_vehicle_number || "No vehicle"}</span>
           </div>
         </div>
         {canEdit && (
-            <div className="flex flex-wrap justify-end gap-2 sm:w-[864px] [&>button]:whitespace-nowrap [&>button]:w-[calc((100%_-_0.5rem)/2)] sm:[&>button]:w-[210px]">
+            <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:flex-wrap sm:justify-end [&>button]:!w-full [&>button]:!justify-center [&>button]:!whitespace-normal [&>button]:text-center [&>button]:leading-tight [&>button]:!h-auto [&>button]:min-h-[44px] [&>button]:py-2 [&>button]:text-sm [&>button>svg]:shrink-0 sm:[&>button]:!w-[210px]">
             
             <GhostBtn onClick={() => setEdit(true)}><Edit className="w-4 h-4" /> Edit</GhostBtn>
             {/* {d.deposit_status !== "paid" ? (
@@ -191,7 +191,7 @@ export default function DriverProfile() {
                       }
                     }}
                     className={(fullDone && !d.deposit_first_paid_at) ? "opacity-50 cursor-not-allowed " + (partialOn ? doneCls : "") : partialOn ? doneClickCls : "text-red-600 hover:text-red-700 hover:bg-red-50"}>
-                    <Check className="w-4 h-4" /> {partialOn ? "Partial Deposit Enabled" : "Enable Partial Deposit"}
+                    <Check className="w-4 h-4" /> {partialOn ? "Partial Enabled" : "Partial Deposit"}
                   </GhostBtn>
                   <GhostBtn
                     data-testid="mark-full-deposit-btn"
@@ -218,7 +218,7 @@ export default function DriverProfile() {
                       }
                     }}
                     className={fullDone ? "text-orange-600 hover:text-orange-700 hover:bg-orange-50" : "text-red-600 hover:text-red-700 hover:bg-red-50"}>
-                    {fullDone ? <AlertTriangle className="w-4 h-4" /> : <Check className="w-4 h-4" />} {fullDone ? "Mark Deposit Unpaid" : "Mark Deposit Paid (QR)"}
+                    {fullDone ? <AlertTriangle className="w-4 h-4" /> : <Check className="w-4 h-4" />} {fullDone ? "Deposit Unpaid" : "Deposit Paid (QR)"}
                   </GhostBtn>
                   {/* {partialDone && (
                     <GhostBtn onClick={async () => {
@@ -257,8 +257,8 @@ export default function DriverProfile() {
       </div>
 
       <Tabs defaultValue="personal" className="mt-6">
-        <TabsList className="bg-mv-surface border border-mv-border flex-wrap h-auto">
-          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents", "referral", "odometer"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-red-600 data-[state=active]:text-white capitalize">{t === "odometer" ? "odometer image" : t}</TabsTrigger>)}
+        <TabsList className="bg-mv-surface border border-mv-border h-auto w-full grid grid-cols-3 gap-1 p-1 sm:flex sm:flex-wrap sm:justify-start">
+          {["personal", "kyc", "documents", "vehicle", "rental", "history", "incidents", "referral", "odometer"].map((t) => <TabsTrigger key={t} value={t} className="data-[state=active]:bg-red-600 data-[state=active]:text-white capitalize w-full sm:w-auto py-2">{t === "odometer" ? "odometer" : t === "kyc" ? "KYC" : t}</TabsTrigger>)}
         </TabsList>
 
         <TabsContent value="personal" className="mt-4">

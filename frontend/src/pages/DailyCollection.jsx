@@ -230,7 +230,7 @@ export default function DailyCollection() {
     // salary driver paid TODAY's rent today itself (after 9 PM): shown on today's row with the date it is for
     if (it.is_early_row) return (
       <div className="flex flex-col items-start gap-1" data-testid={`settle-chip-${it.id}`}>
-        <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+        <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
           <Check className="w-3.5 h-3.5" /> {isPkgTab ? "Salary-rent paid" : <>Paid {inr(it.collection.pay_amount)}</>}
         </span>
         <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.collection.for_date}</span>
@@ -256,7 +256,7 @@ export default function DailyCollection() {
       <div className="flex flex-col items-start gap-1" data-testid={`settle-chip-${it.id}`}>
         {pc ? (
           <>
-            <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+            <span className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
               <Check className="w-3.5 h-3.5" /> {isPkgTab
                 ? (it.package_category === "commission" ? "Commission paid" : "Salary-rent paid")
                 : <>{it.package_category === "commission" ? "Commission paid" : "Paid"} {inr(pc.pay_amount)}</>}
@@ -327,9 +327,9 @@ export default function DailyCollection() {
       const c = it.collection;
       return (
         <div className="flex flex-col gap-1 mt-1 mb-1">
-          <span className="font-display font-bold text-sm text-red-600">{inr(c.pay_amount)}</span>
+          <span className="font-display font-bold text-sm text-green-600">{inr(c.pay_amount)}</span>
           <span className="text-[11px] text-mv-muted whitespace-nowrap">{c.for_date}</span>
-          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
             <Check className="w-3.5 h-3.5" /> PAID
           </div>
           {c.transaction_id && (
@@ -351,9 +351,9 @@ export default function DailyCollection() {
     const pc = it.prev_collection;
     if (pc) return (
       <div className="flex flex-col gap-1 mt-1 mb-1">
-        <span className="font-display font-bold text-sm text-red-600">{inr(pc.pay_amount)}</span>
+        <span className="font-display font-bold text-sm text-green-600">{inr(pc.pay_amount)}</span>
         <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.rent_for_date}</span>
-        <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+        <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
           <Check className="w-3.5 h-3.5" /> PAID
         </div>
         {pc.transaction_id && (
@@ -369,10 +369,10 @@ export default function DailyCollection() {
       </div>
     );
   };
-  const qrBadgeCls = "text-[9px] px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold text-red-600 bg-red-50 border-red-200";
+  const qrBadgeCls = "text-[9px] px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold text-green-600 bg-green-50 border-green-200";
   const txnChip = (t, manual) => t ? (
     <>
-      <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${t.startsWith('QR_') ? 'text-red-600 bg-red-50 border-red-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
+      <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${t.startsWith('QR_') ? 'text-green-600 bg-green-50 border-green-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
         {t.startsWith('QR_') ? 'Paid by QR' : `TXN ${t}`}
       </div>
       {manual && !t.startsWith('QR_') && <div className={qrBadgeCls}>Paid by QR</div>}
@@ -408,19 +408,14 @@ export default function DailyCollection() {
             </div>
           )}
           
-          <Select value={dateFilter} onValueChange={setDateFilter}>
-            <SelectTrigger className="w-40 h-10 rounded-xl bg-mv-surface border-mv-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-mv-surface rounded-xl border-mv-border text-mv-text">
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="this_week">This Week</SelectItem>
-              <SelectItem value="this_month">This Month</SelectItem>
-              <SelectItem value="date">Specific Date</SelectItem>
-              <SelectItem value="month">Specific Month</SelectItem>
-              <SelectItem value="custom">Custom Range</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="w-full flex flex-wrap items-center gap-2 mb-1" data-testid="date-tabs">
+            {[["today", "Today"], ["this_week", "This Week"], ["this_month", "This Month"], ["date", "Specific Date"], ["month", "Specific Month"], ["custom", "Custom Range"]].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setDateFilter(k)} data-testid={`date-tab-${k}`}
+                className={`h-9 px-4 rounded-full text-sm font-medium transition-colors ${dateFilter === k ? "bg-mv-primary text-white" : "border border-mv-border text-mv-muted hover:bg-mv-elevated"}`}>
+                {l}
+              </button>
+            ))}
+          </div>
 
           {dateFilter === "date" && (
             <input
@@ -652,9 +647,9 @@ export default function DailyCollection() {
                     <td className="px-5 py-4">
                       {it.collection ? (
                         <div className="flex flex-col gap-1">
-                          <span className="text-red-600 font-display font-bold text-sm">{inr(it.collection.pay_amount)}</span>
+                          <span className="text-green-600 font-display font-bold text-sm">{inr(it.collection.pay_amount)}</span>
                           {it.package_category === "salary" && <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.collection.for_date}</span>}
-                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
                           </div>
                           {it.collection.transaction_id && (
@@ -790,11 +785,11 @@ export default function DailyCollection() {
                       ) : (it.is_today_row || it.prev_rent_row) ? (
                         it.prev_rent ? (
                           <div className="flex flex-col gap-1 mt-1 mb-1">
-                            <span className={`font-display font-bold text-sm ${it.prev_rent.status === "paid" ? "text-red-600" : "text-red-500/80"}`}>{inr(it.prev_rent.amount)}</span>
+                            <span className={`font-display font-bold text-sm ${it.prev_rent.status === "paid" ? "text-green-600" : "text-red-500/80"}`}>{inr(it.prev_rent.amount)}</span>
                             <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.prev_rent.date}</span>
                             {it.prev_rent.status === "paid" ? (
                               <>
-                                <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+                                <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
                                   <Check className="w-3.5 h-3.5" /> PAID
                                 </div>
                                 {it.prev_rent.transaction_id && (
@@ -819,11 +814,11 @@ export default function DailyCollection() {
                         <span className="text-slate-400 font-medium">_</span>
                       ) : it.rent_status === "paid" ? (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
-                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
                           </div>
                           {it.rent_for_date && <span className="text-[11px] text-mv-muted whitespace-nowrap">{it.rent_for_date}</span>}
-                          <span className="text-red-600 font-display font-bold text-sm">{inr(it.rent_amount)}</span>
+                          <span className="text-green-600 font-display font-bold text-sm">{inr(it.rent_amount)}</span>
                           {it.rent_transaction_id && (
                             <>
                               <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
@@ -850,10 +845,10 @@ export default function DailyCollection() {
                         <span className="text-slate-400 font-medium">0</span>
                       ) : it.extra_km_status === "paid" ? (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
-                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-xs font-bold tracking-wide border border-red-200 shadow-sm">
+                          <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
                             <Check className="w-3.5 h-3.5" /> PAID
                           </div>
-                          <span className="text-red-600 font-display font-bold text-sm">{inr(it.extra_km_amount)}</span>
+                          <span className="text-green-600 font-display font-bold text-sm">{inr(it.extra_km_amount)}</span>
                           {it.extra_km_transaction_id && (
                             <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
                               TXN {it.extra_km_transaction_id}
@@ -876,12 +871,12 @@ export default function DailyCollection() {
                       {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span> : inr(depositOf(it).total)}
                     </td>
                     <td className="px-5 py-4 font-display font-bold">
-                      {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span> : <span className="text-red-600">{inr(depositOf(it).paid)}</span>}
+                      {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span> : <span className="text-green-600">{inr(depositOf(it).paid)}</span>}
                     </td>
                     <td className="px-5 py-4 font-display font-bold">
                       {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span>
                         : depositOf(it).pending > 0 ? <span className="text-red-500">{inr(depositOf(it).pending)}</span>
-                        : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">PAID</span>}
+                        : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-bold">PAID</span>}
                     </td>
                     <td className="px-5 py-4 font-display font-bold flex flex-col items-start justify-center gap-1">
                       {isSpecialPkg(it) ? (
@@ -894,7 +889,7 @@ export default function DailyCollection() {
                         </div>
                       ) : depositMode(it) === "remaining" ? (
                         <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-bold">REMAINING AMOUNT PAID - {inr(it.deposit_second_amount)}</span>
+                          <span className="inline-flex items-center gap-1.5 w-max px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-bold">REMAINING AMOUNT PAID - {inr(it.deposit_second_amount)}</span>
                           {txnChip(it.deposit_transaction_id, it.deposit_main_manual)}
                           <span className="text-red-600 font-bold text-xs">Total amount - {inr(it.deposit)}</span>
                         </div>
@@ -906,15 +901,15 @@ export default function DailyCollection() {
                       ) : (
                         <div className="flex flex-col gap-1 mt-1 mb-1">
                           {it.deposit > 0 && it.deposit_status === "paid" && !depositRowIds.has(it.id) ? (
-                            <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-slate-50 text-slate-500 text-[10px] font-bold tracking-wide border border-slate-200 shadow-sm">
+                            <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-[10px] font-bold tracking-wide border border-green-200 shadow-sm">
                               <Check className="w-3 h-3" /> ALREADY PAID
                             </div>
                           ) : (
-                            <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-red-50 text-red-600 text-[10px] font-bold tracking-wide border border-red-200 shadow-sm">
+                            <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-[10px] font-bold tracking-wide border border-green-200 shadow-sm">
                               <Check className="w-3 h-3" /> PAID
                             </div>
                           )}
-                          <span className="text-red-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
+                          <span className="text-green-600 font-bold">{inr(it.deposit_paid || it.deposit || 0)}</span>
                           {it.deposit_transaction_id && depositRowIds.has(it.id) && txnChip(it.deposit_transaction_id, it.deposit_main_manual)}
                         </div>
                       )}
@@ -926,7 +921,7 @@ export default function DailyCollection() {
                             <img src={imgUrl(it.collection.screenshot_url)} alt="Trip screenshot" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
                           </a>
                           <span className="text-[11px] text-mv-muted">Collected {inr(it.collection.total_collected)}</span>
-                          <span className="text-[11px] font-bold text-red-600">Paid {inr(it.collection.pay_amount)}</span>
+                          <span className="text-[11px] font-bold text-green-600">Paid {inr(it.collection.pay_amount)}</span>
                         </div>
                       ) : (
                         <span className="text-slate-400 font-medium">—</span>
