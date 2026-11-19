@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+// import AttendanceSettings from "../components/AttendanceSettings";
 
 const ROLES = ["admin", "city_manager"];
 
@@ -56,6 +57,11 @@ export default function Settings() {
         <TabsList className="bg-mv-surface border border-mv-border mb-6">
           <TabsTrigger value="team" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">Team</TabsTrigger>
           <TabsTrigger value="pkg-password" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">Package Password</TabsTrigger>
+          {/* Attendance tab (no longer used)
+          {(user?.role === "admin" || user?.role === "company_admin") && (
+            <TabsTrigger value="attendance" className="data-[state=active]:bg-red-600 data-[state=active]:text-white">Attendance</TabsTrigger>
+          )}
+          */}
         </TabsList>
 
         <TabsContent value="team">
@@ -155,6 +161,14 @@ export default function Settings() {
         <TabsContent value="pkg-password">
           <PackagePasswordTab />
         </TabsContent>
+
+        {/* Attendance tab content (no longer used)
+        {(user?.role === "admin" || user?.role === "company_admin") && (
+          <TabsContent value="attendance">
+            <AttendanceSettings />
+          </TabsContent>
+        )}
+        */}
       </Tabs>
 
       <UserDialog open={showForm} setOpen={setShowForm} editUser={editingUser} onDone={() => { setShowForm(false); load(); }} />

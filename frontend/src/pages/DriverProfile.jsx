@@ -314,7 +314,7 @@ export default function DriverProfile() {
             ) : (d.week_off_requests || []).map((r) => (
               <div key={r.id} className="mt-3 pb-3 border-b border-mv-border last:border-0 last:pb-0">
                 <div className="text-sm font-medium">{(r.dates || []).join(", ")}</div>
-                <div className={`text-xs mt-0.5 capitalize ${r.status === "approved" ? "text-red-600" : r.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>{r.status}</div>
+                <div className={`text-xs mt-0.5 capitalize ${r.status === "approved" ? "text-green-600" : r.status === "rejected" ? "text-red-500" : "text-amber-600"}`}>{r.status}</div>
                 {r.status === "pending" && (
                   <div className="flex gap-2 mt-2">
                     <button
@@ -334,6 +334,23 @@ export default function DriverProfile() {
               </div>
             ))}
           </div>
+
+          {d.account_deletion_request && (
+            <div className="mv-card p-4" data-testid="account-deletion-request-card">
+              <div className="mv-label">Requested Account Deletion</div>
+              <div className="text-sm font-medium mt-1">
+                Requested on {fmtDate(d.account_deletion_request.requested_at)}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={async () => {
+                    try { await api.post(`/admin/drivers/${d.id}/account-deletion/reject`); toast.success("Account deletion request rejected"); load(); }
+                    catch (e) { toast.error(e.response?.data?.detail || "Failed to reject"); }
+                  }}
+                  className="px-3 py-1.5 border border-red-200 text-red-600 hover:bg-red-50 rounded-lg text-xs font-bold transition-colors">Reject</button>
+              </div>
+            </div>
+          )}
           </div>
         </TabsContent>
 

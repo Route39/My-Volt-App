@@ -10,7 +10,7 @@ const STATUS_LABEL = { pending: "Pending approval", approved: "Approved", reject
 
 const STATUS_CLS = {
   pending: "bg-amber-50 text-amber-600 border-amber-200",
-  approved: "bg-red-50 text-red-600 border-red-200",
+  approved: "bg-green-50 text-green-700 border-green-200",
   rejected: "bg-red-50 text-red-600 border-red-200",
 };
 
@@ -71,7 +71,7 @@ export default function DriverWeekOff() {
   };
 
   const apply = async () => {
-    if (!sel.length) return setMsg({ type: "error", text: "Select at least one date." });
+    if (!sel.length && !editId) return setMsg({ type: "error", text: "Select at least one date." });
     setBusy(true);
     setMsg({ type: "", text: "" });
     try {
@@ -79,7 +79,7 @@ export default function DriverWeekOff() {
       if (editId) {
         await dapi.put(`/driver/week-off/${editId}`, { dates });
         setEditId(null);
-        setMsg({ type: "ok", text: "Week-off request updated. Waiting for admin approval." });
+        setMsg({ type: "ok", text: dates.length ? "Week-off request updated. Waiting for admin approval." : "Week-off request cancelled." });
       } else {
         await dapi.post("/driver/week-off", { dates });
         setMsg({ type: "ok", text: "Week-off request sent. Waiting for admin approval." });
@@ -127,7 +127,7 @@ export default function DriverWeekOff() {
         <div className={`text-xs font-semibold mt-3 text-center ${msg.type === "ok" ? "text-red-600" : "text-red-600"}`}>{msg.text}</div>
       )}
 
-      <button onClick={apply} disabled={busy || !sel.length || info.rent_pending} data-testid="apply-week-off-btn"
+      <button onClick={apply} disabled={busy || (!sel.length && !editId) || info.rent_pending} data-testid="apply-week-off-btn"
         className="mt-4 w-full h-12 rounded-2xl bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold transition-colors flex items-center justify-center gap-2">
         {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : editId ? "Update Week-off" : "Apply Week-off"}
       </button>

@@ -6,6 +6,7 @@ import dapi from "../../lib/driverApi";
 import PayModal from "./PayModal";
 import BlockedScreen from "./BlockedScreen";
 import CatchupScreen from "./CatchupScreen";
+import DriverAttendance from "./DriverAttendance";
 import { useNavigate } from "react-router-dom";
 import { useNativeCamera } from "../../hooks/useNativeCamera";
 
@@ -486,6 +487,9 @@ export default function DriverHome() {
           </div>
         </div>
       )}
+
+      {/* Attendance: check-in / check-out */}
+      <DriverAttendance />
 
       {/* Green Hero Card */}
       <div className="rounded-[1.5rem] bg-gradient-to-br from-red-700 to-red-950 text-white p-6 shadow-xl relative overflow-hidden">

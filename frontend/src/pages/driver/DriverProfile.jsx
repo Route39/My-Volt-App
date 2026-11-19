@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   User, Bike, Package, Wallet, ShieldCheck, LogOut, Phone, MapPin, Camera,
   Loader2, X, ChevronRight, Copy, Check, CheckCircle2, AlertCircle, Calendar,
-  Zap, Gauge, LifeBuoy, FileText, Sparkles, ExternalLink, ShieldAlert
+  Zap, Gauge, LifeBuoy, FileText, Sparkles, ExternalLink, ShieldAlert, Trash2
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -67,13 +67,34 @@ const getPackageBadge = (packageName = "") => {
 };
 
 export default function DriverProfile() {
-  const { data, logout } = useDriver();
+  const { data, logout, refresh } = useDriver();
   const nav = useNavigate();
   const [copiedCode, setCopiedCode] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteSent, setShowDeleteSent] = useState(false);
+  const [deleteSending, setDeleteSending] = useState(false);
 
   if (!data) return null;
   const { driver, rental, account, deposit } = data;
+
+  // Pending "Delete Account" request (comes from /driver/me). While it exists the button stays disabled;
+  // when the admin rejects it the value disappears and the button becomes active again.
+  const deletionRequest = driver.account_deletion_request || null;
+
+  const sendDeletionRequest = async () => {
+    setDeleteSending(true);
+    try {
+      await dapi.post("/driver/account-deletion-request");
+      setShowDeleteConfirm(false);
+      setShowDeleteSent(true);
+      await refresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Could not send the request. Please try again.");
+    } finally {
+      setDeleteSending(false);
+    }
+  };
 
   const doLogout = async () => {
     await logout();
@@ -397,6 +418,79 @@ export default function DriverProfile() {
 
       {/* ─── ODOMETER IMAGE UPLOADS ────────────────────────────────────── */}
       <OdometerImageUpload />
+
+      {/* ─── DELETE ACCOUNT BUTTON ─────────────────────────────────────── */}
+      <button
+        type="button"
+        onClick={() => setShowDeleteConfirm(true)}
+        disabled={!!deletionRequest}
+        data-testid="driver-delete-account-btn"
+        className="w-full h-12 rounded-2xl border border-red-200 bg-red-50/50 hover:bg-red-50 text-red-600 font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-50/50"
+      >
+        <Trash2 className="w-4 h-4" /> Delete Account
+      </button>
+      {deletionRequest && (
+        <p className="text-[11px] text-center text-slate-400 -mt-2">
+          Account deletion requested{deletionRequest.requested_at ? ` on ${fmtDate(deletionRequest.requested_at)}` : ""}. Waiting for your employer.
+        </p>
+      )}
+
+      {/* Delete Account - confirmation popup */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-xs rounded-3xl bg-white p-6 shadow-2xl space-y-4 border border-slate-100 text-center">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">Delete Account?</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                Account deletion request will be sent to the employer.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleteSending}
+                className="h-11 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={sendDeletionRequest}
+                disabled={deleteSending}
+                className="h-11 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm shadow-sm shadow-red-200 flex items-center justify-center disabled:opacity-60"
+              >
+                {deleteSending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account - request sent popup */}
+      {showDeleteSent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative w-full max-w-xs rounded-3xl bg-white p-6 shadow-2xl space-y-3 border border-slate-100 text-center">
+            <button
+              type="button"
+              onClick={() => setShowDeleteSent(false)}
+              aria-label="Close"
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-bold text-slate-900">
+              Account deletion request has been sent to the employer.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ─── LOGOUT BUTTON ──────────────────────────────────────────────── */}
       <button

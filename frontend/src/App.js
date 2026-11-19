@@ -32,6 +32,7 @@ import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import Referrals from "@/pages/Referrals";
 import TeamDocuments from "@/pages/TeamDocuments";
 import PendingPayments from "@/pages/PendingPayments";
+import Attendance from "@/pages/Attendance";
 
 const FLEET_PATHS = ["/fleet", "/drivers", "/rentals", "/service-requests", "/vehicle-service", "/locations", "/incidents"];
 
@@ -88,6 +89,7 @@ function Shell() {
       <Route path="/rentals/new" element={<RentalCreate />} />
       <Route path="/rentals/:id" element={<RentalProfile />} />
       <Route path="/daily-collection" element={<DailyCollection />} />
+      <Route path="/attendance" element={<Attendance />} />
       <Route path="/service-requests" element={<ServiceRequests />} />
       <Route path="/vehicle-service" element={<VehicleService />} />
       <Route path="/incidents" element={<Incidents />} />

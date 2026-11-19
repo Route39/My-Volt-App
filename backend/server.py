@@ -997,6 +997,7 @@ async def get_driver(did: str, request: Request):
         {"id": str(r["_id"]), "dates": r.get("dates", []), "status": r.get("status", "pending")}
         for r in await db.week_off_requests.find({"driver_id": did, "month": cur_month}).sort("created_at", -1).to_list(None)
     ]
+    out["account_deletion_request"] = d.get("account_deletion_request")
     
     return out
 
@@ -2414,6 +2415,12 @@ async def driver_edit_week_off(rid: str, request: Request, body: dict):
     req = await db.week_off_requests.find_one({"_id": oid(rid), "driver_id": did})
     if not req or req.get("status") != "pending":
         raise HTTPException(status_code=400, detail="Only a pending request can be edited")
+    # No dates left = the driver cancels the request before the admin has decided on it
+    if not (body.get("dates") or []):
+        res = await db.week_off_requests.delete_one({"_id": req["_id"], "status": "pending"})
+        if not res.deleted_count:
+            raise HTTPException(status_code=400, detail="This request was just decided by the admin and can no longer be cancelled")
+        return {"ok": True, "cancelled": True}
     if await _rent_pending_before_today(user.get("organization_id"), did):
         raise HTTPException(status_code=400, detail="Please pay your pending rent (up to yesterday) before applying for a week-off")
     picked = sorted({str(x)[:10] for x in (body.get("dates") or [])})
@@ -2502,6 +2509,20 @@ async def admin_reject_week_off(did: str, rid: str, request: Request):
         raise HTTPException(status_code=400, detail="This request is no longer pending")
     await db.week_off_requests.update_one({"_id": req["_id"]}, {"$set": {"status": "rejected", "decided_at": now_iso()}})
     await log_audit(user, "driver_week_off_rejected", "driver", did, f"Week-off rejected: {', '.join(req.get('dates', []))}")
+    return {"ok": True}
+
+
+@api.post("/admin/drivers/{did}/account-deletion/reject")
+async def admin_reject_account_deletion(did: str, request: Request):
+    user = await get_user(request)
+    require_role(user, ["admin", "company_admin", "city_manager"])
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(did)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    if not drv.get("account_deletion_request"):
+        raise HTTPException(status_code=400, detail="There is no pending account deletion request")
+    await db.drivers.update_one({"_id": oid(did)}, {"$unset": {"account_deletion_request": ""}})
+    await log_audit(user, "driver_account_deletion_rejected", "driver", did, "Account deletion request rejected")
     return {"ok": True}
 
 
@@ -5443,6 +5464,8 @@ async def _driver_payload(user):
     }
     # Full Time / Part Time (saved on the driver record) so the app can show "/Part-time" beside the package name
     out["driver"]["employment_type"] = ((await db.drivers.find_one({"_id": ObjectId(did)}, {"employment_type": 1})) or {}).get("employment_type")
+    # Pending "Delete Account" request (set when the driver taps the button, cleared when the admin rejects it)
+    out["driver"]["account_deletion_request"] = ((await db.drivers.find_one({"_id": ObjectId(did)}, {"account_deletion_request": 1})) or {}).get("account_deletion_request")
     if rental:
         acct = await _rental_account(rental)
         
@@ -6221,6 +6244,20 @@ async def apply_leave(request: Request, body: dict):
             )
             
     return {"ok": True, "message": "Leave applied"}
+
+@api.post("/driver/account-deletion-request")
+async def driver_request_account_deletion(request: Request):
+    """Driver taps 'Delete Account' in the app: the request goes to the employer (admin), who can reject it."""
+    user = await get_user(request)
+    require_driver(user)
+    did = user["id"]
+    drv = await db.drivers.find_one({"_id": oid(did)}, {"account_deletion_request": 1, "name": 1, "city": 1}) or {}
+    if drv.get("account_deletion_request"):
+        return {"ok": True, "already_requested": True}
+    await db.drivers.update_one({"_id": oid(did)}, {"$set": {"account_deletion_request": {"requested_at": now_iso()}}})
+    await add_notification(user.get("organization_id"), "blue", "Account deletion requested",
+                           f"{drv.get('name') or 'A driver'} requested account deletion", link=f"/drivers/{did}", city=drv.get("city"))
+    return {"ok": True}
 
 @api.post("/driver/kyc/ack-approved")
 async def ack_kyc_approved(request: Request):
@@ -8155,6 +8192,546 @@ async def pending_payments_signature(request: Request):
     raw = json.dumps([acc, dep, rent, pkg, _today_ist().isoformat()], default=str, sort_keys=True)
     return {"sig": hashlib.md5(raw.encode()).hexdigest()}
 
+# ─── DRIVER ATTENDANCE (check-in / check-out) ─────────────────────────────────
+# Same idea as the mySpace app. The driver punches in from the Home page of the driver app with a
+# selfie + GPS. The check-in is accepted only when the phone is inside the radius of an office / hub
+# that the admin saved in Settings -> Attendance. Everything (locations, records and the selfie
+# images) is stored in MongoDB, so it keeps working on the live server.
+import math
+from urllib.parse import urlparse
+from pymongo.errors import DuplicateKeyError
+
+ATT_MAX_GPS_ACCURACY_M = 1000      # reject only very weak GPS fixes
+ATT_GPS_SLACK_M = 100              # GPS error margin allowed on top of the radius
+ATT_DEFAULT_RADIUS_M = 40          # entrance-door radius
+ATT_OWN_CITY_ONLY = True          # True -> a driver can check in only at offices/hubs of his own city
+ATT_MAX_SELFIE_BYTES = 8 * 1024 * 1024
+ATT_ENFORCE_GEOFENCE = False       # False -> drivers can check in from anywhere (location is still saved)
+ATT_GOOGLE_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "")   # optional; falls back to OpenStreetMap
+ATT_GEO_HEADERS = {"User-Agent": "myvolt-attendance/1.0 (contact: support@route39.in)"}
+
+
+class AttGeoPoint(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    radius_m: Optional[int] = ATT_DEFAULT_RADIUS_M
+
+
+class AttCityIn(BaseModel):
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    radius_m: Optional[int] = None
+    branches: Optional[List[AttGeoPoint]] = None
+    hubs: Optional[List[AttGeoPoint]] = None
+
+
+class AttGeofenceIn(BaseModel):
+    geofence_enabled: bool
+
+
+class AttAddressIn(BaseModel):
+    address: str
+
+
+class AttLatLngIn(BaseModel):
+    lat: float
+    lng: float
+
+
+class AttQueryIn(BaseModel):
+    query: str
+
+
+class AttPlaceIn(BaseModel):
+    place_id: str
+
+
+class AttCoordsIn(BaseModel):
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    accuracy: Optional[float] = None
+
+
+def _att_canon_city(c):
+    """'tirupur' / 'TIRUPPUR ' -> 'Tiruppur' (one spelling, matches CITIES)."""
+    n = (c or "").strip().lower().replace("tirupur", "tiruppur")
+    for x in CITIES:
+        if x.lower() == n:
+            return x
+    return (c or "").strip()
+
+
+def _att_distance_m(lat1, lng1, lat2, lng2):
+    R = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def _att_now():
+    return datetime.now(IST)
+
+
+def _att_clean_point(p, default_name):
+    return {
+        "name": (p.name or default_name).strip() or default_name,
+        "address": (p.address or "").strip(),
+        "lat": p.lat, "lng": p.lng,
+        "radius_m": p.radius_m or ATT_DEFAULT_RADIUS_M,
+    }
+
+
+async def _att_http_get(url, params=None, timeout=10, headers=None):
+    def _go():
+        return requests.get(url, params=params, timeout=timeout, headers=headers or ATT_GEO_HEADERS, allow_redirects=True)
+    return await asyncio.to_thread(_go)
+
+
+async def _att_addr_from_latlng(lat, lng):
+    """Best-effort street address for a GPS point (never blocks a check-in)."""
+    try:
+        if ATT_GOOGLE_KEY:
+            d = (await _att_http_get("https://maps.googleapis.com/maps/api/geocode/json",
+                                     {"latlng": f"{lat},{lng}", "key": ATT_GOOGLE_KEY}, timeout=5)).json()
+            if d.get("status") == "OK" and d.get("results"):
+                return d["results"][0]["formatted_address"]
+        d = (await _att_http_get("https://nominatim.openstreetmap.org/reverse",
+                                 {"lat": lat, "lon": lng, "format": "jsonv2"}, timeout=5)).json()
+        return d.get("display_name")
+    except Exception:
+        return None
+
+
+# ---------- admin: settings + office / hub locations ----------
+@api.get("/attendance/settings")
+async def att_get_settings(request: Request):
+    user = await get_user(request)
+    require_role(user, [])            # admin only
+    org = user.get("organization_id")
+    st = await db.attendance_settings.find_one({"organization_id": org}) or {}
+    docs = await db.attendance_locations.find({"organization_id": org}).to_list(50)
+    by_city = {d.get("city"): d for d in docs}
+    locations = []
+    for c in CITIES:
+        d = by_city.get(c) or {}
+        locations.append({
+            "city": c, "address": d.get("address", ""), "lat": d.get("lat"), "lng": d.get("lng"),
+            "radius_m": d.get("radius_m") or ATT_DEFAULT_RADIUS_M,
+            "branches": d.get("branches") or [], "hubs": d.get("hubs") or [],
+        })
+    return {"geofence_enabled": st.get("geofence_enabled", True), "locations": locations}
+
+
+@api.put("/attendance/settings")
+async def att_set_geofence(body: AttGeofenceIn, request: Request):
+    user = await get_user(request)
+    require_role(user, [])
+    await db.attendance_settings.update_one(
+        {"organization_id": user.get("organization_id")},
+        {"$set": {"geofence_enabled": body.geofence_enabled, "updated_at": now_iso()}}, upsert=True)
+    return {"geofence_enabled": body.geofence_enabled}
+
+
+@api.put("/attendance/locations/{city}")
+async def att_set_city_locations(city: str, body: AttCityIn, request: Request):
+    user = await get_user(request)
+    require_role(user, [])
+    c = _att_canon_city(city)
+    if c not in CITIES:
+        raise HTTPException(status_code=400, detail="Unknown city")
+    upd = {
+        "address": (body.address or "").strip(), "lat": body.lat, "lng": body.lng,
+        "radius_m": body.radius_m or ATT_DEFAULT_RADIUS_M,
+        "branches": [_att_clean_point(b, "Office") for b in (body.branches or [])],
+        "hubs": [_att_clean_point(h, "Hub") for h in (body.hubs or [])],
+        "updated_at": now_iso(),
+    }
+    await db.attendance_locations.update_one(
+        {"organization_id": user.get("organization_id"), "city": c}, {"$set": upd}, upsert=True)
+    await log_audit(user, "update", "attendance_locations", c, f"Attendance locations saved for {c}")
+    return {"ok": True, "city": c, **upd}
+
+
+# ---------- admin: Google Maps / OpenStreetMap helpers for the address boxes ----------
+@api.post("/attendance/suggest")
+async def att_suggest(body: AttQueryIn, request: Request):
+    user = await get_user(request)
+    require_role(user, [])
+    q = (body.query or "").strip()
+    if len(q) < 3:
+        return []
+    try:
+        if ATT_GOOGLE_KEY:
+            data = (await _att_http_get("https://maps.googleapis.com/maps/api/place/autocomplete/json",
+                                        {"input": q, "key": ATT_GOOGLE_KEY, "components": "country:in"}, timeout=8)).json()
+            if data.get("status") not in ("OK", "ZERO_RESULTS"):
+                raise HTTPException(status_code=502, detail=data.get("error_message") or f"Google Maps error: {data.get('status')}")
+            return [{"description": p["description"], "place_id": p["place_id"], "lat": None, "lng": None}
+                    for p in data.get("predictions", [])[:6]]
+        r = await _att_http_get("https://nominatim.openstreetmap.org/search",
+                                {"q": q, "format": "jsonv2", "limit": 6, "countrycodes": "in"}, timeout=8)
+        r.raise_for_status()
+        return [{"description": h.get("display_name", ""), "place_id": None,
+                 "lat": float(h["lat"]), "lng": float(h["lon"])} for h in r.json()]
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not reach the map service. Please try again.")
+
+
+@api.post("/attendance/place-details")
+async def att_place_details(body: AttPlaceIn, request: Request):
+    user = await get_user(request)
+    require_role(user, [])
+    if not ATT_GOOGLE_KEY:
+        raise HTTPException(status_code=400, detail="Google Maps key is not configured")
+    try:
+        data = (await _att_http_get("https://maps.googleapis.com/maps/api/place/details/json",
+                                    {"place_id": body.place_id, "key": ATT_GOOGLE_KEY,
+                                     "fields": "geometry,formatted_address"}, timeout=8)).json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not reach the map service. Please try again.")
+    res = data.get("result") or {}
+    loc = (res.get("geometry") or {}).get("location")
+    if data.get("status") != "OK" or not loc:
+        raise HTTPException(status_code=404, detail=data.get("error_message") or "Place not found")
+    return {"lat": loc["lat"], "lng": loc["lng"], "address": res.get("formatted_address", "")}
+
+
+@api.post("/attendance/geocode")
+async def att_geocode(body: AttAddressIn, request: Request):
+    user = await get_user(request)
+    require_role(user, [])
+    addr = (body.address or "").strip()
+    if len(addr) < 3:
+        raise HTTPException(status_code=400, detail="Enter the office address")
+
+    # pasted coordinates, e.g. "11.0233, 77.0113" (copied from Google Maps): used exactly as given
+    m = re.match(r"^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$", addr)
+    if m:
+        lat, lng = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            return {"lat": lat, "lng": lng, "display_name": "", "approximate": False}
+
+    # Google Maps link (full or short), e.g. https://maps.app.goo.gl/xxxx
+    if addr.lower().startswith("http"):
+        host = (urlparse(addr).hostname or "").lower()
+        if not (host.endswith("google.com") or host.endswith("goo.gl") or host.endswith("g.co")):
+            raise HTTPException(status_code=400, detail="Only Google Maps links are supported")
+        try:
+            resp = await _att_http_get(addr, headers={"User-Agent": "Mozilla/5.0"})
+            final = str(resp.url)
+        except Exception:
+            raise HTTPException(status_code=502, detail="Could not open that link. Please try again.")
+        for pat in (r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)", r"@(-?\d+\.\d+),(-?\d+\.\d+)",
+                    r"[?&](?:q|ll|query)=(-?\d+\.\d+),(-?\d+\.\d+)"):
+            mm = re.search(pat, final)
+            if mm:
+                return {"lat": float(mm.group(1)), "lng": float(mm.group(2)), "display_name": "", "approximate": False}
+        raise HTTPException(status_code=404, detail="No location found in that link. Open the place in Google Maps and copy the link again.")
+
+    # 1. Google Geocoding API if a key is configured (most accurate)
+    if ATT_GOOGLE_KEY:
+        try:
+            data = (await _att_http_get("https://maps.googleapis.com/maps/api/geocode/json",
+                                        {"address": addr, "key": ATT_GOOGLE_KEY, "components": "country:in"})).json()
+            if data.get("status") == "OK" and data.get("results"):
+                res = data["results"][0]
+                loc = res["geometry"]["location"]
+                return {"lat": float(loc["lat"]), "lng": float(loc["lng"]),
+                        "display_name": res.get("formatted_address", ""), "approximate": False}
+        except Exception as e:
+            logger.warning(f"Attendance google geocode: {e}")
+
+    # 2. Fallback: OpenStreetMap Nominatim (retries with a shorter address if nothing is found)
+    parts = [p.strip() for p in addr.replace("\n", ",").split(",") if p.strip()]
+    tries = [", ".join(parts[i:]) for i in range(0, max(1, len(parts) - 1))][:4]
+    try:
+        for i, q in enumerate(tries):
+            if i:
+                await asyncio.sleep(1.1)
+            r = await _att_http_get("https://nominatim.openstreetmap.org/search", {"q": q, "format": "jsonv2", "limit": 1})
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list) and data:
+                return {"lat": float(data[0]["lat"]), "lng": float(data[0]["lon"]),
+                        "display_name": data[0].get("display_name", ""), "approximate": i > 0}
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not reach the map service. Please try again.")
+    raise HTTPException(status_code=404, detail="Address not found. Enter area, city, or paste coordinates like 11.0233, 77.0113.")
+
+
+@api.post("/attendance/reverse")
+async def att_reverse(body: AttLatLngIn, request: Request):
+    user = await get_user(request)
+    require_role(user, [])
+    addr = await _att_addr_from_latlng(body.lat, body.lng)
+    if not addr:
+        raise HTTPException(status_code=404, detail="No address found for this location")
+    return {"address": addr}
+
+
+# ---------- driver: today / check-in / check-out ----------
+@api.get("/driver/attendance/today")
+async def driver_att_today(request: Request):
+    user = await get_user(request)
+    require_driver(user)
+    st = await db.attendance_settings.find_one({"organization_id": user.get("organization_id")}) or {}
+    rec = await db.driver_attendance.find_one({"driver_id": user["id"], "date": _today_ist().isoformat()})
+    return {"geofence_enabled": st.get("geofence_enabled", True), "record": ser(rec) if rec else None}
+
+
+@api.post("/driver/attendance/checkin")
+async def driver_att_checkin(
+    request: Request,
+    selfie: UploadFile = File(...),
+    lat: Optional[float] = Form(None),
+    lng: Optional[float] = Form(None),
+    accuracy: Optional[float] = Form(None),
+):
+    user = await get_user(request)
+    require_driver(user)
+    org = user.get("organization_id")
+    today = _today_ist().isoformat()
+    if await db.driver_attendance.find_one({"driver_id": user["id"], "date": today}):
+        raise HTTPException(status_code=400, detail="Already checked in")
+
+    data = await selfie.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Selfie is required to check in")
+    if len(data) > ATT_MAX_SELFIE_BYTES:
+        raise HTTPException(status_code=400, detail="Photo is too large. Please take the selfie again.")
+
+    # ---- office / hub geofence ----
+    st = await db.attendance_settings.find_one({"organization_id": org}) or {}
+    geo = {}
+    if st.get("geofence_enabled", True) and ATT_ENFORCE_GEOFENCE:
+        my_city = _att_canon_city(user.get("city"))
+        targets = []
+        for loc in await db.attendance_locations.find({"organization_id": org}).to_list(50):
+            c = loc.get("city")
+            if ATT_OWN_CITY_ONLY and my_city and _att_canon_city(c) != my_city:
+                continue
+            rad = loc.get("radius_m") or ATT_DEFAULT_RADIUS_M
+            if loc.get("lat") is not None and loc.get("lng") is not None:
+                targets.append({"name": f"{c} - Main Office", "kind": "office", "lat": loc["lat"], "lng": loc["lng"], "radius": rad})
+            for b in loc.get("branches") or []:
+                if b.get("lat") is not None and b.get("lng") is not None:
+                    targets.append({"name": f"{c} - {b.get('name') or 'Office'}", "kind": "office",
+                                    "lat": b["lat"], "lng": b["lng"], "radius": b.get("radius_m") or rad})
+            for h in loc.get("hubs") or []:
+                if h.get("lat") is not None and h.get("lng") is not None:
+                    targets.append({"name": f"{c} - {h.get('name') or 'Hub'}", "kind": "hub",
+                                    "lat": h["lat"], "lng": h["lng"], "radius": h.get("radius_m") or rad})
+        if not targets:
+            raise HTTPException(status_code=400, detail=(f"No office / hub location has been set for {my_city} yet. Please contact your admin." if (ATT_OWN_CITY_ONLY and my_city) else "No office / hub location has been set yet. Please contact your admin."))
+        if lat is None or lng is None:
+            raise HTTPException(status_code=400, detail="Location not received. Allow location access on your phone and try again.")
+        if accuracy is not None and accuracy > ATT_MAX_GPS_ACCURACY_M:
+            raise HTTPException(status_code=400, detail="Your location is not accurate enough. Turn on GPS / Precise Location and try again.")
+        measured = [(_att_distance_m(lat, lng, t["lat"], t["lng"]), t) for t in targets]
+        inside = [m for m in measured if m[0] <= m[1]["radius"] + min(accuracy or 0, ATT_GPS_SLACK_M)]
+        if not inside:
+            d, t = min(measured, key=lambda m: m[0])
+            dist = f"{round(d)}m" if d < 1000 else f"{d / 1000.0:.1f}km"
+            raise HTTPException(status_code=403,
+                                detail=f"You are {dist} away from {t['name']}. Please come within {t['radius']}m to check in.")
+        d, hit = min(inside, key=lambda m: m[0])
+        geo = {"check_in_distance_m": round(d), "check_in_office": hit["name"], "check_in_place": hit["kind"]}
+    if lat is not None and lng is not None:
+        geo.update(check_in_lat=lat, check_in_lng=lng, check_in_accuracy=accuracy,
+                   check_in_address=await _att_addr_from_latlng(lat, lng))
+
+    # GPS is mandatory: admin / city manager must see where the driver checked in
+    if lat is None or lng is None:
+        raise HTTPException(status_code=400, detail="Location not received. Allow location access on your phone and try again.")
+
+    # the selfie is stored inside MongoDB (same as the KYC documents) and served by a random token
+    token = uuid.uuid4().hex
+    ctype = selfie.content_type if (selfie.content_type or "").startswith("image/") else "image/jpeg"
+    await db.attendance_selfies.insert_one({
+        "organization_id": org, "driver_id": user["id"], "token": token, "filename": selfie.filename,
+        "content_type": ctype, "data": Binary(data), "created_at": now_iso(),
+    })
+    doc = {
+        "organization_id": org, "driver_id": user["id"], "driver_name": user.get("name"),
+        "driver_code": user.get("driver_code"), "driver_phone": user.get("phone"),
+        "city": _att_canon_city(user.get("city")), "date": today,
+        "check_in": _att_now().isoformat(), "check_out": None, "hours": 0, "status": "Present",
+        "selfie_url": f"/api/attendance-selfies/{token}", **geo, "created_at": now_iso(),
+    }
+    try:
+        res = await db.driver_attendance.insert_one(doc)
+    except DuplicateKeyError:
+        await db.attendance_selfies.delete_one({"token": token})
+        raise HTTPException(status_code=400, detail="Already checked in")
+    doc["_id"] = res.inserted_id
+    return ser(doc)
+
+
+@api.post("/driver/attendance/checkout")
+async def driver_att_checkout(request: Request, body: Optional[AttCoordsIn] = None):
+    user = await get_user(request)
+    require_driver(user)
+    rec = await db.driver_attendance.find_one({"driver_id": user["id"], "date": _today_ist().isoformat()})
+    if not rec or not rec.get("check_in"):
+        raise HTTPException(status_code=400, detail="You have not checked in today")
+    if rec.get("check_out"):
+        raise HTTPException(status_code=400, detail="Already checked out")
+    now = _att_now()
+    ci = datetime.fromisoformat(rec["check_in"])
+    if (now - ci).total_seconds() < 60:
+        raise HTTPException(status_code=400, detail="You just checked in. Please wait a minute before checking out.")
+    upd = {"check_out": now.isoformat(), "hours": round((now - ci).total_seconds() / 3600.0, 2)}
+    if body and body.lat is not None and body.lng is not None:
+        upd.update(check_out_lat=body.lat, check_out_lng=body.lng,
+                   check_out_address=await _att_addr_from_latlng(body.lat, body.lng))
+    await db.driver_attendance.update_one({"_id": rec["_id"]}, {"$set": upd})
+    return ser(await db.driver_attendance.find_one({"_id": rec["_id"]}))
+
+
+# Serves a check-in selfie stored in MongoDB. No login on purpose: the admin panel shows these in <img> tags
+# and the 32-character random token in the URL cannot be guessed (same as the KYC / screenshot files).
+@api.get("/attendance-selfies/{token}")
+async def serve_attendance_selfie(token: str):
+    doc = await db.attendance_selfies.find_one({"token": token}, {"data": 1, "content_type": 1})
+    if not doc or not doc.get("data"):
+        raise HTTPException(status_code=404, detail="File not found")
+    return Response(
+        content=bytes(doc["data"]),
+        media_type=doc.get("content_type") or "image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+# ---------- admin / city manager: Attendance page ----------
+@api.get("/attendance/records")
+async def att_records(request: Request, date_from: Optional[str] = None, date_to: Optional[str] = None):
+    user = await get_user(request)
+    require_role(user, ["city_manager"])
+    today = _today_ist().isoformat()
+    d1 = date_from if (date_from and re.match(r"^\d{4}-\d{2}-\d{2}$", date_from)) else today
+    d2 = date_to if (date_to and re.match(r"^\d{4}-\d{2}-\d{2}$", date_to)) else d1
+    if d2 < d1:
+        d1, d2 = d2, d1
+    # org_filter also locks a city manager to his own city
+    # every driver gets one row per day (max 31 days), so Absent / Leave / Week Off can be shown and marked
+    s1 = datetime.strptime(d1, "%Y-%m-%d").date()
+    s2 = datetime.strptime(d2, "%Y-%m-%d").date()
+    if (s2 - s1).days > ATT_MAX_RANGE_DAYS - 1:
+        s1 = s2 - timedelta(days=ATT_MAX_RANGE_DAYS - 1)
+        d1 = s1.isoformat()
+    f = org_filter(user, {"date": {"$gte": d1, "$lte": d2}})
+    docs = await db.driver_attendance.find(f).to_list(10000)
+    by_key = {(x["driver_id"], x["date"]): x for x in docs}
+    marks = {(m["driver_id"], m["date"]): m.get("status")
+             for m in await db.driver_attendance_marks.find(f).to_list(20000)}
+    drivers = await db.drivers.find(org_filter(user, {})).to_list(5000)
+    today_s = _today_ist().isoformat()
+    rows, used = [], set()
+    day = s1
+    while day <= s2:
+        ds = day.isoformat()
+        for drv in drivers:
+            did = str(drv["_id"])
+            rec = by_key.get((did, ds))
+            if not rec and drv.get("status") == "inactive":
+                continue
+            row = ser(rec) if rec else {
+                "id": f"{did}:{ds}", "driver_id": did, "driver_name": drv.get("name"),
+                "driver_code": drv.get("driver_code"), "driver_phone": drv.get("phone"),
+                "city": _att_canon_city(drv.get("city")), "date": ds,
+                "check_in": None, "check_out": None, "hours": 0}
+            used.add((did, ds))
+            row["status"], row["mark_locked"] = _att_effective_status(
+                ds, today_s, rec, marks.get((did, ds)), set(drv.get("week_off_dates") or []))
+            rows.append(row)
+        day += timedelta(days=1)
+    # records of drivers that no longer exist are not listed
+    rows.sort(key=lambda r: (r["date"], r.get("check_in") or ""), reverse=True)
+    return rows
+
+
+# ---------- auto check-out at midnight (visibility only) ----------
+# First 3 forgotten check-outs in a month: checked out at 12:00 AM, stays Present, actual hours.
+# 4th onwards: checked out at 12:00 AM, marked Half Day, hours fixed at 6.
+ATT_AUTO_FREE_PER_MONTH = 3
+ATT_HALF_DAY_HOURS = 6
+
+
+async def _att_auto_checkout_run():
+    today = _today_ist().isoformat()
+    recs = await db.driver_attendance.find(
+        {"check_in": {"$ne": None}, "check_out": None, "date": {"$lt": today}}).sort("date", 1).to_list(2000)
+    for r in recs:
+        try:
+            ci = datetime.fromisoformat(r["check_in"])
+            day = datetime.strptime(r["date"], "%Y-%m-%d").date()
+            midnight = datetime(day.year, day.month, day.day, tzinfo=IST) + timedelta(days=1)
+            upd = {"hours": round(max(0.0, (midnight - ci).total_seconds() / 3600.0), 2)}
+            upd.update({"check_out": midnight.isoformat(), "auto_checkout": True})
+            await db.driver_attendance.update_one({"_id": r["_id"], "check_out": None}, {"$set": upd})
+        except Exception as e:
+            logger.warning(f"attendance auto check-out failed for {r.get('_id')}: {str(e)[:120]}")
+
+
+async def _att_auto_checkout_loop():
+    while True:
+        try:
+            await _att_auto_checkout_run()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"attendance auto check-out error: {str(e)[:150]}")
+        await asyncio.sleep(60)
+
+
+ATT_MARKS = ["Present", "Late", "Absent", "Leave", "Holiday", "Week Off", "Half Day"]
+ATT_MAX_RANGE_DAYS = 31
+
+
+def _att_effective_status(day, today, rec, mark, week_off_set):
+    """(status, locked). Approved week-off wins, then the admin's mark, then the check-in, else Absent."""
+    if day in week_off_set:
+        return "Week Off", True
+    if mark:
+        return mark, False
+    if rec:
+        return rec.get("status") or "Present", False
+    return ("Absent" if day <= today else ""), False
+
+
+class AttMarkIn(BaseModel):
+    driver_id: str
+    date: str
+    status: str
+
+
+@api.put("/attendance/mark")
+async def att_set_mark(body: AttMarkIn, request: Request):
+    user = await get_user(request)
+    require_role(user, ["city_manager"])
+    if body.status not in ATT_MARKS:
+        raise HTTPException(status_code=400, detail="Invalid attendance status")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", body.date or ""):
+        raise HTTPException(status_code=400, detail="Invalid date")
+    drv = await db.drivers.find_one(org_filter(user, {"_id": oid(body.driver_id)}))
+    if not drv:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    if body.date in set(drv.get("week_off_dates") or []):
+        raise HTTPException(status_code=400, detail="This day is an approved week-off for the driver")
+    await db.driver_attendance_marks.update_one(
+        {"driver_id": body.driver_id, "date": body.date},
+        {"$set": {"organization_id": drv.get("organization_id"), "city": drv.get("city"),
+                  "status": body.status, "marked_by": user.get("id"), "updated_at": now_iso()}},
+        upsert=True)
+    await log_audit(user, "update", "driver_attendance", body.driver_id,
+                    f"Attendance marked {body.status} for {drv.get('name')} on {body.date}")
+    return {"ok": True, "status": body.status}
 
 app.include_router(api)
 
@@ -8234,6 +8811,13 @@ async def startup():
         (db.package_collections, [("organization_id", 1), ("driver_id", 1), ("for_date", 1)], {}),
         (db.week_off_requests, [("driver_id", 1), ("month", 1)], {}),
         (db.users, "organization_id", {}),
+        (db.driver_attendance, [("driver_id", 1), ("date", 1)], {"unique": True}),
+        (db.driver_attendance, [("organization_id", 1), ("date", 1)], {}),
+        (db.attendance_locations, [("organization_id", 1), ("city", 1)], {"unique": True}),
+        (db.attendance_selfies, "token", {}),
+        (db.driver_attendance, [("check_out", 1), ("date", 1)], {}),
+        (db.driver_attendance_marks, [("driver_id", 1), ("date", 1)], {"unique": True}),
+        (db.driver_attendance_marks, [("organization_id", 1), ("date", 1)], {}),
     ]
     for coll, keys, opts in indexes:
         try:
@@ -8257,6 +8841,7 @@ async def startup():
         logger.warning(f"driver_code backfill failed: {e}")
     # await seedlib.seed(db, authlib)  # disabled - do not reseed
     app.state.midnight_rent_task = asyncio.create_task(_midnight_rent_job())
+    app.state.att_autocheckout_task = asyncio.create_task(_att_auto_checkout_loop())
 
 
 @app.on_event("shutdown")
@@ -8264,6 +8849,9 @@ async def shutdown():
     _t = getattr(app.state, "midnight_rent_task", None)
     if _t:
         _t.cancel()
+    _a = getattr(app.state, "att_autocheckout_task", None)
+    if _a:
+        _a.cancel()
     client.close()
 
 # Trim spaces from all JSON inputs and search queries
