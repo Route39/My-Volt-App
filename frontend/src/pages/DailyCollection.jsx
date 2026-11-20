@@ -127,7 +127,7 @@ export default function DailyCollection() {
   const { city: gCity, lockedCity, cities } = useApp();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [city, setCity] = useState(lockedCity ? (lockedCity === true ? gCity : lockedCity) : (gCity === "all" ? "all" : gCity));
+  const [city, setCity] = useState(lockedCity ? (lockedCity === true ? gCity : lockedCity) : (new URLSearchParams(window.location.search).get("city") || gCity));
   
   const [dateFilter, setDateFilter] = useState("today");
   const [fromDate, setFromDate] = useState("");

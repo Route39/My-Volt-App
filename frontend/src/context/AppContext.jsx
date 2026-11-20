@@ -1,5 +1,4 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import api from "../lib/api";
 import { useAuth } from "./AuthContext";
 
 const AppCtx = createContext(null);
@@ -13,15 +12,18 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     if (lockedCity) setCity(lockedCity);
-    else if (user?.city) setCity(user.city);
+    else {
+      let saved = null;
+      try { saved = localStorage.getItem("mv_city"); } catch (e) {}
+      if (saved) setCity(saved);
+      else if (user?.city) setCity(user.city);
+    }
   }, [user, lockedCity]);
 
   const setCityPersist = async (c) => {
     if (lockedCity) c = lockedCity;
     setCity(c);
-    if (user) {
-      try { await api.post("/admin/preferences/city", { city: c }); } catch (e) {}
-    }
+    try { localStorage.setItem("mv_city", c); } catch (e) {}
   };
 
   return (

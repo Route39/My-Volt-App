@@ -80,7 +80,7 @@ export default function Drivers() {
     }
   }, [status, city, q, pkgCat]);
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
-  useEffect(() => setCity(gCity), [gCity]);
+  useEffect(() => { if (gCity !== "all" || !new URLSearchParams(window.location.search).get("city")) setCity(gCity); }, [gCity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canEdit = ["admin", "city_manager"].includes(user?.role);
 
