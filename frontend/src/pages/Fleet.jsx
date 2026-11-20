@@ -90,6 +90,38 @@ export default function Fleet() {
         {canEdit && (
           <div className="flex gap-2">
             <GhostBtn onClick={() => setShowImport(true)}><Upload className="w-4 h-4" /> Import</GhostBtn>
+            <GhostBtn onClick={async () => {
+              try {
+                const all = []; let pg = 1; let tot = 0;
+                do {
+                  const p = { page_size: 60, page: pg };
+                  if (status !== "all") p.status = status;
+                  if (city && city !== "all") p.city = city;
+                  if (dq) p.q = dq;
+                  const { data } = await api.get("/vehicles", { params: p });
+                  all.push(...data.items); tot = data.total; pg += 1;
+                  if (!data.items.length) break;
+                } while (all.length < tot);
+                const rows = [["Vehicle", "Status", "Driver", "City", "VIN", "Rental Ends"],
+                  ...all.map((v) => [`${v.vehicle_number || ""}${v.registration_number ? " - " + v.registration_number : ""}`, v.status || "",
+                    (v.current_driver_name && v.status !== "available") ? v.current_driver_name : "Not Assigned",
+                    v.city || "", v.vin_number || "",
+                    (v.status === "rented" && v.rental_end) ? new Date(v.rental_end).toLocaleDateString("en-CA") : ""])];
+                const fname = `vehicles-${city === "all" ? "all-cities" : city}-${status}-${new Date().toLocaleDateString("en-CA")}`;
+                const save = (blob, name) => { const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = name; l.click(); };
+                const csv = "\uFEFF" + rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+                save(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${fname}.csv`);
+                const XLSX = await import("xlsx");
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                ws["!cols"] = rows[0].map((_, i) => ({ wch: Math.min(40, Math.max(...rows.map((r) => String(r[i] ?? "").length)) + 2) }));
+                ws["!autofilter"] = { ref: ws["!ref"] };
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Vehicles");
+                XLSX.writeFile(wb, `${fname}.xlsx`);
+              } catch (e) {
+                toast.error("Export failed");
+              }
+            }}><Download className="w-4 h-4" /> Export</GhostBtn>
             <PrimaryBtn onClick={() => setShowAdd(true)} data-testid="add-vehicle-btn"><Plus className="w-4 h-4" /> Add Vehicle</PrimaryBtn>
           </div>
         )}
