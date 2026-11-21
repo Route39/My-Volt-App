@@ -111,10 +111,10 @@ export default function Drivers() {
           <div className="flex gap-2">
             <GhostBtn onClick={() => setShowImport(true)}><Upload className="w-4 h-4" /> Import</GhostBtn>
             <GhostBtn onClick={async () => {
-              const rows = [["Driver", "ID", "Phone", "Vehicle", "Package", "City", "Joining Date"],
+              const rows = [["Driver", "ID", "Phone", "Vehicle", "Package", "City", "Supervisor", "Joining Date", "Rent Amount"],
                 ...(items || []).map((d) => [d.name, d.driver_code || "", d.phone || "",
                   d.current_vehicle_number ? `${d.current_vehicle_number}${d.current_vehicle_reg ? " - " + d.current_vehicle_reg : ""}` : "Unassigned",
-                  d.package_name || "", d.city || "", d.created_at ? new Date(d.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : ""])];
+                  d.package_name || "", d.city || "", d.supervisor_name || "", d.created_at ? new Date(d.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : "", d.package_rate ?? ""])];
               const fname = `drivers-${city === "all" ? "all-cities" : city}-${new Date().toLocaleDateString("en-CA")}`;
               const save = (blob, name) => { const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = name; l.click(); };
               const csv = "\uFEFF" + rows.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
