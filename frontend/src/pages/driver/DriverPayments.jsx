@@ -55,7 +55,7 @@ export default function DriverPayments() {
               {p.transaction_id && (
                 <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between text-[11px] text-slate-400">
                   <span>{(p.payment_method || "—")}</span>
-                  <span>TXN {p.transaction_id}</span>
+                  <span>{p.payment_method === "receipt" ? (p.receipt_txn_id ? `TXN ${p.receipt_txn_id}` : "TXN Not detected") : `TXN ${p.transaction_id}`}</span>
                 </div>
               )}
             </div>

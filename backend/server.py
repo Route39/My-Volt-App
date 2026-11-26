@@ -15,7 +15,7 @@ from typing import Optional, List
 import requests
 import random
 
-from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, Query, File, UploadFile, Form
+from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, Query, File, UploadFile, Form, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -3656,6 +3656,21 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             {"row_id": 1})}
         for x in out:
             x["settled"] = x["id"] in _settled_ids
+
+    # latest payment-receipt screenshot (uploaded from the driver app) of each driver whose payment is still unpaid
+    if out:
+        _rcpt_by_driver = {}
+        async for _p in db.rental_payments.find(
+            {"organization_id": user.get("organization_id"),
+             "driver_id": {"$in": list({x["driver_id"] for x in out if x.get("driver_id")})},
+             "receipt_url": {"$exists": True, "$ne": None}},
+            {"driver_id": 1, "receipt_url": 1, "receipt_uploaded_at": 1, "amount": 1, "kind": 1, "receipt_txn_id": 1},
+        ).sort("receipt_uploaded_at", -1):
+            _rcpt_by_driver.setdefault((str(_p["driver_id"]), (_p.get("receipt_uploaded_at") or "")[:10]), {
+                "url": _p["receipt_url"], "uploaded_at": _p.get("receipt_uploaded_at"),
+                "amount": _p.get("amount"), "kind": _p.get("kind"), "txn": _p.get("receipt_txn_id")})
+        for x in out:
+            x["pending_receipt"] = _rcpt_by_driver.get((str(x.get("driver_id")), str(x.get("date"))[:10]))
 
     out.sort(key=lambda x: x["date"], reverse=True)
     return out
@@ -7447,6 +7462,172 @@ async def driver_verify(body: VerifyBody, request: Request):
     if rental:
         acct = await _rental_account(rental)
     return {"ok": True, "transaction_id": txn, "paid_at": now_iso(), "kind": rec["kind"], "amount": rec["amount"], "account": acct}
+
+import threading as _threading
+_OCR_ENGINE = None
+_OCR_LOCK = _threading.Lock()
+
+# label groups in priority order: the bank-side reference (UTR / UPI Ref) is preferred over app-side IDs
+_RCPT_LABELS = [
+    r"UTR(?:\s*(?:No|Number))?",
+    r"UPI\s*(?:Ref(?:erence)?(?:\s*(?:No|ID|Number))?|transaction\s*ID)",
+    r"Ref(?:erence)?\s*(?:No|ID|Number)",
+    r"(?:Transaction|Txn)\s*(?:ID|No|Number)",
+]
+_RCPT_VAL = r"([A-Za-z0-9][A-Za-z0-9\-]{7,39})"
+
+
+def _ocr_receipt_txn_sync(path, ext):
+    """Free offline scan (RapidOCR). Returns the transaction / UTR reference from a payment screenshot, else None."""
+    global _OCR_ENGINE
+    if ext not in ("jpg", "jpeg", "png", "webp", "bmp"):
+        return None
+    with _OCR_LOCK:                       # one scan at a time; the model loads once, on first use
+        if _OCR_ENGINE is None:
+            from rapidocr_onnxruntime import RapidOCR
+            _OCR_ENGINE = RapidOCR()
+        res, _ = _OCR_ENGINE(path)
+    if not res:
+        return None
+    res = sorted(res, key=lambda r: r[0][0][1])          # top-to-bottom
+    text = "\n".join(r[1] for r in res)
+    for g in _RCPT_LABELS:                                # 1) value written after a known label
+        for m in re.finditer(g + r"\.?\s*[:#\-]?\s*\n?\s*" + _RCPT_VAL, text, re.I):
+            if re.search(r"\d{6,}", m.group(1)):
+                return m.group(1)
+    m = re.search(r"(?<!\d)(\d{12})(?!\d)", text)        # 2) any standalone 12-digit number (UPI ref / UTR)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(T\d{15,25})\b", text)             # 3) PhonePe-style transaction id
+    return m.group(1) if m else None
+
+async def _scan_receipt_txn(payment_oid, path, ext):
+    """Runs after the upload response is sent, so the driver never waits for the scan; a failure never affects the payment."""
+    try:
+        tid = await asyncio.to_thread(_ocr_receipt_txn_sync, path, ext)
+    except Exception as e:
+        logger.warning(f"Receipt scan failed: {e}")
+        tid = None
+    await db.rental_payments.update_one({"_id": payment_oid}, {"$set": {"receipt_txn_id": tid, "receipt_scanned_at": now_iso()}})
+
+
+# ---- receipt amount check settings ----
+RECEIPT_AMOUNT_CHECK_ENABLED = True    # set False to switch the amount check off (any screenshot is accepted again)
+RECEIPT_AMOUNT_FAIL_OPEN = True        # True = if the scanner itself is broken (library missing / crash) accept the receipt instead of blocking drivers
+_RECEIPT_AMOUNT_KINDS = ("package_commission", "package_salary", "deposit", "daily", "extra_km", "outstanding", "catchup")
+
+_AMT_NUM = r"(\d{1,3}(?:,\d{2,3})+|\d{1,8})(?:\.(\d{1,2}))?"
+
+
+def _amounts_from_ocr_text(lines):
+    """All rupee amounts visible in the screenshot text (as floats)."""
+    found = set()
+
+    def add(m):
+        try:
+            found.add(float(m.group(1).replace(",", "") + ("." + m.group(2) if m.group(2) else "")))
+        except Exception:
+            pass
+    text = "\n".join(lines)
+    # 1) number right after a rupee sign / Rs / INR (the rupee sign is sometimes read as "?")
+    for m in re.finditer(r"(?<![A-Za-z])(?:₹|Rs\.?|INR|\?)\s*" + _AMT_NUM + r"(?![\d:])", text, re.I):
+        add(m)
+    # 2) number after the word "Amount" (same line or next line)
+    for m in re.finditer(r"Amount[^\n\d]{0,8}\n?[^\n\d]{0,3}" + _AMT_NUM + r"(?![\d:])", text, re.I):
+        add(m)
+    # 3) a line that is only a number (the big amount at the top of GPay / PhonePe / Paytm)
+    for ln in lines:
+        m = re.fullmatch(r"\s*[^\w\s]?\s*" + _AMT_NUM + r"\s*", ln)
+        if m:
+            add(m)
+    return found
+
+
+def _ocr_receipt_scan_sync(path, ext):
+    """ONE scan of the screenshot -> {"ok", "reason", "txn" (UPI ref / UTR), "amounts" (list of rupee amounts)}."""
+    global _OCR_ENGINE
+    if ext not in ("jpg", "jpeg", "png", "webp", "bmp"):
+        return {"ok": False, "reason": "format", "txn": None, "amounts": []}
+    with _OCR_LOCK:
+        if _OCR_ENGINE is None:
+            from rapidocr_onnxruntime import RapidOCR
+            _OCR_ENGINE = RapidOCR()
+        res, _ = _OCR_ENGINE(path)
+    lines = [r[1] for r in sorted(res or [], key=lambda r: r[0][0][1])]
+    text = "\n".join(lines)
+    txn = None
+    for g in _RCPT_LABELS:
+        for m in re.finditer(g + r"\.?\s*[:#\-]?\s*\n?\s*" + _RCPT_VAL, text, re.I):
+            if re.search(r"\d{6,}", m.group(1)):
+                txn = m.group(1)
+                break
+        if txn:
+            break
+    if not txn:
+        m = re.search(r"(?<!\d)(\d{12})(?!\d)", text) or re.search(r"\b(T\d{15,25})\b", text)
+        txn = m.group(1) if m else None
+    return {"ok": True, "reason": None, "txn": txn, "amounts": sorted(_amounts_from_ocr_text(lines))}
+
+
+@api.post("/driver/payments/receipt")
+async def driver_payment_receipt(request: Request, background_tasks: BackgroundTasks, payment_id: str = Form(...), image: UploadFile = File(...)):
+    user = await get_user(request)
+    require_driver(user)
+    rec = await db.rental_payments.find_one({"_id": oid(payment_id),
+                                             "organization_id": user.get("organization_id"), "driver_id": user["id"]})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if rec.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="This payment is already completed")
+    if not image or not image.filename:
+        raise HTTPException(status_code=400, detail="Please attach the receipt screenshot")
+    if image.content_type and not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    ext = image.filename.rsplit(".", 1)[-1].lower() if "." in image.filename else "jpg"
+    if ext not in ("jpg", "jpeg", "png", "webp", "heic", "heif"):
+        ext = "jpg"
+    filename = f"{user['id']}_receipt_{uuid.uuid4().hex[:8]}.{ext}"
+    with open(f"uploads/{filename}", "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
+    url = f"/uploads/{filename}"
+    # scan once: used for the amount check below and for the transaction id shown later
+    scan = None
+    try:
+        scan = await asyncio.wait_for(asyncio.to_thread(_ocr_receipt_scan_sync, f"uploads/{filename}", ext), timeout=25)
+    except Exception as e:
+        logger.warning(f"Receipt scan failed: {e}")
+    if RECEIPT_AMOUNT_CHECK_ENABLED and rec.get("kind") in _RECEIPT_AMOUNT_KINDS:
+        expected = float(rec.get("amount") or 0)
+        amt_txt = f"{expected:,.2f}".rstrip("0").rstrip(".")
+        err = None
+        if scan is None:                                   # scanner crashed / timed out
+            if not RECEIPT_AMOUNT_FAIL_OPEN:
+                err = "Could not check the screenshot. Please try again."
+        elif not scan["ok"]:                               # unsupported image type (e.g. HEIC)
+            err = "Please upload the payment screenshot as a JPG or PNG image."
+        elif not scan["amounts"]:
+            err = "Could not read the amount from the screenshot. Please upload a clear screenshot of the payment."
+        elif not any(abs(a - expected) < 0.01 for a in scan["amounts"]):
+            err = f"Amount is not equal, please pay the mentioned amount ₹{amt_txt}."
+        if err:
+            try:
+                os.remove(f"uploads/{filename}")           # rejected screenshot is not kept
+            except OSError:
+                pass
+            raise HTTPException(status_code=400, detail=err)
+    await db.rental_payments.update_one({"_id": rec["_id"]}, {"$set": {
+        "receipt_url": url, "receipt_uploaded_at": now_iso(), "receipt_status": "submitted"}})
+    # receipt uploaded -> payment is considered PAID (same effect as a verified payment)
+    txn = "RCPT-" + secrets.token_hex(5).upper()
+    await _apply_paid(rec, txn, "receipt")
+    scanned = (scan or {}).get("txn")     # taken from the single scan done above
+    await db.rental_payments.update_one({"_id": rec["_id"]}, {"$set": {"receipt_txn_id": scanned, "receipt_scanned_at": now_iso()}})
+    acct = None
+    rental = await _active_rental(user.get("organization_id"), user["id"])
+    if rental:
+        acct = await _rental_account(rental)
+    return {"ok": True, "receipt_url": url, "transaction_id": txn, "scanned_txn_id": scanned, "paid_at": now_iso(),
+            "kind": rec["kind"], "amount": rec["amount"], "account": acct}
 
 
 @api.post("/driver/payments/webhook")

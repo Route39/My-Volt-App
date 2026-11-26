@@ -261,9 +261,11 @@ export default function DailyCollection() {
                 ? (it.package_category === "commission" ? "Commission paid" : "Salary-rent paid")
                 : <>{it.package_category === "commission" ? "Commission paid" : "Paid"} {inr(pc.pay_amount)}</>}
             </span>
+            {/* TXN box hidden (All Packages tab)
             {!isPkgTab && pc.transaction_id && (
               <span className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200">TXN {pc.transaction_id}</span>
             )}
+            */}
           </>
         ) : (
           <span className="inline-flex items-center w-max px-2.5 py-1 rounded-md bg-amber-50 text-amber-600 text-xs font-bold tracking-wide border border-amber-200 shadow-sm">Unsettled</span>
@@ -332,9 +334,11 @@ export default function DailyCollection() {
           <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
             <Check className="w-3.5 h-3.5" /> PAID
           </div>
+          {/* TXN box hidden (All Packages tab)
           {c.transaction_id && (
             <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">TXN {c.transaction_id}</div>
           )}
+          */}
         </div>
       );
     }
@@ -356,9 +360,11 @@ export default function DailyCollection() {
         <div className="inline-flex items-center gap-1.5 w-max px-2.5 py-1 rounded-md bg-green-50 text-green-600 text-xs font-bold tracking-wide border border-green-200 shadow-sm">
           <Check className="w-3.5 h-3.5" /> PAID
         </div>
+        {/* TXN box hidden (All Packages tab)
         {pc.transaction_id && (
           <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">TXN {pc.transaction_id}</div>
         )}
+        */}
       </div>
     );
     return (
@@ -372,9 +378,12 @@ export default function DailyCollection() {
   const qrBadgeCls = "text-[9px] px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold text-green-600 bg-green-50 border-green-200";
   const txnChip = (t, manual) => t ? (
     <>
+      {/* TXN box hidden in the Deposit column
       <div className={`text-[9px] font-mono px-1.5 py-0.5 rounded w-max border mt-0.5 font-bold ${t.startsWith('QR_') ? 'text-green-600 bg-green-50 border-green-200' : 'text-slate-400 bg-slate-50 border-slate-200'}`}>
         {t.startsWith('QR_') ? 'Paid by QR' : `TXN ${t}`}
       </div>
+      */}
+      {t.startsWith('QR_') && <div className={qrBadgeCls}>Paid by QR</div>}
       {manual && !t.startsWith('QR_') && <div className={qrBadgeCls}>Paid by QR</div>}
     </>
   ) : null;
@@ -699,6 +708,7 @@ export default function DailyCollection() {
               <th className="px-5 py-4">Daily Rent</th>
               {/* <th className="px-5 py-4">Extra KM Charges</th> */}
               <th className="px-5 py-4">Pending Rent</th>
+              <th className="px-5 py-4">Transaction ID</th>
               <th className="px-5 py-4">Deposit Amount</th>
               <th className="px-5 py-4">Deposit Paid</th>
               <th className="px-5 py-4">Deposit Pending</th>
@@ -710,7 +720,7 @@ export default function DailyCollection() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={pkgTab === "rental" ? 11 : 12} className="px-5 py-16 text-center text-mv-muted">
+                <td colSpan={pkgTab === "rental" ? 12 : 13} className="px-5 py-16 text-center text-mv-muted">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                     Loading collection data...
@@ -719,7 +729,7 @@ export default function DailyCollection() {
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={pkgTab === "rental" ? 11 : 12} className="px-5 py-16 text-center">
+                <td colSpan={pkgTab === "rental" ? 12 : 13} className="px-5 py-16 text-center">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                       <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -794,9 +804,11 @@ export default function DailyCollection() {
                                 </div>
                                 {it.prev_rent.transaction_id && (
                                   <>
+                                    {pkgTab !== "all" && (
                                     <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
                                       TXN {it.prev_rent.transaction_id}
                                     </div>
+                                    )}
                                     {it.prev_rent.manual && <div className={qrBadgeCls}>Paid by QR</div>}
                                   </>
                                 )}
@@ -821,9 +833,11 @@ export default function DailyCollection() {
                           <span className="text-green-600 font-display font-bold text-sm">{inr(it.rent_amount)}</span>
                           {it.rent_transaction_id && (
                             <>
+                              {pkgTab !== "all" && (
                               <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200 mt-0.5">
                                 TXN {it.rent_transaction_id}
                               </div>
+                              )}
                               {it.rent_manual && <div className={qrBadgeCls}>Paid by QR</div>}
                             </>
                           )}
@@ -866,6 +880,23 @@ export default function DailyCollection() {
                     </td> */}
                     <td className="px-5 py-4 font-display font-bold">
                       {pendingRentOf(it) > 0 ? <span className="text-red-500">{inr(pendingRentOf(it))}</span> : <span className="text-slate-400 font-medium">—</span>}
+                      {it.pending_receipt?.url && (
+                        <div className="flex flex-col gap-1 mt-2">
+                          <a href={imgUrl(it.pending_receipt.url)} target="_blank" rel="noreferrer" data-testid="pending-receipt-link">
+                            <img src={imgUrl(it.pending_receipt.url)} alt="Payment receipt" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
+                          </a>
+                          <span className="text-[11px] text-mv-muted">Receipt uploaded</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {it.pending_receipt?.txn ? (
+                        <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200">{it.pending_receipt.txn}</div>
+                      ) : it.pending_receipt?.url ? (
+                        <span className="text-[11px] text-mv-muted">Not detected</span>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
                     </td>
                     <td className="px-5 py-4 font-display font-bold">
                       {_special(it) || !(it.deposit > 0) ? <span className="text-slate-400 font-medium">—</span> : inr(depositOf(it).total)}

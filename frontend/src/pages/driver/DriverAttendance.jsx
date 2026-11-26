@@ -99,15 +99,19 @@ export default function DriverAttendance() {
       try {
         const image = await CapCamera.getPhoto({
           quality: 70, width: 960, allowEditing: false, saveToGallery: false,
-          resultType: CameraResultType.Uri, source: CameraSource.Prompt, direction: CameraDirection.Front,
+          resultType: CameraResultType.DataUrl, source: CameraSource.Prompt, direction: CameraDirection.Front,
           promptLabelHeader: "Upload Photo", promptLabelPicture: "Take Photo", promptLabelPhoto: "Upload Image", promptLabelCancel: "Cancel",
         });
-        if (!image?.webPath) return;
-        const blob = await (await fetch(image.webPath)).blob();
+        if (!image?.dataUrl) return;
+        const [head, b64] = image.dataUrl.split(",");
+        const mime = (head.match(/:(.*?);/) || [])[1] || "image/jpeg";
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const ext = image.format || "jpeg";
-        setFile(new File([blob], `selfie_${Date.now()}.${ext}`, { type: blob.type || `image/${ext}` }));
+        setFile(new File([bytes], `selfie_${Date.now()}.${ext}`, { type: mime }));
       } catch (e) {
-        if (!/cancel/i.test(e?.message || "")) setErr("Could not open the camera. Allow Camera permission for this app and try again.");
+        if (!/cancel/i.test(e?.message || "")) setErr(`Could not open the camera. ${e?.message || "Allow Camera permission for this app and try again."}`);
       }
     } else if (inputRef.current) {
       inputRef.current.value = "";

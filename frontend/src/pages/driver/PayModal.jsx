@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
-import { X, Loader2, CheckCircle2, ShieldCheck } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Loader2, CheckCircle2, ShieldCheck, Camera, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
 import dapi from "../../lib/driverApi";
 import { inr, fmtDate } from "../../lib/format";
 import { Capacitor } from "@capacitor/core";
+import { Camera as CapCamera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { Checkout } from "capacitor-razorpay";
 
 function loadRazorpay() {
@@ -25,6 +26,18 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
   const [nextDate, setNextDate] = useState("");
   const [phase, setPhase] = useState("confirm"); // confirm | processing | success
   const [result, setResult] = useState(null);
+  const [receipt, setReceipt] = useState(null);        // chosen receipt screenshot (File)
+  const [receiptPreview, setReceiptPreview] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const camRef = useRef(null);                          // browser: opens the camera
+  const galRef = useRef(null);                          // browser: opens the phone's gallery / files
+
+  useEffect(() => {
+    if (!receipt) { setReceiptPreview(null); return undefined; }
+    const url = URL.createObjectURL(receipt);
+    setReceiptPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [receipt]);
 
   // Nothing to pay (amount is 0) and no payment just completed -> close the popup.
   useEffect(() => {
@@ -37,6 +50,63 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
 
   const close = () => { setPhase("confirm"); setResult(null); onClose(); };
 
+  // source: "camera" = Take Photo, "photos" = Upload Screenshot (from the phone)
+  const pickReceipt = async (source) => {
+    if (Capacitor.isNativePlatform()) {            // Android + iOS app
+      try {
+        const image = await CapCamera.getPhoto({
+          quality: 80, width: 1600, allowEditing: false, saveToGallery: false,
+          resultType: CameraResultType.DataUrl,
+          source: source === "camera" ? CameraSource.Camera : CameraSource.Photos,
+        });
+        if (!image?.dataUrl) return;
+        const [head, b64] = image.dataUrl.split(",");
+        const mime = (head.match(/:(.*?);/) || [])[1] || "image/jpeg";
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const ext = image.format || "jpeg";
+        setReceipt(new File([bytes], `receipt_${Date.now()}.${ext}`, { type: mime }));
+      } catch (e) {
+        if (!/cancel/i.test(e?.message || "")) toast.error("Could not open the camera/gallery. Please allow permission and try again.");
+      }
+    } else {                                        // mobile browser / desktop
+      const el = source === "camera" ? camRef.current : galRef.current;
+      if (el) { el.value = ""; el.click(); }
+    }
+  };
+
+  const onReceiptFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) setReceipt(f);
+  };
+
+  const submitReceipt = async () => {
+    if (!receipt) return toast.error("Please add the payment receipt screenshot.");
+    if (askNextDate && (!nextDate || nextDate < tomorrowIST())) {
+      return toast.error("Select a date for the next half payment (from tomorrow).");
+    }
+    setUploading(true);
+    try {
+      const order = createOrderFn
+        ? await createOrderFn()
+        : (await dapi.post("/driver/payments/create-order", { kind, ...extraParams, ...(askNextDate ? { next_payment_date: nextDate } : {}) })).data;
+      const fd = new FormData();
+      fd.append("payment_id", order.payment_id);
+      fd.append("image", receipt);
+      const { data: done } = await dapi.post("/driver/payments/receipt", fd);
+      setReceipt(null);
+      setResult(done);
+      setPhase("success");          // shows the same "Payment Confirmed" screen with the transaction id
+      toast.success("Payment submitted ✓");
+      onDone && onDone(done);       // continues the flow exactly like a normal successful payment
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Could not upload the receipt. Please try again.");
+    } finally { setUploading(false); }
+  };
+
+  // Razorpay payment is commented out in the UI (replaced by receipt upload); kept for later use.
+  // eslint-disable-next-line no-unused-vars
   const pay = async () => {
     if (askNextDate && (!nextDate || nextDate < tomorrowIST())) {
       return toast.error("Select a date for the next half payment (from tomorrow).");
@@ -134,7 +204,7 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
             <h3 className="text-xl font-bold text-slate-900">Payment Confirmed</h3>
             <div className="text-3xl font-extrabold text-slate-900 mt-2">{inr(result?.amount || amount)}</div>
             <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-left space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-slate-500">Transaction ID</span><span className="font-semibold text-slate-800" data-testid="pay-txn">{result?.transaction_id}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Transaction ID</span><span className="font-semibold text-slate-800" data-testid="pay-txn">{result?.scanned_txn_id !== undefined ? (result.scanned_txn_id || "Not detected") : result?.transaction_id}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Date &amp; Time</span><span className="font-medium text-slate-800">{fmtDate(result?.paid_at, true)}</span></div>
               {result?.account && <div className="flex justify-between"><span className="text-slate-500">Rental Status</span><span className="font-semibold text-red-600 uppercase">{result.account.status}</span></div>}
             </div>
@@ -156,10 +226,33 @@ export default function PayModal({ open, onClose, kind, title, amount, lines = [
               ))}
             </div>
             {children}
+            {/* PAY BUTTON COMMENTED OUT - replaced by payment receipt screenshot upload
             <button onClick={pay} disabled={phase === "processing" || payDisabled || (askNextDate && !nextDate)} data-testid="pay-now-btn"
               className="mt-5 w-full h-12 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-70">
               {phase === "processing" ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</> : <>Pay {inr(amount)}</>}
             </button>
+            */}
+
+            <div className="mt-5" data-testid="pay-receipt-section">
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">Payment receipt screenshot *</label>
+              {receiptPreview && <img src={receiptPreview} alt="Receipt preview" className="w-full h-40 object-contain rounded-xl border border-slate-200 bg-slate-50 mb-2" />}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => pickReceipt("camera")} disabled={uploading} data-testid="pay-take-photo"
+                  className="flex-1 h-11 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-50 disabled:opacity-60">
+                  <Camera className="w-4 h-4" /> Take Photo
+                </button>
+                <button type="button" onClick={() => pickReceipt("photos")} disabled={uploading} data-testid="pay-upload-screenshot"
+                  className="flex-1 h-11 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-50 disabled:opacity-60">
+                  <ImagePlus className="w-4 h-4" /> Upload Screenshot
+                </button>
+              </div>
+              <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onReceiptFile} />
+              <input ref={galRef} type="file" accept="image/*" className="hidden" onChange={onReceiptFile} />
+              <button onClick={submitReceipt} disabled={uploading || !receipt || payDisabled || (askNextDate && !nextDate)} data-testid="pay-submit-receipt"
+                className="mt-3 w-full h-12 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-70">
+                {uploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Uploading…</> : <>Submit Receipt</>}
+              </button>
+            </div>
             {askNextDate && (
               <div className="mt-4" data-testid="pay-next-date">
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Select date for next half payment</label>
