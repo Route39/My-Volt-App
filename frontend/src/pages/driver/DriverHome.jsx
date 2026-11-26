@@ -524,7 +524,7 @@ export default function DriverHome() {
             <div className="font-semibold">{rental?.package_category === "commission" ? (rental?.commission_percent != null ? `${rental.commission_percent}%` : "—") : rental?.package_category === "salary" ? "Collected amount" : inr(rental?.daily_rate || driver?.package_rate || 0)}</div>
           </div>
           
-          <div className="col-span-2 mt-2 pt-4 border-t border-red-600/30">
+          <div className="hidden col-span-2 mt-2 pt-4 border-t border-red-600/30">
             <div className="grid grid-cols-1 gap-3">
 
               {/* Daily KM Limit */}

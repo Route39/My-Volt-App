@@ -93,6 +93,8 @@ function DriverShell() {
   // Remaining half of the security deposit is due: keep the driver on Home, where the pay popup is shown
   if (data?.deposit?.remaining_due && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
 
+  // Check-in is no longer compulsory: a driver who has not checked in can still use every tab of the app.
+
   // From 12:00 noon (IST) the unpaid-rent popup cannot be closed: keep the driver on Home (where it is shown) until it is paid
   if (data?.account?.rent_popup_locked && loc.pathname !== "/driver") return <Navigate to="/driver" replace />;
 

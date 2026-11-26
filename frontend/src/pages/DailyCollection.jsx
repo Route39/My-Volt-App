@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, useLayoutEffect } from "react";
 import api from "../lib/api";
 import { useApp, CITIES } from "../context/AppContext";
 import { inr } from "../lib/format";
@@ -9,6 +9,119 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { DriverCode } from "../lib/driverCodes";
 import { imgUrl } from "../lib/imgUrl";
+// import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "../components/ui/tooltip";   // row hover tooltip (disabled for now)
+
+// A table row that shows a hover tooltip with the details of that row
+// Tooltip is disabled for now: this renders a plain row. To turn it back on, restore the import above,
+// change the function to `RowTip({ tip, className, children })` and swap the return for the commented block below.
+function RowTip({ className, children }) {
+  return <tr className={className}>{children}</tr>;
+  /*
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <tr className={className}>{children}</tr>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="start" className="bg-white text-slate-800 border border-slate-200 text-xs px-3 py-2 rounded-lg shadow-lg">
+          <div className="flex flex-col gap-1">
+            {tip.map(([label, value]) => (
+              <div key={label} className="flex gap-2">
+                <span className="text-slate-500 min-w-[70px]">{label}</span>
+                <span className="font-semibold">{value}</span>
+              </div>
+            ))}
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+  */
+}
+
+// ---- Excel-like resizable columns: drag the right edge of a column header ----
+const MIN_COL_W = 60;
+
+function useColResize(tabKey) {
+  const tableRef = useRef(null);
+  const [all, setAll] = useState({});           // { [tab]: { [columnId]: widthPx } }  (each tab keeps its own widths)
+  const widths = all[tabKey] || null;           // null = never resized -> normal automatic layout
+  const drag = useRef(null);
+
+  // keep the table exactly as wide as its columns, so shrinking one column does not stretch the others
+  useLayoutEffect(() => {
+    const t = tableRef.current;
+    if (!t) return;
+    if (!widths) { t.style.width = ""; return; }
+    let total = 0;
+    t.querySelectorAll("thead th").forEach((th) => { total += widths[th.dataset.col] || th.offsetWidth; });
+    t.style.width = `${total}px`;
+  });
+
+  const apply = () => {
+    const d = drag.current;
+    if (!d) return;
+    setAll((p) => ({ ...p, [tabKey]: { ...(p[tabKey] || {}), [d.id]: d.w } }));
+  };
+  const begin = (id, e) => {
+    const t = tableRef.current;
+    if (!t) return;
+    const snap = {};
+    t.querySelectorAll("thead th").forEach((th) => { snap[th.dataset.col] = th.offsetWidth; });   // freeze today's widths on the first drag
+    const base = widths || snap;
+    drag.current = { id, startX: e.clientX, startW: base[id], w: base[id], raf: 0 };
+    if (!widths) setAll((p) => ({ ...p, [tabKey]: snap }));
+  };
+  const move = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    d.w = Math.max(MIN_COL_W, Math.round(d.startW + e.clientX - d.startX));
+    if (!d.raf) d.raf = requestAnimationFrame(() => { d.raf = 0; apply(); });
+  };
+  const end = () => {
+    const d = drag.current;
+    if (!d) return;
+    if (d.raf) cancelAnimationFrame(d.raf);
+    apply();
+    drag.current = null;
+  };
+  const reset = () => setAll((p) => { const n = { ...p }; delete n[tabKey]; return n; });   // double-click a handle: back to automatic widths
+
+  return { tableRef, widths, begin, move, end, reset };
+}
+
+function ResizableTh({ id, rz, className = "px-5 py-4", children }) {
+  const w = rz.widths && rz.widths[id];
+  return (
+    <th data-col={id} className={`${className} relative`} style={w ? { width: w } : undefined}>
+      {children}
+      <span
+        onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); rz.begin(id, e); }}
+        onPointerMove={rz.move}
+        onPointerUp={rz.end}
+        onPointerCancel={rz.end}
+        onDoubleClick={rz.reset}
+        title="Drag to resize · double-click to reset"
+        className="group absolute top-0 right-0 z-10 h-full w-4 cursor-col-resize select-none"
+        style={{ touchAction: "none" }}
+      >
+        {/* red line shown on hover, centred in the handle */}
+        <span className="absolute top-0 left-1/2 -translate-x-1/2 h-full w-1.5 pointer-events-none group-hover:bg-mv-primary/40" />
+        {/* Excel-style column-resize marker: vertical bar with a left and a right arrow (◀|▶) */}
+        <svg
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-mv-muted opacity-60 group-hover:opacity-100 group-hover:text-mv-primary transition-opacity"
+        >
+          <rect x="7.25" y="1" width="1.5" height="14" rx="0.5" />
+          <path d="M6 7.2H3.6V5L0 8l3.6 3V8.8H6z" />
+          <path d="M10 7.2h2.4V5L16 8l-3.6 3V8.8H10z" />
+        </svg>
+      </span>
+    </th>
+  );
+}
 
 export default function DailyCollection() {
   const { city: gCity, lockedCity, cities } = useApp();
@@ -24,20 +137,26 @@ export default function DailyCollection() {
   const [pickMonth, setPickMonth] = useState(todayIST.slice(0, 7));
   const [search, setSearch] = useState("");
   const [pkgTab, setPkgTab] = useState("all");   // all | rental | commission | salary
+  const rz = useColResize(pkgTab);               // column widths of the table shown in the current tab
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const reqId = useRef(0);   // id of the latest request, so an old slow response can never overwrite a newer one
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
   const [pendMap, setPendMap] = useState({});     // driver_id -> row from /pending-payments
   const [pendRows, setPendRows] = useState([]);
 
   const load = useCallback(async () => {
+    const myId = ++reqId.current;
     setLoading(true);
     try {
       const p = city !== "all" ? { city } : {};
       
-      if (search) p.driver_name = search;
+      if (debouncedSearch) p.driver_name = debouncedSearch;
       
       if (dateFilter === "today") {
-        const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-        p.from_date = today;
-        p.to_date = today;
+        // no dates sent: the server uses its own IST date for "today"
       } else if (dateFilter === "this_week") {
         // Week = Sunday to Saturday, based on today's date in IST
         const [y, m, d] = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }).split("-").map(Number);
@@ -70,13 +189,13 @@ export default function DailyCollection() {
       }
       
       const { data } = await api.get("/admin/daily-collection", { params: p });
-      setItems(data);
+      if (myId === reqId.current) setItems(data);
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (myId === reqId.current) setLoading(false);
     }
-  }, [city, dateFilter, fromDate, toDate, pickDate, pickMonth, search]);
+  }, [city, dateFilter, fromDate, toDate, pickDate, pickMonth, debouncedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -90,7 +209,7 @@ export default function DailyCollection() {
       setPendMap(m); setPendRows(data || []);
     }).catch(() => {});
     return () => { live = false; };
-  }, [items]);
+  }, []);
 
   // Deposit is a ONE-TIME payment per driver, so it is counted once, on the row of the
   // day it was paid. Paid deposits are de-duplicated by transaction id; pending deposits
@@ -104,7 +223,7 @@ export default function DailyCollection() {
     for (const it of items) {
       // today's rent is paid by the driver tomorrow, so it is not counted (as pending) in the cards today;
       // only if it has already been paid is it counted. Extra-KM charges are unchanged.
-      const _todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+      const _todayIST = items[0]?.server_today || todayIST;
       if (it.is_today_row || it.date === _todayIST) {
         const todayRentPaid = it.rent_status === "paid" && it.daily_rate > 0 ? it.daily_rate : 0;
         revenue += ((it.total_charge ?? it.daily_rate) || 0) - (it.daily_rate || 0) + todayRentPaid;
@@ -191,7 +310,7 @@ export default function DailyCollection() {
     // A salary driver's early payment (today's rent paid today) makes the backend also return a row dated TOMORROW
     // (its "yesterday" has a payment). That future row showed tomorrow's date beside today's payment, so it is dropped:
     // the payment is already shown on the row dated today (the "early" row below).
-    if (x.package_category === "salary" && x.date > todayIST) return [];
+    if (x.package_category === "salary" && x.date > (x.server_today || todayIST)) return [];
     const prevEarly = !!x.prev_collection?.paid_early;
     const base = { ...x, collection: prevEarly ? null : x.prev_collection };
     if (!x.early_collection) return [base];
@@ -223,6 +342,35 @@ export default function DailyCollection() {
     return a;
   }, { settled: 0, unsettled: 0 });
   const salaryGross = salaryTotals.settled + salaryTotals.unsettled;
+
+  // Hover tooltip of a row: driver, vehicle, package, date and the rent / salary-rent / commission paid or pending
+  // (same rules as the cells of the table)
+  const rowTipOf = (it) => {
+    const cat = it.package_category;
+    let label = "Rent";
+    let amount = "—";
+    if (cat === "commission" || cat === "salary") {
+      label = cat === "commission" ? "Commission" : "Salary rent";
+      const s = cat === "salary" ? salaryRentOf(it) : null;
+      if (s && s.amount > 0) amount = `${inr(s.amount)} (${s.paid ? "Paid" : "Pending"})`;
+      else if (!s && it.collection) amount = `${inr(it.collection.pay_amount)} (Paid)`;
+      else if (it.rent_status === "week_off") amount = "Week-off";
+      else if (it.rent_status === "paid_leave") amount = "Paid leave";
+      else if (!s && it.rent_for_date && !it.prev_collection && !(it.rental_start && it.date <= it.rental_start)) amount = "Pending";
+    } else if (it.rent_status === "week_off") amount = "Week-off";
+    else if (it.rent_status === "paid_leave") amount = "Paid leave";
+    else if (it.is_today_row || it.prev_rent_row) {
+      amount = it.prev_rent ? `${inr(it.prev_rent.amount)} (${it.prev_rent.status === "paid" ? "Paid" : "Pending"})` : "—";
+    } else if (it.rent_status === "paid") amount = it.rent_amount > 0 ? `${inr(it.rent_amount)} (Paid)` : "—";
+    else amount = `${inr(it.rent_amount)} (Pending)`;
+    return [
+      ["Driver", it.driver_name || "—"],
+      ["Vehicle", it.vehicle_reg || it.vehicle_code || "—"],
+      ["Package", it.package_name || "—"],
+      ["Date", it.date || "—"],
+      [label, amount],
+    ];
+  };
 
   // Settled / Unsettled button is shown only for Commission / Salary package drivers (not Rental package)
   const settleBtn = (it) => {
@@ -391,6 +539,13 @@ export default function DailyCollection() {
   return (
     <div>
       <PageHeader title="Daily Collection" subtitle={<>Finance and cash flow control center{isPkgTab && <span className="block mt-1 font-medium text-mv-text" data-testid="pkg-paid-total">Total amount paid - {inr(pkgPaidTotal)}</span>}</>} />
+
+      <style>{`
+        .mv-col-fixed { table-layout: fixed; }
+        .mv-col-fixed th, .mv-col-fixed td { overflow: hidden; text-overflow: ellipsis; }
+        /* smaller column-header text (was 11px) */
+        .mv-card table thead tr.mv-label th { font-size: 10px; }
+      `}</style>
 
       {/* Package tabs */}
       <div className="flex flex-wrap items-center gap-2 mb-4" data-testid="package-tabs">
@@ -599,23 +754,25 @@ export default function DailyCollection() {
       {/* Commission / Salary package tabs: their own table */}
       {isPkgTab && (
         <div className="mv-card overflow-hidden overflow-x-auto mv-rise" style={{ animationDelay: "150ms" }}>
-          <table className="w-full text-sm">
+          <table ref={rz.tableRef} className={`w-full text-sm ${rz.widths ? "mv-col-fixed" : ""}`}>
             <thead>
               <tr className="border-b border-mv-border text-left mv-label">
-                <th className="px-5 py-4">Driver</th>
-                <th className="px-5 py-4">Date</th>
-                <th className="px-5 py-4">Vehicle</th>
-                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission %" : "Salary"}</th>
-                <th className="px-5 py-4">Total Collected</th>
-                <th className="px-5 py-4">{pkgTab === "commission" ? "Commission Amount" : "Rent (Salary) Paid"}</th>
-                <th className="px-5 py-4">Trip Screenshot</th>
-                <th className="px-5 py-4">Settled / Unsettled</th>
+                <ResizableTh id="driver" rz={rz}>Driver</ResizableTh>
+                <ResizableTh id="date" rz={rz}>Date</ResizableTh>
+                <ResizableTh id="vehicle" rz={rz}>Vehicle</ResizableTh>
+                <ResizableTh id="pct" rz={rz}>{pkgTab === "commission" ? "Commission %" : "Salary"}</ResizableTh>
+                <ResizableTh id="total" rz={rz}>Total Collected</ResizableTh>
+                <ResizableTh id="amount" rz={rz}>{pkgTab === "commission" ? "Commission Amount" : "Rent (Salary) Paid"}</ResizableTh>
+                <ResizableTh id="receipt" rz={rz}>Uploaded Receipt</ResizableTh>
+                <ResizableTh id="txn" rz={rz}>Transaction ID</ResizableTh>
+                <ResizableTh id="trip" rz={rz}>Trip Screenshot</ResizableTh>
+                <ResizableTh id="settle" rz={rz}>Settled / Unsettled</ResizableTh>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="px-5 py-16 text-center text-mv-muted">
+                  <td colSpan="10" className="px-5 py-16 text-center text-mv-muted">
                     <div className="flex flex-col items-center justify-center gap-3">
                       <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                       Loading collection data...
@@ -624,7 +781,7 @@ export default function DailyCollection() {
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-5 py-16 text-center">
+                  <td colSpan="10" className="px-5 py-16 text-center">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                         <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -635,10 +792,13 @@ export default function DailyCollection() {
                 </tr>
               ) : (
                 pkgRows.map((it) => (
-                  <tr key={it.id} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
+                  <RowTip key={it.id} tip={rowTipOf(it)} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
                     <td className="px-5 py-4 font-medium flex items-center gap-3">
                       <Avatar className="w-8 h-8"><AvatarImage src={it.driver_avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{it.driver_name?.[0]}</AvatarFallback></Avatar>
-                      {it.driver_name} <DriverCode id={it.driver_id} className="block" />
+                      <div className="flex flex-col items-start">
+                        <span>{it.driver_name}</span>
+                        <DriverCode id={it.driver_id} className="block whitespace-nowrap" />
+                      </div>
                     </td>
                     <td className="px-5 py-4 text-mv-muted whitespace-nowrap">{it.date || "—"}</td>
                     <td className="px-5 py-4">
@@ -674,6 +834,26 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4">
+                      {it.collection?.receipt_url ? (
+                        <a href={imgUrl(it.collection.receipt_url)} target="_blank" rel="noreferrer">
+                          <img src={imgUrl(it.collection.receipt_url)} alt="Payment receipt" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {it.collection?.receipt_txn ? (
+                        <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200">{it.collection.receipt_txn}</div>
+                      ) : it.collection?.receipt_url ? (
+                        <span className="text-[11px] text-mv-muted">Not detected</span>
+                      ) : it.collection?.transaction_id ? (
+                        <div className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded w-max border border-slate-200">{it.collection.transaction_id}</div>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
                       {it.collection?.screenshot_url ? (
                         <a href={imgUrl(it.collection.screenshot_url)} target="_blank" rel="noreferrer">
                           <img src={imgUrl(it.collection.screenshot_url)} alt="Trip screenshot" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
@@ -683,7 +863,7 @@ export default function DailyCollection() {
                       )}
                     </td>
                     <td className="px-5 py-4">{settleBtn(it)}</td>
-                  </tr>
+                  </RowTip>
                 ))
               )}
             </tbody>
@@ -694,33 +874,34 @@ export default function DailyCollection() {
       {/* Table Section */}
       {!isPkgTab && (
       <div className="mv-card overflow-hidden overflow-x-auto mv-rise" style={{ animationDelay: "150ms" }}>
-        <table className="w-full text-sm">
+        <table ref={rz.tableRef} className={`w-full text-sm ${rz.widths ? "mv-col-fixed" : ""}`}>
           <thead>
             <tr className="border-b border-mv-border text-left mv-label">
-              <th className="px-5 py-4">Driver</th>
-              <th className="px-5 py-4">Date</th>
-              <th className="px-5 py-4">Vehicle</th>
+              <ResizableTh id="driver" rz={rz}>Driver</ResizableTh>
+              <ResizableTh id="date" rz={rz}>Date</ResizableTh>
+              <ResizableTh id="vehicle" rz={rz}>Vehicle</ResizableTh>
               {/* <th className="px-5 py-4">Start KM</th>
               <th className="px-5 py-4">End KM</th>
               <th className="px-5 py-4">Total KM</th> */}
-              <th className="px-5 py-4 text-amber-500">Revenue</th>
+              <ResizableTh id="revenue" rz={rz} className="px-5 py-4 text-amber-500">Revenue</ResizableTh>
               {/* <th className="px-5 py-4 text-red-500">Extra KM</th> */}
-              <th className="px-5 py-4">Daily Rent</th>
+              <ResizableTh id="rent" rz={rz}>Daily Rent</ResizableTh>
               {/* <th className="px-5 py-4">Extra KM Charges</th> */}
-              <th className="px-5 py-4">Pending Rent</th>
-              <th className="px-5 py-4">Transaction ID</th>
-              <th className="px-5 py-4">Deposit Amount</th>
-              <th className="px-5 py-4">Deposit Paid</th>
-              <th className="px-5 py-4">Deposit Pending</th>
-              <th className="px-5 py-4">Deposit Status</th>
-              <th className="px-5 py-4">Trip Screenshot</th>
-              {pkgTab !== "rental" && <th className="px-5 py-4">Settled / Unsettled</th>}
+              <ResizableTh id="pending" rz={rz}>Pending Rent</ResizableTh>
+              <ResizableTh id="receipt" rz={rz}>Uploaded Receipt</ResizableTh>
+              <ResizableTh id="txn" rz={rz}>Transaction ID</ResizableTh>
+              <ResizableTh id="dep-amount" rz={rz}>Deposit Amount</ResizableTh>
+              <ResizableTh id="dep-paid" rz={rz}>Deposit Paid</ResizableTh>
+              <ResizableTh id="dep-pending" rz={rz}>Deposit Pending</ResizableTh>
+              <ResizableTh id="dep-status" rz={rz}>Deposit Status</ResizableTh>
+              <ResizableTh id="trip" rz={rz}>Trip Screenshot</ResizableTh>
+              {pkgTab !== "rental" && <ResizableTh id="settle" rz={rz}>Settled / Unsettled</ResizableTh>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={pkgTab === "rental" ? 12 : 13} className="px-5 py-16 text-center text-mv-muted">
+                <td colSpan={pkgTab === "rental" ? 13 : 14} className="px-5 py-16 text-center text-mv-muted">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <Loader2 className="w-6 h-6 animate-spin text-mv-primary" />
                     Loading collection data...
@@ -729,7 +910,7 @@ export default function DailyCollection() {
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={pkgTab === "rental" ? 12 : 13} className="px-5 py-16 text-center">
+                <td colSpan={pkgTab === "rental" ? 13 : 14} className="px-5 py-16 text-center">
                   <div className="flex flex-col items-center justify-center gap-2">
                     <div className="w-12 h-12 rounded-full bg-mv-elevated flex items-center justify-center mb-2">
                       <AlertCircle className="w-5 h-5 text-mv-dim" />
@@ -742,10 +923,13 @@ export default function DailyCollection() {
             ) : (
               pkgRows.map((it) => {
                 return (
-                  <tr key={it.id} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
+                  <RowTip key={it.id} tip={rowTipOf(it)} className="border-b border-mv-border/50 hover:bg-mv-elevated transition-colors">
                     <td className="px-5 py-4 font-medium flex items-center gap-3">
                       <Avatar className="w-8 h-8"><AvatarImage src={it.driver_avatar} /><AvatarFallback className="text-[10px] bg-mv-elevated">{it.driver_name?.[0]}</AvatarFallback></Avatar>
-                      {it.driver_name} <DriverCode id={it.driver_id} className="block" />
+                      <div className="flex flex-col items-start">
+                        <span>{it.driver_name}</span>
+                        <DriverCode id={it.driver_id} className="block whitespace-nowrap" />
+                      </div>
                     </td>
                     <td className="px-5 py-4 text-mv-muted whitespace-nowrap">{it.date || "—"}</td>
                     <td className="px-5 py-4">
@@ -880,13 +1064,14 @@ export default function DailyCollection() {
                     </td> */}
                     <td className="px-5 py-4 font-display font-bold">
                       {pendingRentOf(it) > 0 ? <span className="text-red-500">{inr(pendingRentOf(it))}</span> : <span className="text-slate-400 font-medium">—</span>}
-                      {it.pending_receipt?.url && (
-                        <div className="flex flex-col gap-1 mt-2">
-                          <a href={imgUrl(it.pending_receipt.url)} target="_blank" rel="noreferrer" data-testid="pending-receipt-link">
-                            <img src={imgUrl(it.pending_receipt.url)} alt="Payment receipt" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
-                          </a>
-                          <span className="text-[11px] text-mv-muted">Receipt uploaded</span>
-                        </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      {it.pending_receipt?.url ? (
+                        <a href={imgUrl(it.pending_receipt.url)} target="_blank" rel="noreferrer" data-testid="pending-receipt-link">
+                          <img src={imgUrl(it.pending_receipt.url)} alt="Payment receipt" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 font-medium">—</span>
                       )}
                     </td>
                     <td className="px-5 py-4">
@@ -951,15 +1136,15 @@ export default function DailyCollection() {
                           <a href={imgUrl(it.collection.screenshot_url)} target="_blank" rel="noreferrer">
                             <img src={imgUrl(it.collection.screenshot_url)} alt="Trip screenshot" className="w-14 h-14 object-cover rounded-lg border border-mv-border" />
                           </a>
-                          <span className="text-[11px] text-mv-muted">Collected {inr(it.collection.total_collected)}</span>
-                          <span className="text-[11px] font-bold text-green-600">Paid {inr(it.collection.pay_amount)}</span>
+                          {/* <span className="text-[11px] text-mv-muted">Collected {inr(it.collection.total_collected)}</span>
+                          <span className="text-[11px] font-bold text-green-600">Paid {inr(it.collection.pay_amount)}</span> */}
                         </div>
                       ) : (
                         <span className="text-slate-400 font-medium">—</span>
                       )}
                     </td>
                     {pkgTab !== "rental" && <td className="px-5 py-4">{settleBtn(it)}</td>}
-                  </tr>
+                  </RowTip>
                 );
               })
             )}

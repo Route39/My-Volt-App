@@ -3206,6 +3206,15 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             deposit_paid = 0
             async for _c in db.package_collections.find({"organization_id": user.get("organization_id"), "driver_id": r["driver_id"], "status": "paid"}):
                 _coll_by_date[_c.get("for_date")] = _c
+            # receipt screenshot + scanned transaction id of each paid collection (read from its own payment record)
+            _pay_ids = [oid(_c["payment_id"]) for _c in _coll_by_date.values() if _c.get("payment_id")]
+            if _pay_ids:
+                _pay_by_id = {str(_p["_id"]): _p async for _p in db.rental_payments.find({"_id": {"$in": _pay_ids}}, {"receipt_url": 1, "receipt_txn_id": 1})}
+                for _c in _coll_by_date.values():
+                    _p = _pay_by_id.get(str(_c.get("payment_id")))
+                    if _p:
+                        _c["receipt_url"] = _p.get("receipt_url")
+                        _c["receipt_txn"] = _p.get("receipt_txn_id")
             if _pkg_cat in ("commission", "salary") and r.get("plan_id"):   # package of this rental: its % history gives each day's %
                 try:
                     _cp_plan = await db.rental_plans.find_one({"_id": oid(r["plan_id"])})
@@ -3289,6 +3298,25 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             _veh_hist.append((_a_day, _a.get("vehicle_id"), _a.get("vehicle_number")))
         _veh_reg_cache = {}
 
+        # ---- prefetch: one query each per rental (instead of one per day) ----
+        _all_pays, _all_odo = [], []
+        if dates_to_check:
+            _range_strs = [x.strftime("%Y-%m-%d") for x in dates_to_check]
+            _prefetch_strs = _range_strs + [(dates_to_check[0] - timedelta(days=1)).strftime("%Y-%m-%d")]
+            _range_start_iso = datetime.combine(dates_to_check[0], time.min).replace(tzinfo=timezone.utc).isoformat()
+            _range_end_iso = datetime.combine(dates_to_check[-1], time.max).replace(tzinfo=timezone.utc).isoformat()
+            _all_pays = await db.rental_payments.find({
+                "rental_id": rid,
+                "$or": [
+                    {"covers_dates": {"$in": _prefetch_strs}},
+                    {"covers_dates": {"$exists": False}, "created_at": {"$gte": _range_start_iso, "$lte": _range_end_iso}},
+                    {"covers_dates": {"$size": 0}, "created_at": {"$gte": _range_start_iso, "$lte": _range_end_iso}},
+                ]
+            }).to_list(None)
+            _all_odo = await db.driver_odometer_logs.find({
+                "driver_id": r["driver_id"], "date": {"$in": _range_strs}
+            }).to_list(None)
+
         for d in dates_to_check:
             d_str = d.strftime("%Y-%m-%d")
             # default = current vehicle of the rental (unchanged behaviour)
@@ -3316,14 +3344,17 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
             d_end = datetime.combine(d, time.max).replace(tzinfo=timezone.utc)
             
             # Payments that specifically cover this date (due date), or fallback to exact timestamp matching if no covers_dates exists.
-            day_payments = await db.rental_payments.find({
-                "rental_id": rid,
-                "$or": [
-                    {"covers_dates": d_str},
-                    {"covers_dates": {"$exists": False}, "created_at": {"$gte": d_start.isoformat(), "$lte": d_end.isoformat()}},
-                    {"covers_dates": {"$size": 0}, "created_at": {"$gte": d_start.isoformat(), "$lte": d_end.isoformat()}}
-                ]
-            }).to_list(100)
+            _ds_iso, _de_iso = d_start.isoformat(), d_end.isoformat()
+            day_payments = []
+            for _p in _all_pays:
+                if "covers_dates" not in _p:
+                    _hit = _ds_iso <= (_p.get("created_at") or "") <= _de_iso
+                elif isinstance(_p["covers_dates"], list) and len(_p["covers_dates"]) == 0:
+                    _hit = _ds_iso <= (_p.get("created_at") or "") <= _de_iso
+                else:
+                    _hit = isinstance(_p["covers_dates"], list) and d_str in _p["covers_dates"]
+                if _hit:
+                    day_payments.append(dict(_p))
                         # Payments already claimed by a started trip are shown on that trip's row only.
             # EXCEPTION: a multi-day payment (e.g. yesterday + today paid together) is owned
             # by the trip of ONE of its days. The other covered days must still show their
@@ -3379,10 +3410,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     if _extra_part > 0:
                         extra_km_payments.append({**p, "amount": _extra_part})
             
-            odo_logs = await db.driver_odometer_logs.find({
-                "driver_id": r["driver_id"],
-                "date": d_str
-            }).to_list(100)
+            odo_logs = [dict(_o) for _o in _all_odo if _o.get("date") == d_str]
 
             is_today = (d == _today_ist())
             # Key the pending-rent injection off the date the charge actually belongs
@@ -3551,11 +3579,11 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         if float(rbd_map.get(_y_str, 0) or 0) > 0 and float((acct or {}).get("rent_due", 0) or 0) > 0:
                             prev_rent = {"date": _y_str, "amount": float(rbd_map[_y_str]), "status": "not_paid", "transaction_id": None}
                         else:
-                            _yp = await db.rental_payments.find_one({
-                                "rental_id": rid, "payment_status": "paid",
-                                "kind": {"$in": ["daily", "outstanding", "catchup"]},
-                                "covers_dates": _y_str,
-                            }, sort=[("created_at", -1)])
+                            _yp_c = [p_ for p_ in _all_pays
+                                     if p_.get("payment_status") == "paid"
+                                     and p_.get("kind") in ("daily", "outstanding", "catchup")
+                                     and _y_str in (p_.get("covers_dates") or [])]
+                            _yp = max(_yp_c, key=lambda p_: p_.get("created_at") or "") if _yp_c else None
                             if _yp:
                                 prev_rent = {
                                     "date": _y_str,
@@ -3568,6 +3596,7 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                     r_out.append({
                         "id": f"{rid}_{d_str}_{idx}",
                         "driver_name": r.get("driver_name", "Unknown"),
+                        "package_name": r.get("package_name"),
                         "driver_avatar": driver_avatar,
                         "vehicle_code": row_vehicle_code,
                         "vehicle_reg": row_vehicle_reg,
@@ -3636,12 +3665,19 @@ async def get_daily_collection(request: Request, city: Optional[str] = None, fro
                         "start_meter": start_meter if start_meter else None,
                         "end_meter": end_meter if end_meter else None,
                         "total_km": total_km if total_km else None,
+                        "server_today": _today_ist().isoformat(),
                         "date": d_str,
                     })
 
         return r_out
 
-    _rental_batches = await asyncio.gather(*[_process_single_rental(r) for r in rentals], return_exceptions=True)
+    _sem = asyncio.Semaphore(8)   # at most 8 rentals processed at once
+
+    async def _limited(r_):
+        async with _sem:
+            return await _process_single_rental(r_)
+
+    _rental_batches = await asyncio.gather(*[_limited(r) for r in rentals], return_exceptions=True)
     out = []
     for _rb in _rental_batches:
         if isinstance(_rb, list):
@@ -5895,19 +5931,14 @@ def _coll_view(c):
         return None
     return {"screenshot_url": c.get("screenshot_url"), "total_collected": c.get("total_collected"),
             "pay_amount": c.get("pay_amount"), "transaction_id": c.get("transaction_id"), "for_date": c.get("for_date"),
-            "paid_early": bool(c.get("paid_early"))}
+            "paid_early": bool(c.get("paid_early")),
+            "receipt_url": c.get("receipt_url"), "receipt_txn": c.get("receipt_txn")}
 
 
 def _commission_percent_on(plan, fallback, day_iso):
-    """Commission % that applied on one working day. Every change of a package's % is saved with the day it was made
-    (plan["commission_history"]); a day uses the % of the latest change made on or before it, so past / pending days
-    keep their old % and the new % counts from the day of the change. No history -> the package's current %."""
-    val = None
-    for h in sorted((plan or {}).get("commission_history") or [], key=lambda x: x.get("from") or ""):
-        if (h.get("from") or "") <= day_iso:
-            val = h.get("percent")
-    if val is not None:
-        return float(val)
+    """Commission % for a day that is still unpaid: always the package's live (current) %.
+    Days that are already paid keep the % saved on their own collection record (package_collections),
+    so changing the package % never changes an amount that was paid earlier."""
     return float((plan or {}).get("commission_percent") or fallback or 0)
 
 
@@ -6115,7 +6146,7 @@ async def package_collection_create_order(
         pct = float(state.get("commission_percent") or 0)
         if pct <= 0:
             raise HTTPException(status_code=400, detail="Commission percentage is not set for this package")
-        pay_amount = round(total_collected * pct / 100, 2)
+        pay_amount = float(int(round(total_collected * pct / 100, 6) + 0.5))   # whole rupees (1.4 -> 1, 1.5 -> 2)
     else:
         pct = None
         pay_amount = round(float(state.get("salary_daily_rent") or 0), 2)   # salary drivers always pay the package's Daily Rent (Salary)
@@ -6195,6 +6226,8 @@ async def driver_me(request: Request):
     payload["admin_block_reason"] = (blocked or {}).get("admin_block_reason")
     payload["week_off"] = await _week_off_state(user["id"])
     payload["package_due"] = await _package_due_state(user)
+    payload["checked_in_today"] = bool(await db.driver_attendance.find_one(
+        {"driver_id": user["id"], "date": _today_ist().isoformat()}, {"_id": 1}))
     return payload
 
 import shutil
@@ -8991,6 +9024,7 @@ async def startup():
         (db.drivers, [("organization_id", 1), ("rental_status", 1)], {}),
         (db.package_collections, [("organization_id", 1), ("driver_id", 1), ("for_date", 1)], {}),
         (db.week_off_requests, [("driver_id", 1), ("month", 1)], {}),
+        (db.collection_settlements, [("organization_id", 1), ("row_id", 1)], {}),
         (db.users, "organization_id", {}),
         (db.driver_attendance, [("driver_id", 1), ("date", 1)], {"unique": True}),
         (db.driver_attendance, [("organization_id", 1), ("date", 1)], {}),
